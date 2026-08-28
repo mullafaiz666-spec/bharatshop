@@ -2,142 +2,62 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { orders, products, aiActivityLogs } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
-import { ensureDemoDataSeeded } from "@/lib/seed";
 
-const INDIAN_CITIES = [
-  { city: "Mumbai", state: "Maharashtra", pincode: "400001" },
-  { city: "Delhi", state: "Delhi", pincode: "110001" },
-  { city: "Bengaluru", state: "Karnataka", pincode: "560001" },
-  { city: "Ahmedabad", state: "Gujarat", pincode: "380001" },
-  { city: "Chennai", state: "Tamil Nadu", pincode: "600001" },
-  { city: "Hyderabad", state: "Telangana", pincode: "500001" },
-  { city: "Kolkata", state: "West Bengal", pincode: "700001" },
-  { city: "Pune", state: "Maharashtra", pincode: "411001" },
-  { city: "Jaipur", state: "Rajasthan", pincode: "302001" },
-  { city: "Lucknow", state: "Uttar Pradesh", pincode: "226001" },
-];
-
-const CUSTOMERS = [
-  { name: "Anjali Singh", email: "anjali.singh@gmail.com", phone: "9876543210" },
-  { name: "Rohit Gupta", email: "rohit.gupta@yahoo.in", phone: "9988112233" },
-  { name: "Kavita Sharma", email: "kavita.sharma@rediffmail.com", phone: "9765432100" },
-  { name: "Suresh Nair", email: "suresh.nair@gmail.com", phone: "8899001122" },
-  { name: "Deepika Patel", email: "deepika.p@outlook.com", phone: "9900112233" },
-];
-
-const CARRIERS = ["Delhivery Surface", "Ekart Logistics", "Shiprocket", "Amazon Logistics", "DTDC Express"];
-const PAYMENT_MODES = ["COD", "UPI", "Card", "Net Banking"];
+export const dynamic = "force-dynamic";
 
 export async function GET() {
-  await ensureDemoDataSeeded();
   const allOrders = await db.select().from(orders).orderBy(desc(orders.orderedAt));
   return NextResponse.json({ orders: allOrders });
 }
 
 export async function POST(req: Request) {
   try {
-    const demoUser = await ensureDemoDataSeeded();
-    const userId = demoUser?.id ?? 1;
-    const body = await req.json().catch(() => ({}));
+    const body = await req.json();
+    const productId = Number(body.productId);
+    const qty = Number(body.quantity || 1);
+    if (!productId || qty < 1 || !body.customerName || !body.customerEmail || !body.customerPhone || !body.customerCity || !body.customerState || !body.customerPincode) {
+      return NextResponse.json({ error: "Real order requires productId, quantity, customerName, customerEmail, customerPhone, customerCity, customerState and customerPincode" }, { status: 400 });
+    }
+    const [target] = await db.select().from(products).where(eq(products.id, productId)).limit(1);
+    if (!target) return NextResponse.json({ error: "Product not found" }, { status: 404 });
+    if (target.stockCount < qty) return NextResponse.json({ error: "Insufficient verified stock" }, { status: 409 });
 
-    const allProducts = await db.select().from(products);
-    const target = allProducts.find(p => p.id === body.productId) || allProducts[Math.floor(Math.random() * allProducts.length)];
-    if (!target) return NextResponse.json({ error: "No products" }, { status: 400 });
+    const paid = Number(target.sellingPriceInr) * qty;
+    const supplier = (Number(target.supplierCostInr) + Number(target.shippingCostInr)) * qty;
+    const gstAmt = Number(target.supplierCostInr) * Number(target.gstPct) / 100 * qty;
+    const platformComm = paid * 0.08;
+    const netProfit = paid - supplier - gstAmt - platformComm;
+    if (netProfit <= 0) return NextResponse.json({ error: "Order economics are no longer profitable; fulfillment blocked" }, { status: 422 });
 
-    const location = INDIAN_CITIES[Math.floor(Math.random() * INDIAN_CITIES.length)];
-    const customer = CUSTOMERS[Math.floor(Math.random() * CUSTOMERS.length)];
-    const qty = Number(body.quantity) || 1;
-    const paid = (Number(target.sellingPriceInr) * qty).toFixed(2);
-    const cost = ((Number(target.supplierCostInr) + Number(target.shippingCostInr)) * qty).toFixed(2);
-    const gstAmt = ((Number(target.supplierCostInr) * Number(target.gstPct) / 100) * qty).toFixed(2);
-    const platformComm = (Number(paid) * 0.08).toFixed(2);
-    const netProfit = (Number(paid) - Number(cost) - Number(gstAmt) - Number(platformComm)).toFixed(2);
-    const orderNo = `BD-M-${Math.floor(10500 + Math.random() * 900)}`;
-    const carrier = CARRIERS[Math.floor(Math.random() * CARRIERS.length)];
-    const payMode = PAYMENT_MODES[Math.floor(Math.random() * PAYMENT_MODES.length)];
-
+    const orderNo = `BD-${Date.now()}`;
     const [created] = await db.insert(orders).values({
-      userId,
-      storeId: target.storeId,
-      orderNumber: orderNo,
-      customerName: body.customerName || customer.name,
-      customerEmail: body.customerEmail || customer.email,
-      customerPhone: body.customerPhone || customer.phone,
-      customerCity: body.customerCity || location.city,
-      customerState: body.customerState || location.state,
-      customerPincode: body.customerPincode || location.pincode,
-      productId: target.id,
-      productTitle: target.title,
-      quantity: qty,
-      customerPaidInr: paid,
-      supplierCostInr: cost,
-      gstAmountInr: gstAmt,
-      platformCommissionInr: platformComm,
-      netProfitInr: netProfit,
-      fulfillmentStatus: "Incoming",
-      supplierTrackingCode: "PENDING_AI_QUEUE",
-      carrierName: carrier,
-      paymentMode: payMode,
-      aiDecisionLog: `${payMode} order from ${location.city}, ${location.state}. Fraud check: SAFE. Auto-fulfillment queued.`,
+      userId: Number(body.userId || target.userId), storeId: target.storeId, orderNumber: orderNo,
+      customerName: body.customerName, customerEmail: body.customerEmail, customerPhone: body.customerPhone,
+      customerCity: body.customerCity, customerState: body.customerState, customerPincode: body.customerPincode,
+      productId: target.id, productTitle: target.title, quantity: qty,
+      customerPaidInr: paid.toFixed(2), supplierCostInr: supplier.toFixed(2), gstAmountInr: gstAmt.toFixed(2),
+      platformCommissionInr: platformComm.toFixed(2), netProfitInr: netProfit.toFixed(2), fulfillmentStatus: "RECHECK_REQUIRED",
+      supplierTrackingCode: null, carrierName: null, paymentMode: body.paymentMode || "COD",
+      aiDecisionLog: "Real customer order received. Supplier stock, price and fulfillment eligibility must be re-checked before supplier ordering.",
     }).returning();
-
-    await db.insert(aiActivityLogs).values({
-      userId,
-      agentName: "Store-Webhook // Incoming Order",
-      actionType: "ORDER_RECEIVED",
-      message: `Naya order ${orderNo} — ${customer.name} (${location.city}) ne ${target.title} kharida. Net Profit: ₹${netProfit}`,
-      profitImpactInr: netProfit,
-      status: "INFO",
-    });
-
+    await db.insert(aiActivityLogs).values({ userId: created.userId, agentName: "Store-Webhook // Real Order", actionType: "ORDER_RECEIVED", message: `Real order ${orderNo} received for ${target.title}; awaiting supplier re-check.`, profitImpactInr: created.netProfitInr, status: "INFO" });
     return NextResponse.json({ order: created }, { status: 201 });
-  } catch (err: unknown) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : "Error" }, { status: 500 });
-  }
+  } catch (err: unknown) { return NextResponse.json({ error: err instanceof Error ? err.message : "Error" }, { status: 500 }); }
 }
 
 export async function PATCH(req: Request) {
   try {
     const body = await req.json();
-    const { id, fulfillmentStatus, supplierTrackingCode, aiDecisionLog } = body;
+    const { id, fulfillmentStatus, supplierTrackingCode, carrierName, aiDecisionLog } = body;
     if (!id) return NextResponse.json({ error: "Order ID required" }, { status: 400 });
-
-    const tracking = supplierTrackingCode || (
-      ["Auto-Ordered","In Transit","Delivered"].includes(fulfillmentStatus)
-        ? `DELHIVERY${Math.floor(1000000 + Math.random() * 9000000)}`
-        : undefined
-    );
-
-    const [updated] = await db.update(orders).set({
-      ...(fulfillmentStatus && { fulfillmentStatus }),
-      ...(tracking && { supplierTrackingCode: tracking }),
-      ...(aiDecisionLog && { aiDecisionLog }),
-      ...(fulfillmentStatus === "Delivered" && { fulfilledAt: new Date() }),
-    }).where(eq(orders.id, Number(id))).returning();
-
-    await db.insert(aiActivityLogs).values({
-      userId: updated.userId,
-      agentName: "Fulfillment-Core // Pipeline",
-      actionType: "ORDER_FULFILLED",
-      message: `Order ${updated.orderNumber} → "${updated.fulfillmentStatus}" | Tracking: ${updated.supplierTrackingCode}`,
-      profitImpactInr: updated.netProfitInr,
-      status: "SUCCESS",
-    });
-
+    const [updated] = await db.update(orders).set({ ...(fulfillmentStatus && { fulfillmentStatus }), ...(supplierTrackingCode !== undefined && { supplierTrackingCode }), ...(carrierName !== undefined && { carrierName }), ...(aiDecisionLog && { aiDecisionLog }), ...(fulfillmentStatus === "Delivered" && { fulfilledAt: new Date() }) }).where(eq(orders.id, Number(id))).returning();
+    if (!updated) return NextResponse.json({ error: "Order not found" }, { status: 404 });
+    await db.insert(aiActivityLogs).values({ userId: updated.userId, agentName: "Fulfillment-Core // Real Order", actionType: "ORDER_STATUS_CHANGED", message: `Order ${updated.orderNumber} → ${updated.fulfillmentStatus}${updated.supplierTrackingCode ? ` | ${updated.supplierTrackingCode}` : ""}`, profitImpactInr: updated.netProfitInr, status: "SUCCESS" });
     return NextResponse.json({ order: updated });
-  } catch (err: unknown) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : "Error" }, { status: 500 });
-  }
+  } catch (err: unknown) { return NextResponse.json({ error: err instanceof Error ? err.message : "Error" }, { status: 500 }); }
 }
 
 export async function DELETE(req: Request) {
-  try {
-    const { searchParams } = new URL(req.url);
-    const id = searchParams.get("id");
-    if (!id) return NextResponse.json({ error: "Order ID required" }, { status: 400 });
-    await db.delete(orders).where(eq(orders.id, Number(id)));
-    return NextResponse.json({ deleted: true });
-  } catch (err: unknown) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : "Error" }, { status: 500 });
-  }
+  try { const id = new URL(req.url).searchParams.get("id"); if (!id) return NextResponse.json({ error: "Order ID required" }, { status: 400 }); await db.delete(orders).where(eq(orders.id, Number(id))); return NextResponse.json({ deleted: true }); }
+  catch (err: unknown) { return NextResponse.json({ error: err instanceof Error ? err.message : "Error" }, { status: 500 }); }
 }
