@@ -1,16 +1,27 @@
 import { NextResponse } from "next/server";
+import { createApproval, researchWeb, listPendingApprovals } from "@/lib/ai/ceo-tools";
 
 export const dynamic = "force-dynamic";
 
-const SYSTEM = `You are BHARATSHOP CEO, a conversational senior operating agent. You have live business context and can request web research through the application's research endpoint. Be decisive but evidence-driven. Answer naturally like ChatGPT, while clearly separating VERIFIED FACTS, INFERENCE and RECOMMENDATION. Never invent prices, stock, images, specifications, orders, tracking, supplier purchases, ad connections or live status. If evidence is missing, say so and request research. You may recommend and prepare actions, but the human operator remains the final authorizer of irreversible supplier purchases. For consequential operating decisions include DECISION, WHY, RISKS and NEXT ACTION.`;
+const SYSTEM = `You are BHARATSHOP AI CEO. Operate like a capable senior operator: understand the user's request, inspect available business evidence, use tools when useful, and give a clear answer like ChatGPT. Separate VERIFIED FACTS, INFERENCE and RECOMMENDATION when it matters. Never invent product facts, prices, stock, images, supplier identity, orders, tracking or financial results. You can research the web and create an approval request. You cannot directly perform irreversible or financially consequential actions. For those, create an approval request and tell the operator exactly what will happen, why, risks and what evidence supports it. Do not ask for credentials or secrets in chat. Never expose API keys or internal tokens. Prefer Indian market context when researching BharatShop.`;
+
+const tools = [
+  { type: "function", name: "research_web", description: "Research current public web results for a product, supplier, brand, market opportunity, image/source issue or other question. Use when current evidence is needed.", parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"], additionalProperties: false } },
+  { type: "function", name: "create_approval", description: "Create a persistent operator approval request for a consequential BharatShop action. Use instead of performing purchases, publishing risky products, sharing contact details, changing important settings, or other irreversible actions.", parameters: { type: "object", properties: { title: { type: "string" }, action_type: { type: "string" }, payload: { type: "object", additionalProperties: true }, reason: { type: "string" }, risk_level: { type: "string", enum: ["LOW","MEDIUM","HIGH","CRITICAL"] } }, required: ["title","action_type","reason","risk_level"], additionalProperties: false } },
+  { type: "function", name: "list_pending_approvals", description: "List the current pending CEO approval requests.", parameters: { type: "object", properties: {}, additionalProperties: false } },
+];
+
+async function runTool(name: string, args: any) {
+  if (name === "research_web") return researchWeb(String(args.query || ""));
+  if (name === "create_approval") return createApproval({ title: String(args.title), actionType: String(args.action_type), payload: args.payload ?? {}, reason: String(args.reason), riskLevel: String(args.risk_level) });
+  if (name === "list_pending_approvals") return listPendingApprovals();
+  throw new Error(`Unknown CEO tool: ${name}`);
+}
 
 function fallback(question: string, context: unknown) {
   const q = question.toLowerCase();
-  const c = typeof context === "object" && context ? JSON.stringify(context) : "";
-  if (q.includes("image") || q.includes("spec") || q.includes("product") || q.includes("research") || q.includes("supplier")) return `I can investigate this, but live web research is not configured on this deployment yet. I will not label a product image or specification as verified without evidence.\n\nDECISION: Do not publish or advertise the product as verified yet.\n\nNEXT ACTION: Configure SERPAPI_API_KEY (preferred) or BING_SEARCH_API_KEY and OPENAI_API_KEY in Render, then ask me to verify the product again.\n\nCURRENT CONTEXT: ${c.slice(0, 1200)}`;
-  if (q.includes("purchase") || q.includes("order")) return `DECISION: Do not purchase until the specific customer order has passed the order-time re-check.\n\nWHY: The operating rule is paid/valid order → current supplier price/stock/shipping check → margin check → source selection → human supplier purchase.\n\nRISKS: Buying before re-check can create negative margin or unavailable-stock fulfilment.\n\nNEXT ACTION: Open the purchase queue, run Re-check, and only use Purchase after PASSED.`;
-  if (q.includes("ads") || q.includes("advertising")) return `DECISION: Keep advertising in PREPARED status until a real advertising account is connected.\n\nWHY: The dashboard must not claim LIVE without connected credentials.\n\nNEXT ACTION: Connect the account, then validate campaign, budget, tracking and product economics.`;
-  return `I’m ready to act as the BHARATSHOP CEO. Tell me what you want investigated or decided. I’ll use available evidence, identify uncertainty, and give you a clear recommendation rather than pretending to know something I cannot verify.`;
+  if (q.includes("purchase") || q.includes("order")) return `DECISION: Do not purchase until the specific order has passed the current re-check.\n\nWHY: Supplier price, stock, shipping and margin can change.\n\nNEXT ACTION: Run the order-time re-check and use the CEO approval queue before any consequential supplier purchase.`;
+  return `I’m your BHARATSHOP AI CEO. I can investigate the live dashboard context, research current web evidence, and prepare actions for your approval. If something is consequential, I will put it into the approval queue rather than pretending I executed it.`;
 }
 
 export async function POST(req: Request) {
@@ -22,16 +33,33 @@ export async function POST(req: Request) {
     const context = body.context ?? {};
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) return NextResponse.json({ reply: fallback(question, context), mode: "safe-ceo-fallback" });
-    const response = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ model: process.env.OPENAI_MODEL || "gpt-5-mini", instructions: SYSTEM, input: [
-        { role: "user", content: `LIVE DASHBOARD CONTEXT:\n${JSON.stringify(context).slice(0, 12000)}\n\nOPERATOR QUESTION:\n${question}` },
-        ...messages.slice(0, -1).map((m: { role?: string; content?: string }) => ({ role: m.role === "assistant" ? "assistant" : "user", content: String(m.content || "") }))
-      ] })
-    });
-    if (!response.ok) return NextResponse.json({ reply: fallback(question, context), mode: "safe-ceo-fallback", warning: "AI provider unavailable; safe rules used." });
-    const data = await response.json();
-    return NextResponse.json({ reply: String(data.output_text || fallback(question, context)), mode: "ai-ceo" });
-  } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "CEO chat failed" }, { status: 500 }); }
+
+    let input: any[] = [{ role: "user", content: `LIVE DASHBOARD CONTEXT:\n${JSON.stringify(context).slice(0, 14000)}\n\nOPERATOR QUESTION:\n${question}` }];
+    let responseData: any = null;
+
+    for (let round = 0; round < 4; round++) {
+      const r = await fetch("https://api.openai.com/v1/responses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({ model: process.env.OPENAI_MODEL || "gpt-5.6-luna", instructions: SYSTEM, input, tools, tool_choice: "auto" }),
+      });
+      if (!r.ok) return NextResponse.json({ reply: fallback(question, context), mode: "safe-ceo-fallback", warning: `AI provider returned ${r.status}` });
+      responseData = await r.json();
+      const output = Array.isArray(responseData.output) ? responseData.output : [];
+      input.push(...output);
+      const calls = output.filter((item: any) => item.type === "function_call");
+      if (!calls.length) break;
+      for (const call of calls) {
+        let args: any = {};
+        try { args = JSON.parse(call.arguments || "{}"); } catch { args = {}; }
+        let result: any;
+        try { result = await runTool(call.name, args); } catch (error) { result = { error: error instanceof Error ? error.message : "Tool failed" }; }
+        input.push({ type: "function_call_output", call_id: call.call_id, output: JSON.stringify(result).slice(0, 16000) });
+      }
+    }
+
+    return NextResponse.json({ reply: String(responseData?.output_text || fallback(question, context)), mode: "ai-ceo-tools" });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "CEO chat failed" }, { status: 500 });
+  }
 }
