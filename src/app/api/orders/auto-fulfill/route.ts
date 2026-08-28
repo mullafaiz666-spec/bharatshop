@@ -3,6 +3,8 @@ import { db } from "@/db";
 import { orders, aiActivityLogs } from "@/db/schema";
 import { ensureDemoDataSeeded } from "@/lib/seed";
 import { eq } from "drizzle-orm";
+import { canPlaceAutomatedOrder } from "@/lib/suppliers/supplier-router";
+import { createCjOrder } from "@/lib/suppliers/cj";
 
 export async function POST() {
   try {
@@ -10,43 +12,37 @@ export async function POST() {
     const userId = demoUser?.id ?? 1;
     const allOrders = await db.select().from(orders);
     const pending = allOrders.filter(o => ["Incoming", "AI Checking"].includes(o.fulfillmentStatus));
+    if (!pending.length) return NextResponse.json({ fulfilledCount: 0, message: "No pending orders." });
 
-    if (pending.length === 0) {
-      return NextResponse.json({ fulfilledCount: 0, totalProfitLockedInr: 0, message: "Sab orders already fulfilled hain." });
+    if (!canPlaceAutomatedOrder("cj")) {
+      return NextResponse.json({ success: false, blocked: true, error: "No authorized live supplier ordering integration is enabled. Configure CJ credentials and enable live fulfillment only after end-to-end verification." }, { status: 409 });
     }
 
-    let totalProfit = 0;
     const updated = [];
-
     for (const order of pending) {
-      const tracking = `DELHIVERY${Math.floor(1000000 + Math.random() * 9000000)}`;
+      if (!order.productId) continue;
+      const result = await createCjOrder({
+        orderNumber: order.orderNumber,
+        shippingName: order.customerName,
+        phone: order.customerPhone,
+        address: "",
+        city: order.customerCity,
+        state: order.customerState,
+        pincode: order.customerPincode,
+        productId: String(order.productId),
+        quantity: order.quantity,
+      });
+      const supplierOrderId = result?.data?.orderId || result?.data?.orderNumber || null;
       const [upd] = await db.update(orders).set({
-        fulfillmentStatus: "Auto-Ordered",
-        supplierTrackingCode: tracking,
-        carrierName: "Delhivery Surface",
-        aiDecisionLog: `AI Auto-Pilot ne ₹${order.supplierCostInr} supplier ko pay kiya. Tracking ${tracking} — ${order.customerCity} ko dispatch.`,
-        fulfilledAt: new Date(),
+        fulfillmentStatus: "Supplier Ordered",
+        aiDecisionLog: `Authorized supplier order submitted. Supplier reference: ${supplierOrderId || "pending"}.`,
       }).where(eq(orders.id, order.id)).returning();
       updated.push(upd);
-      totalProfit += Number(order.netProfitInr || 0);
-
-      await db.insert(aiActivityLogs).values({
-        userId,
-        agentName: "Zero-Touch Core // Auto-Fulfill",
-        actionType: "ORDER_FULFILLED",
-        message: `Auto-purchase: ${order.orderNumber} (₹${order.supplierCostInr} cost) | Net Profit locked ₹${order.netProfitInr}`,
-        profitImpactInr: order.netProfitInr,
-        status: "SUCCESS",
-      });
+      await db.insert(aiActivityLogs).values({ userId, agentName: "Zero-Touch Core // Supplier Fulfillment", actionType: "SUPPLIER_ORDER_CREATED", message: `${order.orderNumber}: supplier order ${supplierOrderId || "created"}`, profitImpactInr: order.netProfitInr, status: "SUCCESS" });
     }
 
-    return NextResponse.json({
-      fulfilledCount: updated.length,
-      totalProfitLockedInr: Number(totalProfit.toFixed(2)),
-      orders: updated,
-      message: `Zero-Touch Auto-Fulfillment: ${updated.length} orders Delhivery ko book kar diya!`,
-    });
+    return NextResponse.json({ success: true, fulfilledCount: updated.length, orders: updated, message: `Submitted ${updated.length} authorized supplier order(s).` });
   } catch (err: unknown) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : "Error" }, { status: 500 });
+    return NextResponse.json({ success: false, error: err instanceof Error ? err.message : "Supplier fulfillment failed" }, { status: 500 });
   }
 }
