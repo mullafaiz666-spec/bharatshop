@@ -23,10 +23,10 @@ jobs:
           BHARATSHOP_URL: ${{ secrets.BHARATSHOP_URL }}
           BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
         run: |
-          curl --fail-with-body --retry 3 --retry-delay 5 -X POST "$BHARATSHOP_URL/api/catalog/image-resolve" -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" -H "Content-Type: application/json" --data '{"limit":50}'
+          curl --fail-with-body --retry 3 --retry-delay 5 -X POST "$BHARATSHOP_URL/api/catalog/image-resolve" -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" -H "Content-Type: application/json" --data '{"limit":200}'
       - name: Enrich clothing sizes and variants
         env:
           BHARATSHOP_URL: ${{ secrets.BHARATSHOP_URL }}
           BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
         run: |
-          curl --fail-with-body --retry 3 --retry-delay 5 -X POST "$BHARATSHOP_URL/api/catalog/fashion-enrich" -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" -H "Content-Type: application/json" --data '{"limit":50}'
+          curl --fail-with-body --retry 3 --retry-delay 5 -X POST "$BHARATSHOP_URL/api/catalog/fashion-enrich" -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" -H "Content-Type: application/json" --data '{"limit":200}'
