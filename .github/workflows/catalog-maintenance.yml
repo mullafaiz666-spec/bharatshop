@@ -34,4 +34,4 @@ jobs:
             -X POST "$BHARATSHOP_URL/api/catalog/image-resolve" \
             -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" \
             -H "Content-Type: application/json" \
-            --data '{"limit":10}'
+            --data '{"limit":50}'
