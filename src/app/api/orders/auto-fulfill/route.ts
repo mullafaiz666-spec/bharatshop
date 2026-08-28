@@ -3,30 +3,30 @@ import { db } from "@/db";
 import { orders, aiActivityLogs } from "@/db/schema";
 import { ensureDemoDataSeeded } from "@/lib/seed";
 import { eq } from "drizzle-orm";
-import { canPlaceAutomatedOrder } from "@/lib/suppliers/supplier-router";
-import { createCjOrder } from "@/lib/suppliers/cj";
 
+/**
+ * The business workflow is operator-purchase based: after a customer order,
+ * the agent re-checks the source cart price/stock and puts the buyer into the
+ * purchase queue. This endpoint must never silently place a CJ order because
+ * CJ is not the approved source for this workflow.
+ */
 export async function POST() {
   try {
     const demoUser = await ensureDemoDataSeeded();
     const userId = demoUser?.id ?? 1;
-    const allOrders = await db.select().from(orders);
-    const pending = allOrders.filter(o => ["Incoming", "AI Checking"].includes(o.fulfillmentStatus));
-    if (!pending.length) return NextResponse.json({ fulfilledCount: 0, message: "No pending orders." });
-    if (!canPlaceAutomatedOrder("cj")) return NextResponse.json({ success: false, blocked: true, error: "No authorized live supplier ordering integration is enabled." }, { status: 409 });
-
-    const updated = [];
-    for (const order of pending) {
-      if (!order.productId) continue;
-      const result = await createCjOrder({ orderNumber: order.orderNumber, shippingName: order.customerName, phone: order.customerPhone, address: "", city: order.customerCity, state: order.customerState, pincode: order.customerPincode, productId: String(order.productId), quantity: order.quantity });
-      const supplierOrderId = result?.data?.orderId || result?.data?.orderNumber || null;
-      if (!supplierOrderId) continue;
-      const [upd] = await db.update(orders).set({ fulfillmentStatus: "Supplier Ordered", aiDecisionLog: `Authorized supplier order submitted. Supplier reference: ${supplierOrderId}.` }).where(eq(orders.id, order.id)).returning();
-      updated.push(upd);
-      await db.insert(aiActivityLogs).values({ userId, agentName: "Zero-Touch Core // Supplier Fulfillment", actionType: "SUPPLIER_ORDER_CREATED", message: `${order.orderNumber}: supplier order ${supplierOrderId}`, profitImpactInr: order.netProfitInr, status: "SUCCESS" });
-    }
-    return NextResponse.json({ success: true, fulfilledCount: updated.length, orders: updated, message: `Submitted ${updated.length} authorized supplier order(s).` });
+    const pending = await db.select().from(orders).where(eq(orders.userId, userId));
+    const ready = pending.filter(o => ["RECHECK_REQUIRED", "PURCHASE_PENDING"].includes(o.fulfillmentStatus));
+    if (!ready.length) return NextResponse.json({ success: true, fulfilledCount: 0, message: "No orders are ready for operator purchase." });
+    await db.insert(aiActivityLogs).values(ready.map(order => ({
+      userId,
+      agentName: "Order-Agent // Manual Purchase Queue",
+      actionType: "PURCHASE_QUEUE_READY",
+      message: `${order.orderNumber} is ready for source re-check/operator purchase; no automatic CJ order was placed.`,
+      profitImpactInr: order.netProfitInr,
+      status: "INFO",
+    })));
+    return NextResponse.json({ success: true, fulfilledCount: 0, queuedCount: ready.length, orders: ready, workflow: "Customer order → payment gate → source re-check → operator purchase → tracking" });
   } catch (err: unknown) {
-    return NextResponse.json({ success: false, error: err instanceof Error ? err.message : "Supplier fulfillment failed" }, { status: 500 });
+    return NextResponse.json({ success: false, error: err instanceof Error ? err.message : "Purchase queue preparation failed" }, { status: 500 });
   }
 }
