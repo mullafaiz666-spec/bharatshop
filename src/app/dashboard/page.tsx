@@ -1,4 +1,10 @@
 import OperationalDashboard from "@/components/OperationalDashboard";
+import CEOChat from "@/components/CEOChat";
 export const dynamic = "force-dynamic";
-// Production deployment trigger: dashboard must always render the current operational loop from main.
-export default function DashboardPage(){ return <OperationalDashboard/>; }
+// Production deployment trigger: dashboard renders the operational loop plus the CEO decision layer.
+export default function DashboardPage(){
+  return <>
+    <OperationalDashboard />
+    <CEOChat />
+  </>;
+}
