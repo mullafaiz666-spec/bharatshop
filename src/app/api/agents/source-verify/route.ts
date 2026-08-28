@@ -1,66 +1,14 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { aiActivityLogs } from "@/db/schema";
-
+import { serpSearch, openAIJson } from "@/lib/ai/agent-tools";
 export const dynamic = "force-dynamic";
-
-type Candidate = {
-  sourceId: string;
-  sourceName: string;
-  title: string;
-  sku: string;
-  imageUrl: string;
-  supplierName: string;
-  supplierCostInr: number;
-  shippingCostInr: number;
-  gstPct: number;
-  sellingPriceInr: number;
-  stockCount: number;
-  sourceVerified: boolean;
-};
-
-function calculate(c: Candidate, minMarginPct: number) {
-  const landed = c.supplierCostInr + c.shippingCostInr + c.supplierCostInr * c.gstPct / 100;
-  const profit = c.sellingPriceInr - landed;
-  const margin = c.sellingPriceInr > 0 ? profit / c.sellingPriceInr * 100 : 0;
-  const score = c.sourceVerified && c.stockCount > 0 && margin >= minMarginPct
-    ? Math.round(Math.min(100, margin + Math.min(c.stockCount / 100, 20)))
-    : 0;
-  return { landedCostInr: Number(landed.toFixed(2)), netProfitInr: Number(profit.toFixed(2)), marginPct: Number(margin.toFixed(2)), selectionScore: score };
-}
-
-export async function POST(request: Request) {
-  try {
-    const body = await request.json();
-    const candidates: Candidate[] = Array.isArray(body.candidates) ? body.candidates : [];
-    const minMarginPct = Number(body.minMarginPct ?? 35);
-    if (!candidates.length) return NextResponse.json({ error: "No source candidates supplied. Connect an authorized source/API/feed first." }, { status: 400 });
-
-    const evaluated = candidates.map((candidate) => ({ ...candidate, economics: calculate(candidate, minMarginPct) }));
-    const selected = evaluated.filter(x => x.economics.selectionScore > 0).sort((a, b) => b.economics.selectionScore - a.economics.selectionScore);
-
-    if (selected.length) {
-      await db.insert(aiActivityLogs).values({
-        userId: Number(body.userId ?? 1),
-        agentName: "Verify-Select-AI",
-        actionType: "SOURCE_VERIFIED_AND_SELECTED",
-        message: `Evaluated ${evaluated.length} source candidates; selected ${selected[0].title} at ${selected[0].economics.marginPct}% margin.`,
-        profitImpactInr: selected[0].economics.netProfitInr.toFixed(2),
-        status: "SUCCESS",
-      });
-    }
-
-    return NextResponse.json({
-      pipeline: "Source → Verify → Calculate → Select",
-      candidates: evaluated,
-      selected: selected[0] ?? null,
-      status: selected.length ? "READY_FOR_LISTING" : "NO_QUALIFIED_PRODUCT",
-    });
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Invalid request" }, { status: 400 });
-  }
-}
-
-export async function GET() {
-  return NextResponse.json({ agent: "Verify-Select-AI", status: "ready", requiresAuthorizedSourceData: true });
-}
+type Candidate={sourceId:string;sourceName:string;title:string;sku?:string;imageUrl?:string;supplierName:string;supplierCostInr:number;shippingCostInr:number;gstPct?:number;sellingPriceInr:number;stockCount:number;sourceVerified?:boolean;sourceUrl?:string};
+function calculate(c:Candidate,min:number){const landed=c.supplierCostInr+c.shippingCostInr+c.supplierCostInr*(c.gstPct||0)/100;const profit=c.sellingPriceInr-landed;const margin=c.sellingPriceInr>0?profit/c.sellingPriceInr*100:0;return{landedCostInr:+landed.toFixed(2),netProfitInr:+profit.toFixed(2),marginPct:+margin.toFixed(2),selectionScore:c.sourceVerified&&c.stockCount>0&&margin>=min?Math.round(Math.min(100,margin+Math.min(c.stockCount/100,20))):0};}
+export async function POST(request:Request){try{const body=await request.json();let candidates:Candidate[]=Array.isArray(body.candidates)?body.candidates:[];const query=String(body.productName||body.title||"").trim();const min=Number(body.minMarginPct??35);
+if(!candidates.length&&query){const d=await serpSearch(query,"google_shopping");candidates=(d.shopping_results||[]).slice(0,10).map((x:any,i:number)=>({sourceId:String(i),sourceName:String(x.source||x.merchant||"Unknown"),title:String(x.title||query),imageUrl:x.thumbnail,sourceUrl:x.link,supplierName:String(x.source||x.merchant||"Unknown"),supplierCostInr:Number(x.extracted_price||0),shippingCostInr:0,gstPct:0,sellingPriceInr:Number(body.sellingPriceInr||0),stockCount:1,sourceVerified:true}));}
+if(!candidates.length)return NextResponse.json({error:"No source candidates found"},{status:400});
+const evaluated=candidates.map(c=>({...c,economics:calculate(c,min)}));const ai=await openAIJson("You are BharatShop Source Verification Agent. Verify source evidence and economics. Never invent stock, price or delivery facts. Select only candidates with credible source evidence and positive margin. Return JSON {selectedIndex:number|null,verificationStatus:string,reason:string,risks:string[]}.",{query,min,evaluated});const idx=Number(ai.selectedIndex);const selected=Number.isInteger(idx)?evaluated[idx]??null:null;const valid=selected&&selected.economics.selectionScore>0?selected:null;
+await db.insert(aiActivityLogs).values({userId:Number(body.userId??1),agentName:"Verify-Select-AI",actionType:"SOURCE_VERIFIED_AND_SELECTED",message:`Verified ${evaluated.length} source candidates.`,profitImpactInr:String(valid?.economics.netProfitInr??0),metadataJson:{evaluated,selected:valid,ai},status:valid?"SUCCESS":"WARNING"});return NextResponse.json({pipeline:"Live Source → AI Verify → Economics → Select",candidates:evaluated,selected:valid,status:valid?"READY_FOR_LISTING":"NO_QUALIFIED_PRODUCT",ai});
+}catch(error){return NextResponse.json({error:error instanceof Error?error.message:"Invalid request"},{status:503})}}
+export async function GET(){return NextResponse.json({agent:"Verify-Select-AI",status:process.env.SERPAPI_API_KEY&&process.env.OPENAI_API_KEY?"ready":"blocked_missing_keys",capabilities:["live_source_evidence","openai_verification","economics_gate"]})}
