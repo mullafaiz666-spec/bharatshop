@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: bharatshop
+    env: node
+    buildCommand: npm install && npm run build
+    startCommand: npx drizzle-kit push --force && npm run start
+    autoDeploy: true
