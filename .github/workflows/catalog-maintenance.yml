@@ -11,26 +11,14 @@ jobs:
   maintain-catalog:
     runs-on: ubuntu-latest
     steps:
-      - name: Run live AI product research and publication
-        env:
-          BHARATSHOP_URL: ${{ secrets.BHARATSHOP_URL }}
-          AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
-        run: |
-          test -n "$BHARATSHOP_URL"
-          curl --fail-with-body --retry 3 --retry-delay 10 \
-            -X POST "$BHARATSHOP_URL/api/automation/research-products" \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer $AUTOMATION_TOKEN" \
-            --data '{"userId":1,"limit":6}'
+      - name: Check out catalog bootstrap
+        uses: actions/checkout@v4
 
-      - name: Run automated image verification batch
+      - name: Run live catalog bootstrap (research then maintenance)
         env:
           BHARATSHOP_URL: ${{ secrets.BHARATSHOP_URL }}
-          AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
+          BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
         run: |
           test -n "$BHARATSHOP_URL"
-          curl --fail-with-body --retry 3 --retry-delay 10 \
-            -X POST "$BHARATSHOP_URL/api/automation/catalog-maintenance" \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer $AUTOMATION_TOKEN" \
-            --data '{"userId":1,"limit":10}'
+          test -n "$BHARATSHOP_AUTOMATION_TOKEN"
+          node scripts/catalog-live-bootstrap.mjs
