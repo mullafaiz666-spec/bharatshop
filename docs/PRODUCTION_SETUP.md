@@ -1,52 +1,66 @@
 # BharatDrop production setup
 
-The repository currently contains a working application shell, database-backed catalog/order tables, Shopify synchronization, and AI/demo catalog generation. The supplier names and seeded catalog are not proof of live supplier inventory or authorization.
+The repository contains a Next.js application shell, PostgreSQL-backed catalog/order tables, supplier integrations, marketing workflow records, and a PWA shell. Seeded/demo records are not proof of live supplier inventory, live orders, live advertising, or authorization.
 
 ## Required production credentials
 
-Set these in Render environment variables (never commit secrets):
+Set these only in Render environment variables; never commit secrets:
 
 - `DATABASE_URL` — production PostgreSQL connection string
-- `SHOPIFY_STORE_URL` and `SHOPIFY_ADMIN_TOKEN` — only if Shopify is used
-- `CJ_API_KEY` — CJ Dropshipping API key for real supplier catalog/inventory
+- `RAZORPAY_KEY_ID` — Razorpay public key ID
+- `RAZORPAY_KEY_SECRET` — Razorpay server secret
+- `RAZORPAY_WEBHOOK_SECRET` — exact secret configured in Razorpay Webhooks
+- `CASHFREE_APP_ID` / `CASHFREE_SECRET_KEY` — if Cashfree is used
+- `SHOPIFY_STORE_URL` / `SHOPIFY_ADMIN_TOKEN` — only if Shopify is used
+- `CJ_API_KEY` — only for a configured CJ Dropshipping supplier account
 - `CJ_COUNTRY_CODE=IN`
-- `CJ_FROM_COUNTRY_CODE=CN` (change if the selected supplier warehouse is elsewhere)
-- `USD_INR_RATE` — current rate used for price calculation; update from a trusted FX source
-- `DEFAULT_DROPSHIP_SHIPPING_INR` — verified shipping estimate for the selected supplier/warehouse
+- `CJ_FROM_COUNTRY_CODE=CN` (change if the selected supplier warehouse differs)
+- `USD_INR_RATE` — current trusted FX rate if the supplier flow requires USD conversion
+- `DEFAULT_DROPSHIP_SHIPPING_INR` — verified shipping estimate
 - `MIN_DROPSHIP_MARGIN_PCT=35`
-- `CJ_LIVE_FULFILLMENT_ENABLED=false` until the supplier account, payment method, shipping methods, returns and tax rules are tested
+- `CJ_LIVE_FULFILLMENT_ENABLED=false` until supplier account, payment method, shipping, returns and tax rules are tested
+
+## Razorpay checkout flow
+
+1. Storefront creates an order through `POST /api/storefront/orders` with `paymentMode: "RAZORPAY"`.
+2. Server creates the Razorpay order through `POST /api/payments/razorpay/order` using the server secret.
+3. The browser uses the returned `keyId`, `razorpayOrderId`, amount and currency to open Razorpay Checkout.
+4. Razorpay sends events to `POST /api/payments/razorpay/webhook`.
+5. The webhook verifies `x-razorpay-signature` with `RAZORPAY_WEBHOOK_SECRET` before changing the stored payment status.
+6. The client must never be allowed to mark an order `PAID` directly.
+
+Webhook URL after deployment:
+
+`https://<your-production-host>/api/payments/razorpay/webhook`
+
+For the current Render host, this will be:
+
+`https://bharatshop-9w4a.onrender.com/api/payments/razorpay/webhook`
+
+Configure the URL in Razorpay only after the Render deployment containing the webhook code is live.
 
 ## Supplier flow
 
 1. `GET /api/suppliers/cj?q=<keyword>` checks the live CJ catalogue and returns supplier data.
 2. `POST /api/suppliers/cj` with `{ "action":"IMPORT", "keyword":"...", "limit":20 }` imports only products returned by the supplier API with positive verified inventory and positive modeled margin.
-3. Imported products are linked to the supplier in `supplier_product_links` so fulfillment can use a real supplier product ID rather than a fake store name.
-4. `POST /api/suppliers/cj` with `{ "action":"CREATE_ORDER", ... }` is blocked unless `CJ_LIVE_FULFILLMENT_ENABLED=true`.
+3. Imported products are linked to the supplier so fulfillment can use a real supplier product ID rather than a demo supplier name.
+4. Supplier auto-ordering remains blocked unless the relevant live fulfillment flag is explicitly enabled.
 
 ## Marketing
 
-The existing campaign generator creates campaign records/copy. It must not be interpreted as proof that Google, Meta, Instagram or email ads were actually purchased or sent. Before enabling live ads, connect the corresponding advertising accounts and add explicit budget, audience, landing-page, tracking/consent and policy checks.
+Campaign records/copy are not proof that Google, Meta, Instagram or email ads were actually purchased or sent. Before live advertising, connect the corresponding accounts and enforce budget, audience, landing-page, tracking/consent, inventory and policy checks. Start campaigns paused/draft.
 
-Recommended live controls:
+## Fulfillment safety
 
-- never exceed a configured daily spend cap
-- start campaigns paused/draft for verification
-- require valid product availability and margin before advertising
-- use UTM/attribution IDs for every campaign
-- stop campaigns when supplier inventory, price or margin becomes invalid
-
-## Order fulfillment safety
-
-Do not auto-submit a supplier order merely because a customer order exists. Verify payment status, address, product-to-supplier mapping, current supplier price/inventory, shipping availability to the destination, expected margin, tax treatment and refund/return policy. Only then enable live fulfillment.
+Do not auto-submit a supplier order merely because a customer order exists. Verify payment status, address, product-to-supplier mapping, current supplier price/inventory, destination shipping availability, expected margin, tax treatment and refund/return policy first.
 
 ## End-to-end test
 
-1. Health: `GET /api/health`
-2. Supplier health: `POST /api/suppliers/cj` `{ "action":"HEALTH" }`
-3. Import one supplier product.
-4. Verify its supplier link and inventory.
-5. Verify storefront checkout creates an order with the correct SKU/product ID.
-6. Keep live fulfillment disabled and run a test order against the supplier sandbox/test facility if the supplier account supports one.
-7. Verify Shopify sync only if Shopify is configured.
-8. Create a marketing campaign in draft/paused mode and verify tracking.
-9. Only after all checks pass, enable live fulfillment and advertising independently.
+1. `GET /api/health` — database health.
+2. Create a storefront test order using `RAZORPAY` in Razorpay test mode.
+3. Create its Razorpay order server-side.
+4. Complete/fail the test payment and confirm webhook status changes.
+5. Confirm an invalid webhook signature is rejected.
+6. Verify the supplier product link and live inventory before fulfillment.
+7. Keep live supplier fulfillment disabled until the full test passes.
+8. Keep advertising draft/paused until attribution and budget controls are verified.
