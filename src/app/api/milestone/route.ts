@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { count, desc, eq } from "drizzle-orm";
+import { count, desc } from "drizzle-orm";
 import { db } from "@/db";
 import { products, aiActivityLogs, storefrontOrders, orders, marketingCampaigns } from "@/db/schema";
 
@@ -42,8 +42,7 @@ export async function GET() {
       learnOptimize: { status: agentActivityLive ? "OBSERVED" : "BLOCKED", message: agentActivityLive ? "Agent activity is persisted." : "No agent activity has been observed." },
     };
 
-    const requiredOperationalChecks = [productsLive, agentActivityLive];
-    const pass = requiredOperationalChecks.every(Boolean);
+    const pass = productsLive && agentActivityLive;
 
     return NextResponse.json({
       milestone: pass ? "PASS" : "NOT_READY",
