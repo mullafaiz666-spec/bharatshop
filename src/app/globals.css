@@ -5,61 +5,52 @@
   --font-heading: 'Space Grotesk', sans-serif;
   --font-body: 'Inter', sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
+  --bs-saffron: #ff7a18;
+  --bs-saffron-2: #ff9f43;
+  --bs-ink: #070b12;
+  --bs-line: rgba(148, 163, 184, .14);
 }
 
-body {
-  font-family: var(--font-body);
-  background-color: #090D16;
-  color: #F8FAFC;
-  overflow-x: hidden;
-}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; font-family: var(--font-body); background: var(--bs-ink); color: #f8fafc; overflow-x: hidden; }
+h1,h2,h3,h4,.font-heading { font-family: var(--font-heading); }
+.font-mono-num { font-family: var(--font-mono); }
 
-h1, h2, h3, h4, .font-heading {
-  font-family: var(--font-heading);
-}
-
-.font-mono-num {
-  font-family: var(--font-mono);
-}
-
-/* Subtle tactical radar dot grid */
 .radar-grid-bg {
-  background-color: #090D16;
-  background-image: radial-gradient(rgba(148, 163, 184, 0.08) 1px, transparent 1px);
-  background-size: 20px 20px;
+  background-color: #070b12;
+  background-image: radial-gradient(circle at 50% -20%, rgba(255,122,24,.14), transparent 38%), radial-gradient(rgba(148,163,184,.08) 1px, transparent 1px);
+  background-size: auto, 20px 20px;
 }
 
-/* Custom scrollbars */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+.bs-glass {
+  background: linear-gradient(145deg, rgba(20,28,43,.86), rgba(8,12,20,.72));
+  border: 1px solid var(--bs-line);
+  box-shadow: 0 18px 60px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.035);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
 }
-::-webkit-scrollbar-track {
-  background: #090D16;
-}
-::-webkit-scrollbar-thumb {
-  background: #1E293B;
-  border-radius: 999px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #10B981;
-}
+.bs-glow { box-shadow: 0 0 0 1px rgba(255,122,24,.12), 0 18px 60px rgba(255,122,24,.08); }
 
-@keyframes radar-pulse {
-  0% {
-    transform: scale(0.95);
-    opacity: 0.7;
-  }
-  70% {
-    transform: scale(1.85);
-    opacity: 0;
-  }
-  100% {
-    transform: scale(1.85);
-    opacity: 0;
-  }
-}
+.store-3d { perspective: 1400px; }
+.store-3d-card { transform: translateZ(0); transform-style: preserve-3d; transition: transform .35s cubic-bezier(.2,.8,.2,1), box-shadow .35s ease, border-color .35s ease; }
+.store-3d-card:hover { transform: translateY(-6px) rotateX(1deg) rotateY(-1deg); box-shadow: 0 24px 55px rgba(15,23,42,.14), 0 8px 20px rgba(255,122,24,.08); }
+.store-product-stage { position: relative; isolation: isolate; overflow: hidden; background: radial-gradient(circle at 50% 42%, rgba(255,255,255,.98), rgba(248,250,252,.9) 48%, rgba(226,232,240,.78)); }
+.store-product-stage::before { content: ""; position: absolute; width: 58%; height: 12%; left: 21%; bottom: 10%; border-radius: 50%; background: rgba(15,23,42,.16); filter: blur(18px); pointer-events: none; }
+.store-product-stage img { position: relative; z-index: 1; transition: transform .45s cubic-bezier(.2,.8,.2,1), filter .45s ease; }
+.store-product-stage:hover img { transform: scale(1.045) translateY(-3px); filter: drop-shadow(0 18px 20px rgba(15,23,42,.12)); }
+.store-light { background: radial-gradient(circle at 12% 0%, rgba(255,159,67,.12), transparent 28%), radial-gradient(circle at 92% 20%, rgba(251,191,36,.08), transparent 25%), #fff; }
 
-.animate-radar-pulse {
-  animation: radar-pulse 2.2s infinite cubic-bezier(0.16, 1, 0.3, 1);
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #090d16; }
+::-webkit-scrollbar-thumb { background: #263246; border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: #ff7a18; }
+
+@keyframes radar-pulse { 0% { transform: scale(.95); opacity: .7; } 70% { transform: scale(1.85); opacity: 0; } 100% { transform: scale(1.85); opacity: 0; } }
+.animate-radar-pulse { animation: radar-pulse 2.2s infinite cubic-bezier(.16,1,.3,1); }
+@keyframes bs-float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+.bs-float { animation: bs-float 5s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  *,*::before,*::after { animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; scroll-behavior:auto !important; }
 }
