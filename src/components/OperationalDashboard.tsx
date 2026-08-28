@@ -5,10 +5,36 @@ type Stage={key:string;title:string;icon:string;status:string;detail:string};
 const tone=(s:string)=>s==="PASSED"||s==="OBSERVED"||s==="CONNECTED"||s==="PREPARED"?"border-emerald-500/30 bg-emerald-500/10 text-emerald-300":s==="FAILED"||s==="BLOCKED"?"border-red-500/30 bg-red-500/10 text-red-300":"border-slate-700 bg-slate-900 text-slate-300";
 const money=(n:number)=>`₹${Number(n||0).toLocaleString("en-IN",{maximumFractionDigits:2})}`;
 
+const API_TIMEOUT_MS=8000;
+async function fetchJson(path:string){
+ const controller=new AbortController();
+ const timer=setTimeout(()=>controller.abort(),API_TIMEOUT_MS);
+ try{
+  const response=await fetch(path,{cache:"no-store",signal:controller.signal});
+  if(!response.ok) throw new Error(`${path} returned HTTP ${response.status}`);
+  return await response.json();
+ }finally{clearTimeout(timer)}
+}
+
 export default function OperationalDashboard(){
  const [data,setData]=useState<any>({orders:[],queue:[],tracking:[],learning:{recent:[]},ads:{channels:[]},milestone:{checks:{}}});
  const [busy,setBusy]=useState(false); const [msg,setMsg]=useState("");
- const load=useCallback(async()=>{try{const urls=["/api/milestone","/api/orders/purchase-queue","/api/agents/tracking","/api/agents/learning","/api/agents/advertising-status","/api/orders"];const rs=await Promise.all(urls.map(u=>fetch(u)));const js=await Promise.all(rs.map(async r=>{try{return await r.json()}catch{return {}}}));setData({milestone:js[0]||{},queue:Array.isArray(js[1]?.queue)?js[1].queue:[],tracking:Array.isArray(js[2]?.orders)?js[2].orders:[],learning:js[3]||{recent:[]},ads:js[4]||{channels:[]},orders:Array.isArray(js[5]?.orders)?js[5].orders:[]})}catch{setMsg("Dashboard data unavailable; safe empty state shown.")}},[]);
+ const load=useCallback(async()=>{
+  const urls=["/api/milestone","/api/orders/purchase-queue","/api/agents/tracking","/api/agents/learning","/api/agents/advertising-status","/api/orders"];
+  const results=await Promise.allSettled(urls.map(fetchJson));
+  const failed=results.filter((r):r is PromiseRejectedResult=>r.status==="rejected");
+  const js=results.map(r=>r.status==="fulfilled"?r.value:{});
+  setData({
+   milestone:js[0]||{},
+   queue:Array.isArray(js[1]?.queue)?js[1].queue:[],
+   tracking:Array.isArray(js[2]?.orders)?js[2].orders:[],
+   learning:js[3]||{recent:[]},
+   ads:js[4]||{channels:[]},
+   orders:Array.isArray(js[5]?.orders)?js[5].orders:[]
+  });
+  if(failed.length) setMsg(`Some dashboard data sources are unavailable (${failed.length}/${urls.length}); showing safe live data from the remaining sources.`);
+  else setMsg("");
+ },[]);
  useEffect(()=>{void load()},[load]);
  async function recheck(id:number){setBusy(true);setMsg("AI re-checking supplier price, stock, shipping and margin…");try{const r=await fetch("/api/agents/recheck",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({orderId:id})});const d=await r.json().catch(()=>({}));setMsg(d.passed?"✓ Re-check passed.":"⚠ Re-check blocked.")}catch{setMsg("⚠ Re-check failed.")}finally{setBusy(false);void load()}}
  async function purchase(x:any){const supplier=window.prompt(`Enter actual supplier order number for ${x.orderNumber}`);if(!supplier)return;const tracking=window.prompt("Enter actual supplier tracking number (optional)")||"";setBusy(true);try{const r=await fetch("/api/orders/purchase-queue",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({orderId:x.orderId,action:"purchased",supplierOrderNumber:supplier,trackingCode:tracking})});const d=await r.json().catch(()=>({}));setMsg(d.error||"✓ Supplier purchase recorded.")}catch{setMsg("⚠ Purchase recording failed.")}finally{setBusy(false);void load()}}
