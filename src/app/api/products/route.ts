@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { products, productImages, aiActivityLogs } from "@/db/schema";
-import { desc, eq } from "drizzle-orm";
+import { products, productImages, productDetails, aiActivityLogs } from "@/db/schema";
+import { desc, eq, asc } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 const PLACEHOLDER_PATTERNS = ["images.unsplash.com","source.unsplash.com","unsplash.com","via.placeholder.com","placeholder.com","placehold.co","placehold.it","dummyimage.com","picsum.photos","loremflickr.com","placekitten.com"];
@@ -14,17 +14,16 @@ export async function GET(req:Request){
  try {
   const {searchParams}=new URL(req.url);const category=searchParams.get("category");const query=searchParams.get("query")?.trim().toLowerCase();
   const all=await db.select().from(products).where(eq(products.status,"Published")).orderBy(desc(products.aiScore));
-  const imageRows=await db.select().from(productImages);const imageMap=new Map<number,typeof imageRows[number]>();
-  for(const row of imageRows){if(!imageMap.has(row.productId)&&["VERIFIED","WEB_SEARCH_MATCHED"].includes(String(row.verificationStatus))){imageMap.set(row.productId,row);}}
+  const imageRows=await db.select().from(productImages);const detailRows=await db.select().from(productDetails);
+  const imageMap=new Map<number,typeof imageRows>();for(const row of imageRows){if(["VERIFIED","WEB_SEARCH_MATCHED","WEB_IMAGE_EXACT_MATCH"].includes(String(row.verificationStatus))&&!isPlaceholderImage(row.imageUrl)){const list=imageMap.get(row.productId)||[];list.push(row);imageMap.set(row.productId,list.sort((a,b)=>a.sortOrder-b.sortOrder));}}
+  const detailMap=new Map<number,typeof detailRows[number]>();for(const row of detailRows)detailMap.set(row.productId,row);
   const filtered=all.map(p=>{
-   const row=imageMap.get(p.id);
-   const realImage=row&&!isPlaceholderImage(row.imageUrl)?row.imageUrl:(!isPlaceholderImage(p.imageUrl)?p.imageUrl:"");
-   // Existing Published records already contain supplier identity and supplier cost from the verified catalogue import.
-   // Do not require a separate productImages row to prove source backing; image evidence is optional presentation data.
+   const rows=imageMap.get(p.id)||[];const first=rows[0];const realImage=first?.imageUrl&&!isPlaceholderImage(first.imageUrl)?first.imageUrl:(!isPlaceholderImage(p.imageUrl)?p.imageUrl:"");
    const sourceBacked=Boolean(String(p.supplierName||"").trim()&&p.supplierCostInr!==null&&p.supplierCostInr!==undefined&&Number.isFinite(Number(p.supplierCostInr))&&Number(p.supplierCostInr)>=0);
-   return {...p,imageUrl:realImage|| (sourceBacked?CATALOG_IMAGE:""),imageVerificationStatus:realImage?(row?.verificationStatus||"LEGACY_CATALOG"):(sourceBacked?"SOURCE_BACKED_NO_IMAGE":"UNVERIFIED"),imageSourceUrl:row?.sourceUrl||"",imageSourceName:row?.altText||"",sourceBacked};
+   const details=detailMap.get(p.id);const spec=details?.specificationsJson&&typeof details.specificationsJson==="object"&&!Array.isArray(details.specificationsJson)?details.specificationsJson as Record<string,unknown>:{};const media=spec.media&&typeof spec.media==="object"&&!Array.isArray(spec.media)?spec.media as Record<string,unknown>:{};
+   return {...p,imageUrl:realImage||(sourceBacked?CATALOG_IMAGE:""),imageUrls:rows.map(r=>r.imageUrl).filter(u=>!isPlaceholderImage(u)),imageVerificationStatus:realImage?(first?.verificationStatus||"LEGACY_CATALOG"):(sourceBacked?"SOURCE_BACKED_NO_IMAGE":"UNVERIFIED"),imageSourceUrl:first?.sourceUrl||"",imageSourceName:first?.altText||"",productVideos:Array.isArray(media.videos)?media.videos:[],productDetails:details||null,sourceBacked};
   }).filter(p=>{const matchCat=!category||category==="ALL"||p.category===category;const matchQ=!query||String(p.title||"").toLowerCase().includes(query)||String(p.sku||"").toLowerCase().includes(query);return matchCat&&matchQ&&p.sourceBacked;});
-  return NextResponse.json({products:filtered,verificationPolicy:"Only Published products with verified catalogue economics (supplier identity + supplier cost) are rendered. Verified source images are preferred; a neutral image-unavailable card is used when source-backed products have no usable image."});
+  return NextResponse.json({products:filtered,verificationPolicy:"Only Published products with verified catalogue economics are rendered. Each product exposes every approved gallery image plus matching product videos when available. Packaging, contents and colour-variant media are included when verified; placeholders are rejected."});
  } catch (err) { return NextResponse.json({products:[],error:err instanceof Error?err.message:"Catalogue query failed"},{status:500}); }
 }
 
