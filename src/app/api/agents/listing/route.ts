@@ -24,6 +24,19 @@ export async function POST(req: Request) {
 
     const selling = Number(p.sellingPriceInr), cost = Number(p.supplierCostInr) + Number(p.shippingCostInr);
     const profit = selling - cost, margin = selling ? profit / selling * 100 : 0;
+    if (selling <= 0 || profit <= 0) {
+      return NextResponse.json({
+        status: "BLOCKED",
+        error: "Listing blocked: product is not profitable at the current verified selling/source economics.",
+      }, { status: 422 });
+    }
+    if (Number(p.stockCount) <= 0) {
+      return NextResponse.json({
+        status: "BLOCKED",
+        error: "Listing blocked: verified source currently reports no available stock.",
+      }, { status: 422 });
+    }
+
     const listing = {
       title: p.title.replace(/\s+/g, " ").trim(),
       description: `${p.title} — source-backed product listing with verified image evidence and customer-friendly delivery.`,
@@ -41,10 +54,24 @@ export async function POST(req: Request) {
       adCreativeData: { hook: p.aiMarketingCopy, audience: p.aiTargetAudience, imageUrl: verifiedImage.imageUrl, cta: "Abhi Kharido" },
     };
 
-    await db.update(products).set({ imageUrl: verifiedImage.imageUrl, netProfitInr: listing.netProfitInr.toFixed(2), customMarginPct: listing.marginPct.toFixed(2), aiMarketingCopy: listing.marketingCopy }).where(eq(products.id, p.id));
+    // Publishing is the final gate of the listing agent. A product becomes
+    // customer-visible only after verified imagery, positive economics and
+    // available stock have all passed. This is what connects the AI
+    // research/verification/marketing pipeline to the real storefront.
+    await db.update(products).set({
+      imageUrl: verifiedImage.imageUrl,
+      netProfitInr: listing.netProfitInr.toFixed(2),
+      customMarginPct: listing.marginPct.toFixed(2),
+      aiMarketingCopy: listing.marketingCopy,
+      status: "Published",
+      updatedAt: new Date(),
+    }).where(eq(products.id, p.id));
+
     await db.insert(aiActivityLogs).values({ userId: p.userId, agentName: "Listing-Creative-Agent", actionType: "LISTING_OPTIMIZED", message: `Optimized source-backed listing for ${p.title}: ${listing.marginPct}% margin.`, profitImpactInr: String(listing.netProfitInr), metadataJson: listing, status: "SUCCESS" });
     await db.insert(aiActivityLogs).values({ userId: p.userId, agentName: "Listing-Creative-Agent", actionType: "CREATIVE_GENERATED", message: `Generated listing creative using verified image evidence for ${p.title}.`, profitImpactInr: String(listing.netProfitInr), metadataJson: listing.adCreativeData, status: "SUCCESS" });
-    return NextResponse.json({ listing });
+    await db.insert(aiActivityLogs).values({ userId: p.userId, agentName: "Listing-Creative-Agent", actionType: "STOREFRONT_PUBLISHED", message: `Published verified product to the BharatShop storefront: ${p.title}.`, profitImpactInr: String(listing.netProfitInr), metadataJson: { productId: p.id, status: "Published", imageUrl: verifiedImage.imageUrl, stockCount: p.stockCount, marginPct: listing.marginPct }, status: "SUCCESS" });
+
+    return NextResponse.json({ listing, storefront: { published: true, productId: p.id, status: "Published" } });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Invalid request" }, { status: 400 });
   }
