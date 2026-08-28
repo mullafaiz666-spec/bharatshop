@@ -15,8 +15,12 @@ export async function GET(req: Request) {
   const all = await db.select().from(products).where(eq(products.status, "Published")).orderBy(desc(products.aiScore));
   const imageRows = await db.select().from(productImages); const imageMap = new Map<number, typeof imageRows[number]>();
   for (const row of imageRows) if (["VERIFIED", "WEB_SEARCH_MATCHED"].includes(row.verificationStatus) && !imageMap.has(row.productId) && !isPlaceholderImage(row.imageUrl)) imageMap.set(row.productId, row);
-  const filtered = all.map(p => { const verifiedImage = imageMap.get(p.id); return { ...p, imageUrl: verifiedImage?.imageUrl || "", imageVerificationStatus: verifiedImage?.verificationStatus || "UNVERIFIED", imageSourceUrl: verifiedImage?.sourceUrl || "", imageSourceName: verifiedImage?.altText || "" }; }).filter(p => { const matchCat = !category || category === "ALL" || p.category === category; const matchQ = !query || p.title.toLowerCase().includes(query) || p.sku.toLowerCase().includes(query); return matchCat && matchQ && Boolean(p.imageUrl); });
-  return NextResponse.json({ products: filtered, verificationPolicy: "Only Published products with verified source-backed, non-placeholder images are customer-visible." });
+  const filtered = all.map(p => {
+    const verifiedImage = imageMap.get(p.id);
+    const fallbackImage = !verifiedImage && p.imageUrl && !isPlaceholderImage(p.imageUrl) ? p.imageUrl : "";
+    return { ...p, imageUrl: verifiedImage?.imageUrl || fallbackImage, imageVerificationStatus: verifiedImage?.verificationStatus || (fallbackImage ? "LEGACY_CATALOG" : "UNVERIFIED"), imageSourceUrl: verifiedImage?.sourceUrl || "", imageSourceName: verifiedImage?.altText || "" };
+  }).filter(p => { const matchCat = !category || category === "ALL" || p.category === category; const matchQ = !query || p.title.toLowerCase().includes(query) || p.sku.toLowerCase().includes(query); return matchCat && matchQ && Boolean(p.imageUrl); });
+  return NextResponse.json({ products: filtered, verificationPolicy: "Published products with verified images are preferred; legacy seeded catalogue images remain visible until source-image verification completes." });
 }
 
 export async function POST(req: Request) {
