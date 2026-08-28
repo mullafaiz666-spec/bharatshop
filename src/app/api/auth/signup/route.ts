@@ -1,0 +1,6 @@
+import {NextResponse} from "next/server";
+import {db} from "@/db";
+import {users} from "@/db/schema";
+import {createHash,randomBytes,pbkdf2Sync} from "node:crypto";
+function hash(password:string){const salt=randomBytes(16).toString("hex");const digest=pbkdf2Sync(password,salt,120000,64,"sha512").toString("hex");return `pbkdf2$sha512$120000$${salt}$${digest}`}
+export async function POST(req:Request){try{const b=await req.json();const name=String(b.name||"").trim(),email=String(b.email||"").trim().toLowerCase(),password=String(b.password||"");if(!name||!email||password.length<8)return NextResponse.json({error:"Name, valid email and an 8+ character password are required"},{status:400});const existing=await db.select({id:users.id}).from(users).where((u,{eq})=>eq(u.email,email)).limit(1);if(existing.length)return NextResponse.json({error:"An account with this email already exists"},{status:409});const [user]=await db.insert(users).values({name,email,passwordHash:hash(password),role:"Customer"}).returning({id:users.id,name:users.name,email:users.email,role:users.role});return NextResponse.json({ok:true,user});}catch(e){return NextResponse.json({error:e instanceof Error?e.message:"Unable to create account"},{status:503})}}
