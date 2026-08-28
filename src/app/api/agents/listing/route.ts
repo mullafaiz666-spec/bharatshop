@@ -2,20 +2,5 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { products, aiActivityLogs } from "@/db/schema";
 import { eq } from "drizzle-orm";
-
-export const dynamic = "force-dynamic";
-
-export async function POST(req: Request) {
-  try {
-    const { productId } = await req.json();
-    if (!productId) return NextResponse.json({ error: "productId required" }, { status: 400 });
-    const [p] = await db.select().from(products).where(eq(products.id, Number(productId))).limit(1);
-    if (!p) return NextResponse.json({ error: "Product not found" }, { status: 404 });
-    const selling = Number(p.sellingPriceInr), cost = Number(p.supplierCostInr) + Number(p.shippingCostInr);
-    const profit = selling - cost, margin = selling ? profit / selling * 100 : 0;
-    const listing = { title: p.title.replace(/\s+/g," ").trim(), description: `${p.title} — quality-focused Indian ecommerce listing with verified source economics and customer-friendly delivery.`, sellingPriceInr: selling, marginPct: +margin.toFixed(2), netProfitInr: +profit.toFixed(2), marketingCopy: p.aiMarketingCopy, targetAudience: p.aiTargetAudience, adCreativeData: { hook: p.aiMarketingCopy, audience: p.aiTargetAudience, imageUrl: p.imageUrl, cta: "Abhi Kharido" } };
-    await db.update(products).set({ netProfitInr: listing.netProfitInr.toFixed(2), customMarginPct: listing.marginPct.toFixed(2), aiMarketingCopy: listing.marketingCopy }).where(eq(products.id, p.id));
-    await db.insert(aiActivityLogs).values({ userId: p.userId, agentName: "Listing-Creative-Agent", actionType: "PRODUCT_LISTING_OPTIMIZED", message: `Optimized listing for ${p.title}: ${listing.marginPct}% margin.`, profitImpactInr: String(listing.netProfitInr), metadataJson: listing, status: "SUCCESS" });
-    return NextResponse.json({ listing });
-  } catch (e) { return NextResponse.json({ error: e instanceof Error ? e.message : "Invalid request" }, { status: 400 }); }
-}
+export const dynamic="force-dynamic";
+export async function POST(req:Request){try{const {productId}=await req.json();if(!productId)return NextResponse.json({error:"productId required"},{status:400});const [p]=await db.select().from(products).where(eq(products.id,Number(productId))).limit(1);if(!p)return NextResponse.json({error:"Product not found"},{status:404});const selling=Number(p.sellingPriceInr),cost=Number(p.supplierCostInr)+Number(p.shippingCostInr);const profit=selling-cost,margin=selling?profit/selling*100:0;const listing={title:p.title.replace(/\s+/g," ").trim(),description:`${p.title} — quality-focused Indian ecommerce listing with verified source economics and customer-friendly delivery.`,sellingPriceInr:selling,marginPct:+margin.toFixed(2),netProfitInr:+profit.toFixed(2),marketingCopy:p.aiMarketingCopy,targetAudience:p.aiTargetAudience,adCreativeData:{hook:p.aiMarketingCopy,audience:p.aiTargetAudience,imageUrl:p.imageUrl,cta:"Abhi Kharido"}};await db.update(products).set({netProfitInr:listing.netProfitInr.toFixed(2),customMarginPct:listing.marginPct.toFixed(2),aiMarketingCopy:listing.marketingCopy}).where(eq(products.id,p.id));await db.insert(aiActivityLogs).values({userId:p.userId,agentName:"Listing-Creative-Agent",actionType:"LISTING_OPTIMIZED",message:`Optimized listing for ${p.title}: ${listing.marginPct}% margin.`,profitImpactInr:String(listing.netProfitInr),metadataJson:listing,status:"SUCCESS"});await db.insert(aiActivityLogs).values({userId:p.userId,agentName:"Listing-Creative-Agent",actionType:"CREATIVE_GENERATED",message:`Generated listing creative for ${p.title}.`,profitImpactInr:String(listing.netProfitInr),metadataJson:listing.adCreativeData,status:"SUCCESS"});return NextResponse.json({listing})}catch(e){return NextResponse.json({error:e instanceof Error?e.message:"Invalid request"},{status:400})}}
