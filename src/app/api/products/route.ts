@@ -1,16 +1,27 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { products, aiActivityLogs } from "@/db/schema";
+import { products, productImages, aiActivityLogs } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 
+const PLACEHOLDER_PATTERNS = [
+  "images.unsplash.com", "source.unsplash.com", "unsplash.com",
+  "via.placeholder.com", "placeholder.com", "placehold.co", "placehold.it",
+  "dummyimage.com", "picsum.photos", "loremflickr.com", "placekitten.com",
+];
+
+function isPlaceholderImage(url: string) {
+  const u = String(url || "").toLowerCase();
+  return !/^https?:\/\//i.test(u) || PLACEHOLDER_PATTERNS.some(p => u.includes(p));
+}
+
 function normalizeImageUrls(body: any): string[] {
   const raw: unknown[] = Array.isArray(body.imageUrls) ? body.imageUrls : [body.imageUrl];
-  const urls = raw
+  return Array.from(new Set(raw
     .filter((v: unknown): v is string => typeof v === "string" && /^https?:\/\//i.test(v.trim()) && v.trim().length > 0)
-    .map((v: string) => v.trim());
-  return Array.from(new Set<string>(urls));
+    .map((v: string) => v.trim())
+    .filter(u => !isPlaceholderImage(u))));
 }
 
 function rejectDuplicateImages(urls: string[]) {
@@ -23,12 +34,31 @@ export async function GET(req: Request) {
   const category = searchParams.get("category");
   const query = searchParams.get("query")?.toLowerCase();
   const all = await db.select().from(products).orderBy(desc(products.aiScore));
-  const filtered = all.filter(p => {
-    const matchCat = !category || category === "ALL" || p.category === category;
-    const matchQ = !query || p.title.toLowerCase().includes(query) || p.sku.toLowerCase().includes(query);
-    return matchCat && matchQ;
-  });
-  return NextResponse.json({ products: filtered });
+  const imageRows = await db.select().from(productImages);
+  const imageMap = new Map<number, typeof imageRows[number]>();
+  for (const row of imageRows) {
+    if (row.verificationStatus === "VERIFIED" || row.verificationStatus === "WEB_SEARCH_MATCHED") {
+      if (!imageMap.has(row.productId) && !isPlaceholderImage(row.imageUrl)) imageMap.set(row.productId, row);
+    }
+  }
+  const filtered = all
+    .map(p => {
+      const verifiedImage = imageMap.get(p.id);
+      return {
+        ...p,
+        imageUrl: verifiedImage?.imageUrl || "",
+        imageVerificationStatus: verifiedImage?.verificationStatus || "UNVERIFIED",
+        imageSourceUrl: verifiedImage?.sourceUrl || "",
+        imageSourceName: verifiedImage?.altText || "",
+      };
+    })
+    .filter(p => {
+      const matchCat = !category || category === "ALL" || p.category === category;
+      const matchQ = !query || p.title.toLowerCase().includes(query) || p.sku.toLowerCase().includes(query);
+      // Never publish placeholder/unverified imagery to the customer storefront.
+      return matchCat && matchQ && Boolean(p.imageUrl);
+    });
+  return NextResponse.json({ products: filtered, verificationPolicy: "Only source-backed, non-placeholder product images are published." });
 }
 
 export async function POST(req: Request) {
@@ -52,7 +82,17 @@ export async function POST(req: Request) {
     if (netProfit <= 0) return NextResponse.json({ error: "Product is not profitable; listing blocked." }, { status: 422 });
 
     const [created] = await db.insert(products).values({ userId, sku, title, category, imageUrl: imageUrls[0], brand, supplierName, supplierCity, supplierCostInr: cost.toFixed(2), shippingCostInr: ship.toFixed(2), gstPct: gst.toFixed(2), sellingPriceInr: price.toFixed(2), mrpInr: Number(mrpInr ?? price).toFixed(2), customMarginPct: Number(customMarginPct).toFixed(2), netProfitInr: netProfit.toFixed(2), aiScore: Math.max(0, Math.min(100, Math.round(margin))), viralVelocityScore: 0, stockCount: Number(stockCount), moq: Number(moq), autoRepriceEnabled: true, status, aiMarketingCopy, aiTargetAudience, hsnCode }).returning();
-    await db.insert(aiActivityLogs).values({ userId, agentName: "Catalog-Manager // Verified Import", actionType: "PRODUCT_IMPORTED", message: `Verified product imported with ${imageUrls.length} unique source image(s): ${created.title} — ₹${created.netProfitInr} net profit (${margin}% margin).`, profitImpactInr: created.netProfitInr, status: "SUCCESS", metadataJson: { sourceImageUrls: imageUrls, verifiedFields: Object.keys(body).filter(k => body[k] !== undefined) } });
+
+    await db.insert(productImages).values(imageUrls.map((url, index) => ({
+      productId: created.id,
+      imageUrl: url,
+      sourceUrl: String(body.sourceUrls?.[index] || body.sourceUrl || ""),
+      sortOrder: index,
+      altText: String(body.imageSourceNames?.[index] || body.imageSourceName || "Verified web source"),
+      verificationStatus: "WEB_SEARCH_MATCHED",
+    })));
+
+    await db.insert(aiActivityLogs).values({ userId, agentName: "Catalog-Manager // Verified Import", actionType: "PRODUCT_IMPORTED", message: `Verified product imported with ${imageUrls.length} unique source image(s): ${created.title} — ₹${created.netProfitInr} net profit (${margin}% margin).`, profitImpactInr: created.netProfitInr, status: "SUCCESS", metadataJson: { sourceImageUrls: imageUrls, sourceUrls: body.sourceUrls || [body.sourceUrl || ""], verifiedFields: Object.keys(body).filter(k => body[k] !== undefined) } });
     return NextResponse.json({ product: created, imageUrls, verification: "source-backed" }, { status: 201 });
   } catch (err) { return NextResponse.json({ error: err instanceof Error ? err.message : "Error" }, { status: 500 }); }
 }
