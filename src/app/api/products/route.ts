@@ -1,15 +1,16 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { products, aiActivityLogs } from "@/db/schema";
-import { desc, eq, sql } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 
-// Supplier images must remain traceable to the source. We do not fabricate or
-// substitute product photos. Duplicate image URLs are rejected per product.
 function normalizeImageUrls(body: any): string[] {
-  const raw = Array.isArray(body.imageUrls) ? body.imageUrls : [body.imageUrl];
-  return [...new Set(raw.filter((v: unknown): v is string => typeof v === "string" && /^https?:\/\//i.test(v) && v.trim().length > 0).map(v => v.trim()))];
+  const raw: unknown[] = Array.isArray(body.imageUrls) ? body.imageUrls : [body.imageUrl];
+  const urls = raw
+    .filter((v: unknown): v is string => typeof v === "string" && /^https?:\/\//i.test(v.trim()) && v.trim().length > 0)
+    .map((v: string) => v.trim());
+  return Array.from(new Set<string>(urls));
 }
 
 function rejectDuplicateImages(urls: string[]) {
@@ -37,8 +38,6 @@ export async function POST(req: Request) {
     const imageUrls = normalizeImageUrls(body);
     const { title, category = "Electronics & Gadgets", sku = `BD-SKU-${Date.now()}`, brand = "Generic", supplierName, supplierCity = "", supplierCostInr, shippingCostInr = 65, gstPct = 18, sellingPriceInr, mrpInr, customMarginPct = 40, aiMarketingCopy = "", aiTargetAudience = "", status = "Draft", stockCount = 0, moq = 1, hsnCode = "" } = body;
 
-    // Require complete source-backed core data. Unknown values must be supplied
-    // as explicit "Not available" by the sourcing agent, never guessed.
     const missing = [
       ["title", title], ["supplierName", supplierName], ["supplierCostInr", supplierCostInr],
       ["sellingPriceInr", sellingPriceInr], ["imageUrls", imageUrls.length ? imageUrls : null],
