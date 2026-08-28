@@ -29,6 +29,27 @@ export async function listPendingApprovals() {
   return result.rows;
 }
 
+/** Ground the CEO in live application data. Never returns customer PII. */
+export async function inspectLiveBusinessData() {
+  const [products, orders, storefrontOrders, activity, refreshes, approvals] = await Promise.all([
+    pool.query(`SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE status ILIKE 'Published')::int AS published, COUNT(*) FILTER (WHERE image_url IS NULL OR image_url='')::int AS missing_images FROM products`),
+    pool.query(`SELECT COUNT(*)::int AS total, COALESCE(SUM(customer_paid_inr),0)::numeric AS revenue, COALESCE(SUM(net_profit_inr),0)::numeric AS profit, COUNT(*) FILTER (WHERE fulfillment_status IN ('RECHECK_REQUIRED','Pending','Received'))::int AS pending FROM orders`),
+    pool.query(`SELECT COUNT(*)::int AS total, COALESCE(SUM(total_amount_inr),0)::numeric AS revenue, COUNT(*) FILTER (WHERE fulfillment_status IN ('RECHECK_REQUIRED','Pending','Received'))::int AS pending FROM storefront_orders`),
+    pool.query(`SELECT agent_name, action_type, message, status, profit_impact_inr, created_at FROM ai_activity_logs ORDER BY created_at DESC LIMIT 40`),
+    pool.query(`SELECT run_at,total_products_updated,total_products_added,total_products_dropped,avg_ai_score,top_category,total_projected_profit_inr,status FROM product_refresh_logs ORDER BY run_at DESC LIMIT 5`),
+    listPendingApprovals(),
+  ]);
+  return {
+    products: products.rows[0],
+    internalOrders: orders.rows[0],
+    storefrontOrders: storefrontOrders.rows[0],
+    recentActivity: activity.rows,
+    refreshes: refreshes.rows,
+    pendingApprovals: approvals,
+    inspectedAt: new Date().toISOString(),
+  };
+}
+
 export async function researchWeb(query: string) {
   const data = await serpSearch(query);
   return {
