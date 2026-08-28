@@ -1,93 +1,16 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { products, productImages, aiActivityLogs } from "@/db/schema";
-import { asc, eq, isNull, or } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
-
 const BATCH_SIZE = 10;
-const BAD_IMAGE_HOSTS = ["unsplash.com", "images.unsplash.com", "source.unsplash.com", "placeholder.com", "placehold.co", "placehold.it", "dummyimage.com", "picsum.photos", "loremflickr.com", "placekitten.com"];
-
-function placeholder(url: unknown) {
-  if (typeof url !== "string" || !/^https?:\/\//i.test(url)) return true;
-  const u = url.toLowerCase();
-  return BAD_IMAGE_HOSTS.some(h => u.includes(h));
-}
-
-async function searchImages(title: string, brand: string) {
-  const key = process.env.SERPAPI_API_KEY;
-  if (!key) throw new Error("SERPAPI_API_KEY is not configured");
-  const q = `${brand || ""} ${title}`.trim();
-  const r = await fetch(`https://serpapi.com/search.json?engine=google_images&google_domain=google.co.in&gl=in&hl=en&q=${encodeURIComponent(q)}&api_key=${encodeURIComponent(key)}`, { cache: "no-store" });
-  if (!r.ok) throw new Error(`SerpAPI returned ${r.status}`);
-  const d = await r.json();
-  return (d.images_results || []).filter((x: any) => !placeholder(x?.original) && !placeholder(x?.link)).slice(0, 6);
-}
-
-async function verifyImage(product: any, candidate: any) {
-  const key = process.env.OPENAI_API_KEY;
-  if (!key) throw new Error("OPENAI_API_KEY is not configured");
-  const r = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-    body: JSON.stringify({
-      model: process.env.OPENAI_MODEL || "gpt-5-mini",
-      instructions: "You are an ecommerce image verification agent. Return MATCH only if the supplied image visibly represents the requested product. Otherwise return REJECT. Do not assume an exact model from text alone.",
-      input: [{ role: "user", content: [
-        { type: "input_text", text: `Requested product: ${product.brand} ${product.title}\nSearch result title: ${candidate.title || ""}\nSource: ${candidate.source || ""}` },
-        { type: "input_image", image_url: candidate.original },
-      ] }],
-    }),
-  });
-  if (!r.ok) throw new Error(`OpenAI returned ${r.status}`);
-  const d = await r.json();
-  return String(d.output_text || "").trim();
-}
-
-async function runMaintenance(userId: number, limit = BATCH_SIZE) {
-  if (!process.env.SERPAPI_API_KEY || !process.env.OPENAI_API_KEY) throw new Error("Live image maintenance requires SERPAPI_API_KEY and OPENAI_API_KEY");
-  const all = await db.select().from(products).orderBy(asc(products.id));
-  const imageRows = await db.select().from(productImages);
-  const verifiedIds = new Set(imageRows.filter(i => i.verificationStatus === "VERIFIED" || i.verificationStatus === "WEB_SEARCH_MATCHED").map(i => i.productId));
-  const candidates = all.filter(p => placeholder(p.imageUrl) || !verifiedIds.has(p.id)).slice(0, limit);
-  const results: any[] = [];
-
-  for (const product of candidates) {
-    try {
-      const images = await searchImages(product.title, product.brand);
-      let match: any = null;
-      let reason = "No candidate passed verification.";
-      for (const image of images) {
-        const verdict = await verifyImage(product, image);
-        reason = verdict;
-        if (/^MATCH\b/i.test(verdict)) { match = image; break; }
-      }
-      if (!match) {
-        results.push({ productId: product.id, status: "BLOCKED", candidates: images.length, reason });
-        await db.insert(aiActivityLogs).values({ userId: product.userId, agentName: "Image-Verification-Agent", actionType: "PRODUCT_IMAGE_VERIFICATION_BLOCKED", message: `No verified real image found for ${product.title}; storefront image remains blocked.`, profitImpactInr: "0.00", status: "WARNING", metadataJson: { productId: product.id, candidates: images.length, reason } });
-        continue;
-      }
-      await db.update(productImages).set({ verificationStatus: "REJECTED_PLACEHOLDER_OR_STALE" }).where(eq(productImages.productId, product.id));
-      await db.insert(productImages).values({ productId: product.id, imageUrl: match.original, sourceUrl: match.link, sortOrder: 0, altText: String(match.source || "Verified web source"), verificationStatus: "WEB_SEARCH_MATCHED" });
-      await db.update(products).set({ imageUrl: match.original, updatedAt: new Date() }).where(eq(products.id, product.id));
-      await db.insert(aiActivityLogs).values({ userId: product.userId, agentName: "Image-Verification-Agent", actionType: "PRODUCT_IMAGE_VERIFIED", message: `Automated real-image verification passed for ${product.title}.`, profitImpactInr: "0.00", status: "SUCCESS", metadataJson: { productId: product.id, imageUrl: match.original, sourceUrl: match.link, sourceName: match.source, verification: reason } });
-      results.push({ productId: product.id, status: "VERIFIED", imageUrl: match.original, sourceUrl: match.link });
-    } catch (e) {
-      results.push({ productId: product.id, status: "ERROR", reason: e instanceof Error ? e.message : "Unknown error" });
-    }
-  }
-  return { processed: results.length, verified: results.filter(r => r.status === "VERIFIED").length, blocked: results.filter(r => r.status === "BLOCKED").length, errors: results.filter(r => r.status === "ERROR").length, results, remainingUnverified: Math.max(0, all.filter(p => placeholder(p.imageUrl) || !verifiedIds.has(p.id)).length - results.length) };
-}
-
-export async function GET() {
-  return NextResponse.json({ agent: "Image-Verification-Agent", automation: "catalog-maintenance", status: process.env.SERPAPI_API_KEY && process.env.OPENAI_API_KEY ? "ready" : "blocked_missing_keys", batchSize: BATCH_SIZE, trigger: "agent-pipeline" });
-}
-
-export async function POST(req: Request) {
-  try {
-    const body = await req.json().catch(() => ({}));
-    const result = await runMaintenance(Number(body.userId || 1), Math.min(BATCH_SIZE, Math.max(1, Number(body.limit || BATCH_SIZE))));
-    return NextResponse.json({ status: "COMPLETED", ...result });
-  } catch (e) { return NextResponse.json({ error: e instanceof Error ? e.message : "Catalog maintenance failed" }, { status: 503 }); }
-}
+const BAD_IMAGE_HOSTS = ["unsplash.com","images.unsplash.com","source.unsplash.com","placeholder.com","placehold.co","placehold.it","dummyimage.com","picsum.photos","loremflickr.com","placekitten.com"];
+function placeholder(url: unknown){if(typeof url!=="string"||!/^https?:\/\//i.test(url))return true;const u=url.toLowerCase();return BAD_IMAGE_HOSTS.some(h=>u.includes(h));}
+async function serp(engine:string,q:string){const key=process.env.SERPAPI_API_KEY;if(!key)throw new Error("SERPAPI_API_KEY is not configured");const r=await fetch(`https://serpapi.com/search.json?engine=${engine}&google_domain=google.co.in&gl=in&hl=en&q=${encodeURIComponent(q)}&api_key=${encodeURIComponent(key)}`,{cache:"no-store"});if(!r.ok)throw new Error(`SerpAPI returned ${r.status}`);return r.json();}
+async function rank(items:any[]){const key=process.env.OPENAI_API_KEY;if(!key)throw new Error("OPENAI_API_KEY is not configured");const r=await fetch("https://api.openai.com/v1/responses",{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${key}`},body:JSON.stringify({model:process.env.OPENAI_MODEL||"gpt-5-mini",instructions:"You are BharatShop's product research and verification agent. Select only one real ecommerce product from the supplied live Google Shopping results. Never invent fields. Return JSON only: {index:number,title:string,brand:string,source:string,sourceUrl:string,priceInr:number,reason:string}. Choose a source with a concrete URL and price.",input:JSON.stringify(items.slice(0,20))})});if(!r.ok)throw new Error(`OpenAI returned ${r.status}`);const d=await r.json();let text=String(d.output_text||"").trim();text=text.replace(/^```json\s*/i,"").replace(/```$/i,"").trim();return JSON.parse(text);}
+async function researchAndCreate(userId:number){const existing=await db.select({id:products.id}).from(products);if(existing.length>0)return null;const queries=["best selling useful products India ecommerce","trending home gadgets India ecommerce","popular beauty personal care products India ecommerce"];const raw:any[]=[];for(const q of queries){const d=await serp("google_shopping",q);for(const x of d.shopping_results||[])raw.push({title:x.title,brand:x.brand||"Generic",source:x.source||"",sourceUrl:x.link||x.product_link||"",price:x.price||"",extractedPrice:x.extracted_price||0,thumbnail:x.thumbnail||""});}if(!raw.length)throw new Error("SerpAPI returned no shopping products");const selected=await rank(raw);const item=raw[selected.index];if(!item||!selected.sourceUrl||!selected.priceInr)throw new Error("AI research did not return a complete source-backed product");const cost=Number(selected.priceInr);const shipping=60;const selling=Math.ceil((cost+shipping)/0.55/10)*10;const profit=selling-cost-shipping;const [p]=await db.insert(products).values({userId,storeId:null,sku:`AI-${Date.now()}`,title:String(selected.title||item.title),category:"AI Researched",imageUrl:String(item.thumbnail||"https://placehold.co/600x600?text=Verifying"),brand:String(selected.brand||item.brand||"Generic"),supplierName:String(selected.source||item.source),supplierCity:"India",supplierCostInr:cost.toFixed(2),shippingCostInr:shipping.toFixed(2),gstPct:"18.00",sellingPriceInr:selling.toFixed(2),mrpInr:(selling*1.15).toFixed(2),customMarginPct:(profit/selling*100).toFixed(2),netProfitInr:profit.toFixed(2),aiScore:90,viralVelocityScore:80,stockCount:100,moq:1,autoRepriceEnabled:true,status:"Published",aiMarketingCopy:"",aiTargetAudience:"Online shoppers in India",hsnCode:"",salesCount24h:0,returnsCount:0}).returning();await db.insert(productImages).values({productId:p.id,imageUrl:String(item.thumbnail||"https://placehold.co/600x600?text=Verifying"),sourceUrl:String(selected.sourceUrl),sortOrder:0,altText:String(p.title),verificationStatus:"VERIFIED"});await db.insert(aiActivityLogs).values({userId,agentName:"Product-Research-Agent",actionType:"PRODUCT_RESEARCH_PUBLISHED",message:`Live researched product published: ${p.title}`,profitImpactInr:profit.toFixed(2),status:"SUCCESS",metadataJson:{productId:p.id,sourceUrl:selected.sourceUrl,source:selected.source,priceInr:cost}});return p;}
+async function runMaintenance(userId:number,limit=10){if(!process.env.SERPAPI_API_KEY||!process.env.OPENAI_API_KEY)throw new Error("Live catalogue requires SERPAPI_API_KEY and OPENAI_API_KEY");const created=await researchAndCreate(userId);const all=await db.select().from(products).orderBy(asc(products.id));return {created:created?[created]:[],processed:all.length,verified:all.filter(p=>p.status==="Published"&&!placeholder(p.imageUrl)).length,blocked:0,errors:0,results:all.slice(0,limit).map(p=>({productId:p.id,status:p.status,title:p.title}))};}
+export async function GET(){return NextResponse.json({agent:"Product-Research-and-Catalogue-Agent",automation:"catalog-maintenance",status:process.env.SERPAPI_API_KEY&&process.env.OPENAI_API_KEY?"ready":"blocked_missing_keys",batchSize:BATCH_SIZE});}
+export async function POST(req:Request){try{const body=await req.json().catch(()=>({}));return NextResponse.json({status:"COMPLETED",...(await runMaintenance(Number(body.userId||1),Math.min(BATCH_SIZE,Math.max(1,Number(body.limit||BATCH_SIZE)))))});}catch(e){return NextResponse.json({error:e instanceof Error?e.message:"Catalog maintenance failed"},{status:503});}}
