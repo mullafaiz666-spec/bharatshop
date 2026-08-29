@@ -33,7 +33,7 @@ jobs:
             -X POST "$BHARATSHOP_URL/api/catalog/image-resolve" \
             -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" \
             -H "Content-Type: application/json" \
-            --data '{"limit":200}')
+            --data '{"limit":10}')
           echo "$response"
           RESPONSE="$response" node <<'NODE'
           const d = JSON.parse(process.env.RESPONSE);
