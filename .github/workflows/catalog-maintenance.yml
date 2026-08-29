@@ -1,16 +1,18 @@
 # Live catalog verification for product media and enrichment.
+# Intentionally manual-only while production routing/database stability is being verified.
 name: BharatShop Catalog Maintenance
 
 on:
-  schedule:
-    - cron: "17 * * * *"
   workflow_dispatch:
-  push:
-    branches: [main]
+
+concurrency:
+  group: bharatshop-catalog-maintenance
+  cancel-in-progress: true
 
 jobs:
   maintain-catalog:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
