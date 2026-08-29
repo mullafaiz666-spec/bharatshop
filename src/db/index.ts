@@ -11,13 +11,18 @@ const globalForDb = globalThis as typeof globalThis & {
 
 const isLocalDatabase = /(?:localhost|127\.0\.0\.1)(?::\d+)?(?:\/|$)/i.test(rawDatabaseUrl);
 
-// Vercel connects to the Render database through Render's external endpoint.
-// Always use TLS there and normalize the connection-string SSL mode.
+// The Render URL can contain sslmode=require/prefer. node-postgres parses SSL
+// query parameters from the URL and those values override the explicit `ssl`
+// object. Remove URL-level SSL options so the Node TLS configuration below is
+// authoritative and cannot be accidentally replaced by an inherited URL option.
 let databaseUrl = rawDatabaseUrl;
 if (!isLocalDatabase) {
   try {
     const parsed = new URL(rawDatabaseUrl);
-    parsed.searchParams.set("sslmode", "require");
+    parsed.searchParams.delete("sslmode");
+    parsed.searchParams.delete("sslcert");
+    parsed.searchParams.delete("sslkey");
+    parsed.searchParams.delete("sslrootcert");
     databaseUrl = parsed.toString();
   } catch {
     // Let pg report malformed connection strings explicitly.
