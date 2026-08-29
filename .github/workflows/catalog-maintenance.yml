@@ -1,32 +1,70 @@
 name: BharatShop Catalog Maintenance
+
 on:
   schedule:
     - cron: "17 * * * *"
   workflow_dispatch:
   push:
     branches: [main]
+
 jobs:
   maintain-catalog:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Run live catalog bootstrap
         env:
           BHARATSHOP_URL: ${{ secrets.BHARATSHOP_URL }}
           BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
         run: |
+          set -euo pipefail
           test -n "$BHARATSHOP_URL"
           test -n "$BHARATSHOP_AUTOMATION_TOKEN"
           node scripts/catalog-live-bootstrap.mjs
+
       - name: Resolve complete product media
         env:
           BHARATSHOP_URL: ${{ secrets.BHARATSHOP_URL }}
           BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
         run: |
-          curl --fail-with-body --retry 3 --retry-delay 5 -X POST "$BHARATSHOP_URL/api/catalog/image-resolve" -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" -H "Content-Type: application/json" --data '{"limit":200}'
+          set -euo pipefail
+          response=$(curl --silent --show-error --fail-with-body --retry 3 --retry-delay 5 \
+            -X POST "$BHARATSHOP_URL/api/catalog/image-resolve" \
+            -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data '{"limit":200}')
+          echo "$response"
+          RESPONSE="$response" node <<'NODE'
+          const d = JSON.parse(process.env.RESPONSE);
+          const badResults = Array.isArray(d.results)
+            ? d.results.filter(x => ["ERROR", "SEARCH_ERROR"].includes(String(x.status)))
+            : [];
+          if (d.error || Number(d.errors || 0) > 0 || badResults.length > 0) {
+            console.error("Catalog media resolver reported an application failure:", JSON.stringify({error:d.error, errors:d.errors, badResults}, null, 2));
+            process.exit(1);
+          }
+          NODE
+
       - name: Enrich clothing sizes and variants
         env:
           BHARATSHOP_URL: ${{ secrets.BHARATSHOP_URL }}
           BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
         run: |
-          curl --fail-with-body --retry 3 --retry-delay 5 -X POST "$BHARATSHOP_URL/api/catalog/fashion-enrich" -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" -H "Content-Type: application/json" --data '{"limit":200}'
+          set -euo pipefail
+          response=$(curl --silent --show-error --fail-with-body --retry 3 --retry-delay 5 \
+            -X POST "$BHARATSHOP_URL/api/catalog/fashion-enrich" \
+            -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data '{"limit":200}')
+          echo "$response"
+          RESPONSE="$response" node <<'NODE'
+          const d = JSON.parse(process.env.RESPONSE);
+          const badResults = Array.isArray(d.results)
+            ? d.results.filter(x => ["ERROR", "SEARCH_ERROR"].includes(String(x.status)))
+            : [];
+          if (d.error || Number(d.errors || 0) > 0 || badResults.length > 0) {
+            console.error("Fashion enrichment reported an application failure:", JSON.stringify({error:d.error, errors:d.errors, badResults}, null, 2));
+            process.exit(1);
+          }
+          NODE
