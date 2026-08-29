@@ -1,1 +1,1 @@
-Production trigger: final automation gate is ready for deployment.
+Production trigger: Vercel is the primary application runtime (frontend + /api/*) backed by the existing production PostgreSQL. Render remains reserved for genuinely long-running/background workloads. Deployment verification must pass /api/health, /api/storefront/products, database connectivity, and storefront behavior before production is declared operational.
