@@ -71,7 +71,10 @@ pool.query = (async (...args: any[]) => {
 
       const freshPool = makePool();
       try {
-        return await freshPool.query(...args);
+        // Pool.query has several overloads; this wrapper deliberately forwards
+        // the original argument tuple unchanged, so use the implementation
+        // signature here rather than trying to model every pg overload.
+        return await (freshPool.query as (...queryArgs: any[]) => Promise<unknown>)(...args);
       } finally {
         await freshPool.end().catch(() => undefined);
       }
