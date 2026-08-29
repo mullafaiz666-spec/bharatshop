@@ -12,7 +12,7 @@ const globalForDb = globalThis as typeof globalThis & {
 const isLocalDatabase = /(?:localhost|127\.0\.0\.1)(?::\d+)?(?:\/|$)/i.test(rawDatabaseUrl);
 
 // Vercel connects to the Render database through Render's external endpoint.
-// Always use TLS there and normalize missing/legacy sslmode settings.
+// Always use TLS there and normalize the connection-string SSL mode.
 let databaseUrl = rawDatabaseUrl;
 if (!isLocalDatabase) {
   try {
@@ -24,11 +24,10 @@ if (!isLocalDatabase) {
   }
 }
 
-// Production PostgreSQL can terminate idle/existing sockets during maintenance,
-// failover, or outbound-network changes. In Vercel serverless functions, prefer a
-// fresh verified socket for every query over retaining a connection that may have
-// been reset upstream. This is intentionally conservative because production DB
-// data is the source of truth and must never be recreated or repaired implicitly.
+// Render can terminate an active external TCP socket during maintenance,
+// failover, or outbound-network changes. Keep each connection disposable and
+// retry only the transient connection failures. Production data remains strictly
+// read/write through the existing application code; this layer never mutates data.
 const pool = globalForDb.__bharatShopPostgresPool ?? new Pool({
   connectionString: databaseUrl,
   ssl: isLocalDatabase ? undefined : { rejectUnauthorized: false },
@@ -46,6 +45,26 @@ pool.on("error", (error) => {
     error instanceof Error ? error.message : error,
   );
 });
+
+const originalQuery = pool.query.bind(pool);
+const isTransientConnectionError = (error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error);
+  return /connection terminated|connection reset|ECONNRESET|EPIPE|socket hang up|Connection terminated unexpectedly/i.test(message);
+};
+
+pool.query = (async (...args: any[]) => {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await originalQuery(...args);
+    } catch (error) {
+      lastError = error;
+      if (!isTransientConnectionError(error) || attempt === 2) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 150 * (attempt + 1)));
+    }
+  }
+  throw lastError;
+}) as typeof pool.query;
 
 globalForDb.__bharatShopPostgresPool = pool;
 
