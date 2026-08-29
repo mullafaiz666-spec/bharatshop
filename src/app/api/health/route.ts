@@ -8,7 +8,11 @@ export async function GET() {
     await db.execute(sql`select 1`);
     return Response.json({ ok: true });
   } catch (error) {
-    console.error("Production database health check failed", error instanceof Error ? error.message : error);
+    const cause = error instanceof Error && "cause" in error ? (error as Error & { cause?: unknown }).cause : undefined;
+    console.error("Production database health check failed", {
+      message: error instanceof Error ? error.message : String(error),
+      cause: cause instanceof Error ? cause.message : String(cause ?? ""),
+    });
     return Response.json({ ok: false }, { status: 500 });
   }
 }
