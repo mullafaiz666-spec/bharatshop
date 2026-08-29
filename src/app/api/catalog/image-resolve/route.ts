@@ -7,83 +7,20 @@ export const dynamic = "force-dynamic";
 const STOP=new Set(["the","with","and","for","from","pack","piece","pieces","new","best","online","india","buy","sale","free"]);
 const FASHION=/(fashion|women|woman|men|man|saree|sari|kurti|kurta|dress|shirt|tshirt|t-shirt|jeans|trouser|petticoat|shapewear|lehenga|salwar|apparel|clothing|footwear|shoe|sandal|jewellery|jewelry)/i;
 const BAD=/(unsplash|placeholder|placehold|picsum|loremflickr|placekitten)/i;
-const SERP_MIN_INTERVAL_MS=Math.max(750,Number(process.env.SERPAPI_MIN_INTERVAL_MS||1200));
-const SERP_MAX_RETRIES=Math.max(1,Math.min(5,Number(process.env.SERPAPI_MAX_RETRIES||4)));
-let lastSerpRequestAt=0;
-let serpQueue=Promise.resolve();
-type ImageSearchResult={original?:string;link?:string;title?:string;source?:string;};
-type VideoSearchResult={link?:string;title?:string;source?:string;thumbnail?:string;};
+const SEARCH_URL=(process.env.IMAGE_SEARCH_URL||process.env.SEARXNG_URL||"https://bharatshop-searxng.onrender.com").replace(/\/$/,"");
+const MIN_INTERVAL_MS=Math.max(750,Number(process.env.IMAGE_SEARCH_MIN_INTERVAL_MS||1200));
+const MAX_RETRIES=Math.max(1,Math.min(5,Number(process.env.IMAGE_SEARCH_MAX_RETRIES||4)));
+let lastRequestAt=0;
+let requestQueue=Promise.resolve();
+type ImageSearchResult={url?:string;thumbnail_src?:string;img_src?:string;title?:string;source?:string;source_url?:string;template?:string;};
+type VideoSearchResult={url?:string;title?:string;source?:string;thumbnail?:string;};
 function tokens(s:string){return String(s||"").toLowerCase().replace(/[^a-z0-9]+/g," ").split(/\s+/).filter(x=>x.length>2&&!STOP.has(x));}
-function score(item:ImageSearchResult,p:any){const ts=tokens(p.title);const hay=`${item.title||""} ${item.source||""} ${item.link||""}`.toLowerCase();const hits=ts.filter(t=>hay.includes(t)).length;const ratio=ts.length?hits/ts.length:0;const brand=String(p.brand||"").trim().toLowerCase();return ratio+(brand&&brand!=="generic"&&hay.includes(brand)?0.25:0);}
-function videoScore(item:VideoSearchResult,p:any){const ts=tokens(`${p.title} ${p.brand!=="Generic"?p.brand:""}`);const hay=`${item.title||""} ${item.source||""} ${item.link||""}`.toLowerCase();return ts.length?ts.filter(t=>hay.includes(t)).length/ts.length:0;}
+function score(item:ImageSearchResult,p:any){const ts=tokens(p.title);const hay=`${item.title||""} ${item.source||""} ${item.source_url||""}`.toLowerCase();const hits=ts.filter(t=>hay.includes(t)).length;const ratio=ts.length?hits/ts.length:0;const brand=String(p.brand||"").trim().toLowerCase();return ratio+(brand&&brand!=="generic"&&hay.includes(brand)?0.25:0);}
+function videoScore(item:VideoSearchResult,p:any){const ts=tokens(`${p.title} ${p.brand!=="Generic"?p.brand:""}`);const hay=`${item.title||""} ${item.source||""} ${item.url||""}`.toLowerCase();return ts.length?ts.filter(t=>hay.includes(t)).length/ts.length:0;}
 function sleep(ms:number){return new Promise(resolve=>setTimeout(resolve,ms));}
-async function throttleSerp(){
-  const previous=serpQueue;
-  let release!:()=>void;
-  serpQueue=new Promise<void>(resolve=>{release=resolve;});
-  await previous;
-  const wait=Math.max(0,SERP_MIN_INTERVAL_MS-(Date.now()-lastSerpRequestAt));
-  if(wait)await sleep(wait);
-  lastSerpRequestAt=Date.now();
-  release();
-}
-async function searchSerp(q:string,key:string,engine:"google_images"|"google_videos"){
-  let lastError="SerpAPI request failed";
-  for(let attempt=0;attempt<=SERP_MAX_RETRIES;attempt++){
-    await throttleSerp();
-    const u=new URL("https://serpapi.com/search.json");
-    u.searchParams.set("engine",engine);u.searchParams.set("q",q);u.searchParams.set("hl","en");u.searchParams.set("gl","in");u.searchParams.set("api_key",key);
-    const r=await fetch(u,{cache:"no-store"});
-    if(r.ok){const d=await r.json();return d;}
-    const retryAfter=Number(r.headers.get("retry-after")||0);
-    let detail="";
-    try{detail=(await r.text()).slice(0,500);}catch{}
-    lastError=`SerpAPI ${engine.replace("google_","")} ${r.status}${detail?` — ${detail.replace(/\s+/g," ")}`:""}`;
-    if(r.status!==429||attempt>=SERP_MAX_RETRIES)throw new Error(lastError);
-    // A 429 caused by account/search exhaustion will not recover by waiting. Surface it
-    // immediately instead of wasting quota/retry attempts; transient rate limits still back off.
-    if(/run out of searches|searches left|quota|account.*limit|monthly.*limit|plan.*limit|insufficient/i.test(detail)){
-      throw new Error(`SerpAPI account/quota limit (HTTP 429) — ${detail.replace(/\s+/g," ")}`);
-    }
-    const backoff=Math.min(30000,Math.max(retryAfter*1000,2000*Math.pow(2,attempt)));
-    console.warn(`SerpAPI rate limited; retrying in ${backoff}ms (attempt ${attempt+1}/${SERP_MAX_RETRIES})`);
-    await sleep(backoff);
-  }
-  throw new Error(lastError);
-}
-async function searchImages(q:string,key:string){const d=await searchSerp(q,key,"google_images");return Array.isArray(d.images_results)?d.images_results as ImageSearchResult[]:[];}
-async function searchVideos(q:string,key:string){const d=await searchSerp(q,key,"google_videos");return Array.isArray(d.video_results)?d.video_results as VideoSearchResult[]:[];}
-export async function POST(req:Request){
- try{
-  const token=req.headers.get("authorization")?.replace(/^Bearer\s+/i,"");if(!process.env.BHARATSHOP_AUTOMATION_TOKEN||token!==process.env.BHARATSHOP_AUTOMATION_TOKEN)return NextResponse.json({error:"Unauthorized"},{status:401});
-  const key=process.env.SERPAPI_API_KEY;if(!key)return NextResponse.json({error:"SERPAPI_API_KEY is not configured"},{status:503});
-  const body=await req.json().catch(()=>({}));const limit=Math.max(1,Math.min(25,Number(body.limit||10)));
-  const all=await db.select().from(products).where(eq(products.status,"Published")).orderBy(asc(products.id));const imgs=await db.select().from(productImages);const counts=new Map<number,number>();
-  for(const x of imgs){if(["WEB_IMAGE_EXACT_MATCH","WEB_SEARCH_MATCHED","VERIFIED"].includes(String(x.verificationStatus))&&!BAD.test(x.imageUrl))counts.set(x.productId,(counts.get(x.productId)||0)+1);}
-  const candidates=all.filter(p=>(counts.get(p.id)||0)<8).slice(0,limit);let resolved=0,rejected=0,videosFound=0;const results:Array<Record<string,unknown>>=[];
-  for(const p of candidates){
-   const fashion=FASHION.test(`${p.category} ${p.title}`);const base=`${p.title} ${p.brand!=="Generic"?p.brand:""}`;
-   const queries=[`${base} exact product official image front`,`${base} exact product back side angle image`,`${base} exact product box packaging contents`,`${base} exact product colour variants colors`];
-   let found:ImageSearchResult[]=[];let videos:VideoSearchResult[]=[];
-   try{for(const q of queries)found.push(...await searchImages(q,key));videos=await searchVideos(`${base} official product video demo unboxing`,key);}catch(e){const message=e instanceof Error?e.message:"search failed";results.push({productId:p.id,status:"SEARCH_ERROR",error:message,retryable:/429/.test(message),quotaExhausted:/account\/quota limit/i.test(message)});continue;}
-   const threshold=fashion?0.70:0.45;
-   const ranked=found.filter(x=>x.original&&/^https?:\/\//i.test(x.original)&&x.link&&!BAD.test(x.original)).map(x=>({...x,score:score(x,p)})).sort((a,b)=>b.score-a.score);
-   const selected:any[]=[];const seen=new Set<string>();
-   for(const item of ranked){if(selected.length>=8)break;if(Number(item.score)<threshold||seen.has(item.original!))continue;seen.add(item.original!);selected.push(item);}
-   if(!selected.length){rejected++;results.push({productId:p.id,status:"NO_EXACT_IMAGE",score:Number((ranked[0]?.score||0).toFixed(3)),fashion});continue;}
-   await db.delete(productImages).where(eq(productImages.productId,p.id));
-   await db.insert(productImages).values(selected.map((item:any,index:number)=>({productId:p.id,imageUrl:item.original!,sourceUrl:item.link!,sortOrder:index,altText:item.title||`${p.title} customer view ${index+1}`,verificationStatus:"WEB_IMAGE_EXACT_MATCH"})));
-   const rankedVideos=videos.filter(v=>v.link&&/^https?:\/\//i.test(v.link)).map(v=>({...v,score:videoScore(v,p)})).sort((a,b)=>b.score-a.score).slice(0,3);
-   if(rankedVideos.length){
-    const existing=await db.select().from(productDetails).where(eq(productDetails.productId,p.id)).limit(1);const old=existing[0]?.specificationsJson&&typeof existing[0].specificationsJson==="object"&&!Array.isArray(existing[0].specificationsJson)?existing[0].specificationsJson as Record<string,unknown>:{};
-    const media={...(old.media as Record<string,unknown>||{}),videos:rankedVideos.map(v=>({url:v.link,title:v.title||p.title,source:v.source||"Web video",thumbnail:v.thumbnail||""}))};
-    if(existing[0])await db.update(productDetails).set({specificationsJson:{...old,media},updatedAt:new Date()}).where(eq(productDetails.productId,p.id));
-    else await db.insert(productDetails).values({productId:p.id,specificationsJson:{media},verificationStatus:"VERIFIED",updatedAt:new Date()});
-    videosFound++;
-   }
-   await db.update(products).set({imageUrl:selected[0].original!,updatedAt:new Date()}).where(eq(products.id,p.id));resolved++;results.push({productId:p.id,status:"COMPLETE_MEDIA_RESOLVED",imageCount:selected.length,videoCount:rankedVideos.length,scores:selected.map(x=>Number(x.score.toFixed(3))),sources:selected.map(x=>x.link)});
-  }
-  const failed=results.filter(x=>x.status==="SEARCH_ERROR").length;
-  return NextResponse.json({status:"COMPLETED",processed:candidates.length,resolved,rejected,failed,videosFound,results,policy:"Every published product is onboarded with up to eight high-confidence exact product images covering front, back/side, packaging/contents and available colour variants. Matching product videos are discovered when available and stored for storefront playback. No placeholder images are accepted."});
- }catch(e){return NextResponse.json({error:e instanceof Error?e.message:"Media resolver failed"},{status:500});}
-}
+async function throttle(){const previous=requestQueue;let release!:()=>void;requestQueue=new Promise<void>(resolve=>{release=resolve;});await previous;const wait=Math.max(0,MIN_INTERVAL_MS-(Date.now()-lastRequestAt));if(wait)await sleep(wait);lastRequestAt=Date.now();release();}
+async function searchSearx(q:string,category:"images"|"videos"){let lastError="SearXNG request failed";for(let attempt=0;attempt<=MAX_RETRIES;attempt++){await throttle();const u=new URL(`${SEARCH_URL}/search`);u.searchParams.set("q",q);u.searchParams.set("categories",category);u.searchParams.set("format","json");u.searchParams.set("language","en");const r=await fetch(u,{cache:"no-store",headers:{accept:"application/json"}});if(r.ok)return await r.json();let detail="";try{detail=(await r.text()).slice(0,500);}catch{}lastError=`SearXNG ${category} ${r.status}${detail?` — ${detail.replace(/\s+/g," ")}`:""}`;if(r.status!==429||attempt>=MAX_RETRIES)throw new Error(lastError);const retryAfter=Number(r.headers.get("retry-after")||0);const backoff=Math.min(30000,Math.max(retryAfter*1000,2000*Math.pow(2,attempt)));console.warn(`SearXNG rate limited; retrying in ${backoff}ms (attempt ${attempt+1}/${MAX_RETRIES})`);await sleep(backoff);}throw new Error(lastError);}
+function imageUrl(x:ImageSearchResult){const u=x.img_src||x.url;return u&&/^https?:\/\//i.test(u)?u:"";}
+async function searchImages(q:string){const d=await searchSearx(q,"images");return Array.isArray(d.results)?d.results as ImageSearchResult[]:[];}
+async function searchVideos(q:string){const d=await searchSearx(q,"videos");return Array.isArray(d.results)?d.results.map((x:any)=>({url:x.url,title:x.title,source:x.engine_data?.source||x.source,thumbnail:x.thumbnail} as VideoSearchResult)):[];}
+export async function POST(req:Request){try{const token=req.headers.get("authorization")?.replace(/^Bearer\s+/i,"");if(!process.env.BHARATSHOP_AUTOMATION_TOKEN||token!==process.env.BHARATSHOP_AUTOMATION_TOKEN)return NextResponse.json({error:"Unauthorized"},{status:401});const body=await req.json().catch(()=>({}));const limit=Math.max(1,Math.min(25,Number(body.limit||10)));const all=await db.select().from(products).where(eq(products.status,"Published")).orderBy(asc(products.id));const imgs=await db.select().from(productImages);const counts=new Map<number,number>();for(const x of imgs){if(["WEB_IMAGE_EXACT_MATCH","WEB_SEARCH_MATCHED","VERIFIED"].includes(String(x.verificationStatus))&&!BAD.test(x.imageUrl))counts.set(x.productId,(counts.get(x.productId)||0)+1);}const candidates=all.filter(p=>(counts.get(p.id)||0)<8).slice(0,limit);let resolved=0,rejected=0,videosFound=0;const results:Array<Record<string,unknown>>=[];for(const p of candidates){const fashion=FASHION.test(`${p.category} ${p.title}`);const base=`${p.title} ${p.brand!=="Generic"?p.brand:""}`;const queries=[`${base} exact product official image front`,`${base} exact product back side angle image`,`${base} exact product box packaging contents`,`${base} exact product colour variants colors`];let found:ImageSearchResult[]=[];let videos:VideoSearchResult[]=[];try{for(const q of queries)found.push(...await searchImages(q));videos=await searchVideos(`${base} official product video demo unboxing`);}catch(e){const message=e instanceof Error?e.message:"search failed";results.push({productId:p.id,status:"SEARCH_ERROR",error:message,retryable:/429/.test(message)});continue;}const threshold=fashion?0.70:0.45;const ranked=found.filter(x=>imageUrl(x)&&x.source_url&&!BAD.test(imageUrl(x))).map(x=>({...x,score:score(x,p)})).sort((a,b)=>b.score-a.score);const selected:any[]=[];const seen=new Set<string>();for(const item of ranked){if(selected.length>=8)break;const url=imageUrl(item);if(Number(item.score)<threshold||seen.has(url))continue;seen.add(url);selected.push({...item,url});}if(selected.length<4){rejected++;results.push({productId:p.id,status:"INSUFFICIENT_EXACT_IMAGES",imageCount:selected.length,score:Number((ranked[0]?.score||0).toFixed(3)),fashion});continue;}await db.delete(productImages).where(eq(productImages.productId,p.id));await db.insert(productImages).values(selected.map((item:any,index:number)=>({productId:p.id,imageUrl:item.url,sourceUrl:item.source_url!,sortOrder:index,altText:item.title||`${p.title} customer view ${index+1}`,verificationStatus:"WEB_IMAGE_EXACT_MATCH"})));const rankedVideos=videos.filter(v=>v.url&&/^https?:\/\//i.test(v.url)).map(v=>({...v,score:videoScore(v,p)})).sort((a,b)=>b.score-a.score).slice(0,3);if(rankedVideos.length){const existing=await db.select().from(productDetails).where(eq(productDetails.productId,p.id)).limit(1);const old=existing[0]?.specificationsJson&&typeof existing[0].specificationsJson==="object"&&!Array.isArray(existing[0].specificationsJson)?existing[0].specificationsJson as Record<string,unknown>:{};const media={...(old.media as Record<string,unknown>||{}),videos:rankedVideos.map(v=>({url:v.url,title:v.title||p.title,source:v.source||"Web video",thumbnail:v.thumbnail||""}))};if(existing[0])await db.update(productDetails).set({specificationsJson:{...old,media},updatedAt:new Date()}).where(eq(productDetails.productId,p.id));else await db.insert(productDetails).values({productId:p.id,specificationsJson:{media},verificationStatus:"VERIFIED",updatedAt:new Date()});videosFound++;}await db.update(products).set({imageUrl:selected[0].url,updatedAt:new Date()}).where(eq(products.id,p.id));resolved++;results.push({productId:p.id,status:"COMPLETE_MEDIA_RESOLVED",imageCount:selected.length,videoCount:rankedVideos.length,scores:selected.map(x=>Number(x.score.toFixed(3))),sources:selected.map(x=>x.source_url)});}const failed=results.filter(x=>x.status==="SEARCH_ERROR").length;return NextResponse.json({status:"COMPLETED",provider:"searxng",processed:candidates.length,resolved,rejected,failed,videosFound,results,policy:"Every published product requires 4–8 high-confidence exact product images covering front, back/side, packaging/contents and available colour variants. No placeholder images are accepted."});}catch(e){return NextResponse.json({error:e instanceof Error?e.message:"Media resolver failed"},{status:500});}}
