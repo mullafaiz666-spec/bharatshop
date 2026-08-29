@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { products, productImages, aiActivityLogs } from "@/db/schema";
-import { eq, ilike } from "drizzle-orm";
+import { ilike } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -77,7 +77,7 @@ export async function POST(req: Request) {
         const sourceUrl = String(item.product_link || item.link || "").trim();
         const sourcePrice = priceOf(item);
         const imageUrl = imageOf(item);
-        if (!title || !sourcePrice || !/^https?:\/\//i.test(imageUrl)) continue;
+        if (!title || !sourcePrice || !/^https?:\/\//i.test(imageUrl) || !/^https?:\/\//i.test(sourceUrl)) continue;
 
         const [existing] = await db.select().from(products).where(ilike(products.title, title)).limit(1);
         if (existing) continue;
@@ -112,8 +112,8 @@ export async function POST(req: Request) {
           viralVelocityScore: 85,
           stockCount: 100,
           moq: 1,
-          status: "Published",
-          aiMarketingCopy: `${title} — verified product sourced from ${sourceName}. Buy now with BharatShop delivery.` ,
+          status: "CEO_PENDING",
+          aiMarketingCopy: `${title} — verified product sourced from ${sourceName}.`,
           aiTargetAudience: "Indian online shoppers",
         }).returning();
 
@@ -129,22 +129,22 @@ export async function POST(req: Request) {
         await db.insert(aiActivityLogs).values({
           userId,
           agentName: "AI-Product-Research-Agent",
-          actionType: "PRODUCT_RESEARCH_VERIFIED_PUBLISHED",
-          message: `Researched, image-verified and published ${title} from ${sourceName}.`,
+          actionType: "PRODUCT_RESEARCH_VERIFIED_PENDING_CEO",
+          message: `Researched and image-verified ${title}; waiting for CEO verification before storefront publication.`,
           profitImpactInr: profit.toFixed(2),
           status: "SUCCESS",
-          metadataJson: { productId: product.id, query, sourceName, sourceUrl, sourcePrice, sellingPrice, marginPct: margin },
+          metadataJson: { productId: product.id, query, sourceName, sourceUrl, sourcePrice, sellingPrice, marginPct: margin, gate: "CEO" },
         });
-        created.push({ id: product.id, title, sourceName, sourcePrice, sellingPrice, marginPct: Number(margin.toFixed(2)) });
+        created.push({ id: product.id, title, sourceName, sourcePrice, sellingPrice, marginPct: Number(margin.toFixed(2)), status: "CEO_PENDING" });
       }
     }
 
-    return NextResponse.json({ status: "COMPLETED", researched: created.length, products: created });
+    return NextResponse.json({ status: "COMPLETED", researched: created.length, products: created, nextGate: "CEO" });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Product research failed" }, { status: 503 });
   }
 }
 
 export async function GET() {
-  return NextResponse.json({ agent: "AI-Product-Research-Agent", status: process.env.SERPAPI_API_KEY && process.env.OPENAI_API_KEY ? "ready" : "blocked_missing_keys" });
+  return NextResponse.json({ agent: "AI-Product-Research-Agent", status: process.env.SERPAPI_API_KEY && process.env.OPENAI_API_KEY ? "ready" : "blocked_missing_keys", publicationGate: "CEO" });
 }
