@@ -1,15 +1,11 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // IMAGE RESOLVER — Chain 1: turns a product into a real, verified image
-// 1. Build a clean search query from brand + title
-// 2. Ask SearXNG for image results
-// 3. Take the first plausible result, persist it to product_images
-// 4. If SearXNG has nothing usable, fall back to a built-in Unsplash pool
-//    (still recorded in product_images so the pipeline is fully auditable)
-//
-// NOTE: this file intentionally does NOT import from productEngine.ts —
-// that module changes independently (CEO/admin features etc.) and a
-// missing/renamed export there previously broke the production build.
-// The fallback pool below is self-contained.
+// Written against the ACTUAL product_images schema on main:
+//   id, productId, imageUrl, sourceUrl, sortOrder, altText,
+//   verificationStatus, createdAt
+// There is no sourceEngine/thumbnailUrl/width/height/status column, so we
+// repurpose verificationStatus ("VERIFIED" | "FALLBACK") to record whether
+// the image came from live SearXNG search or the static fallback pool.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { db } from "@/db";
@@ -69,7 +65,7 @@ export async function resolveImageForProduct(product: {
   const query = buildQuery(product.title, product.brand);
   const results = await searxngImageSearch(query, { limit: 5 });
 
-  let chosen: { url: string; thumbnailUrl?: string; sourceUrl?: string; width?: number; height?: number } | null = null;
+  let chosen: { url: string; sourceUrl?: string } | null = null;
   let sourceEngine: "searxng" | "unsplash_fallback" = "unsplash_fallback";
 
   if (results.length > 0) {
@@ -82,14 +78,9 @@ export async function resolveImageForProduct(product: {
   await db.insert(productImages).values({
     productId: product.id,
     imageUrl: finalUrl,
-    thumbnailUrl: chosen?.thumbnailUrl ?? null,
-    sourceEngine,
-    sourceUrl: chosen?.sourceUrl ?? null,
-    searchQuery: query,
-    isPrimary: true,
-    width: chosen?.width ?? null,
-    height: chosen?.height ?? null,
-    status: "RESOLVED",
+    sourceUrl: chosen?.sourceUrl ?? finalUrl,
+    altText: product.title ?? "",
+    verificationStatus: sourceEngine === "searxng" ? "VERIFIED" : "FALLBACK",
   });
 
   await db.update(products)

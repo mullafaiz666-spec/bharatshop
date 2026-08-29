@@ -9,7 +9,7 @@ import { isSearxngConfigured } from "@/lib/searxng";
 export const maxDuration = 60;
 
 // GET — image pipeline status: how many products have a SearXNG-resolved
-// image vs a static fallback vs nothing resolved yet.
+// image ("VERIFIED") vs a static fallback ("FALLBACK") vs nothing yet.
 export async function GET() {
   await ensureDemoDataSeeded();
 
@@ -17,10 +17,10 @@ export async function GET() {
   const [totalImages] = await db.select({ count: sql<number>`count(*)::int` }).from(productImages);
   const [searxngCount] = await db.select({ count: sql<number>`count(*)::int` })
     .from(productImages)
-    .where(eq(productImages.sourceEngine, "searxng"));
+    .where(eq(productImages.verificationStatus, "VERIFIED"));
   const [fallbackCount] = await db.select({ count: sql<number>`count(*)::int` })
     .from(productImages)
-    .where(eq(productImages.sourceEngine, "unsplash_fallback"));
+    .where(eq(productImages.verificationStatus, "FALLBACK"));
 
   const resolvedProductIds = await db.selectDistinct({ productId: productImages.productId }).from(productImages);
 
