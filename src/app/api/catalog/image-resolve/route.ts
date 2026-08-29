@@ -36,8 +36,15 @@ async function searchSerp(q:string,key:string,engine:"google_images"|"google_vid
     const r=await fetch(u,{cache:"no-store"});
     if(r.ok){const d=await r.json();return d;}
     const retryAfter=Number(r.headers.get("retry-after")||0);
-    lastError=`SerpAPI ${engine.replace("google_","")} ${r.status}`;
+    let detail="";
+    try{detail=(await r.text()).slice(0,500);}catch{}
+    lastError=`SerpAPI ${engine.replace("google_","")} ${r.status}${detail?` — ${detail.replace(/\s+/g," ")}`:""}`;
     if(r.status!==429||attempt>=SERP_MAX_RETRIES)throw new Error(lastError);
+    // A 429 caused by account/search exhaustion will not recover by waiting. Surface it
+    // immediately instead of wasting quota/retry attempts; transient rate limits still back off.
+    if(/run out of searches|searches left|quota|account.*limit|monthly.*limit|plan.*limit|insufficient/i.test(detail)){
+      throw new Error(`SerpAPI account/quota limit (HTTP 429) — ${detail.replace(/\s+/g," ")}`);
+    }
     const backoff=Math.min(30000,Math.max(retryAfter*1000,2000*Math.pow(2,attempt)));
     console.warn(`SerpAPI rate limited; retrying in ${backoff}ms (attempt ${attempt+1}/${SERP_MAX_RETRIES})`);
     await sleep(backoff);
@@ -58,7 +65,7 @@ export async function POST(req:Request){
    const fashion=FASHION.test(`${p.category} ${p.title}`);const base=`${p.title} ${p.brand!=="Generic"?p.brand:""}`;
    const queries=[`${base} exact product official image front`,`${base} exact product back side angle image`,`${base} exact product box packaging contents`,`${base} exact product colour variants colors`];
    let found:ImageSearchResult[]=[];let videos:VideoSearchResult[]=[];
-   try{for(const q of queries)found.push(...await searchImages(q,key));videos=await searchVideos(`${base} official product video demo unboxing`,key);}catch(e){const message=e instanceof Error?e.message:"search failed";results.push({productId:p.id,status:"SEARCH_ERROR",error:message,retryable:/429/.test(message)});continue;}
+   try{for(const q of queries)found.push(...await searchImages(q,key));videos=await searchVideos(`${base} official product video demo unboxing`,key);}catch(e){const message=e instanceof Error?e.message:"search failed";results.push({productId:p.id,status:"SEARCH_ERROR",error:message,retryable:/429/.test(message),quotaExhausted:/account\/quota limit/i.test(message)});continue;}
    const threshold=fashion?0.70:0.45;
    const ranked=found.filter(x=>x.original&&/^https?:\/\//i.test(x.original)&&x.link&&!BAD.test(x.original)).map(x=>({...x,score:score(x,p)})).sort((a,b)=>b.score-a.score);
    const selected:any[]=[];const seen=new Set<string>();
