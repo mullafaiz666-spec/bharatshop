@@ -1,0 +1,1 @@
+Production verification: PostgreSQL sockets are recycled aggressively on Vercel to prevent stale external-DB connections.
