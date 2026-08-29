@@ -5,7 +5,7 @@ import {
   automationRules, productRefreshLogs, marketingCampaigns,
   storefrontOrders, shopifySyncLogs, aiActivityLogs,
 } from "@/db/schema";
-import { sql } from "drizzle-orm";
+import { sql, eq } from "drizzle-orm";
 import { isSearxngConfigured } from "@/lib/searxng";
 
 export const dynamic = "force-dynamic";
@@ -32,8 +32,8 @@ export async function GET() {
       db.select({ n: sql<number>`count(*)::int` }).from(storefrontOrders),
       db.select({ n: sql<number>`count(*)::int` }).from(shopifySyncLogs),
       db.select({ n: sql<number>`count(*)::int` }).from(aiActivityLogs),
-      db.select({ n: sql<number>`count(*)::int` }).from(productImages).where(sql`${productImages.sourceEngine} = 'searxng'`),
-      db.select({ n: sql<number>`count(*)::int` }).from(productImages).where(sql`${productImages.sourceEngine} = 'unsplash_fallback'`),
+      db.select({ n: sql<number>`count(*)::int` }).from(productImages).where(eq(productImages.verificationStatus, "VERIFIED")),
+      db.select({ n: sql<number>`count(*)::int` }).from(productImages).where(eq(productImages.verificationStatus, "FALLBACK")),
     ]);
 
     return NextResponse.json({
