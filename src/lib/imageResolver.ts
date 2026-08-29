@@ -3,15 +3,44 @@
 // 1. Build a clean search query from brand + title
 // 2. Ask SearXNG for image results
 // 3. Take the first plausible result, persist it to product_images
-// 4. If SearXNG has nothing usable, fall back to the static Unsplash pool
+// 4. If SearXNG has nothing usable, fall back to a built-in Unsplash pool
 //    (still recorded in product_images so the pipeline is fully auditable)
+//
+// NOTE: this file intentionally does NOT import from productEngine.ts —
+// that module changes independently (CEO/admin features etc.) and a
+// missing/renamed export there previously broke the production build.
+// The fallback pool below is self-contained.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { db } from "@/db";
 import { products, productImages } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { searxngImageSearch } from "@/lib/searxng";
-import { pickFallbackImageForCategory } from "@/lib/productEngine";
+
+const FALLBACK_IMAGE_POOL: Record<string, string[]> = {
+  default: [
+    "https://images.unsplash.com/photo-1523275335684-37898b6baf30",
+    "https://images.unsplash.com/photo-1560343090-f0409e92791a",
+  ],
+  fashion: [
+    "https://images.unsplash.com/photo-1483985988355-763728e1935b",
+    "https://images.unsplash.com/photo-1441984904996-e0b6ba687e04",
+  ],
+  electronics: [
+    "https://images.unsplash.com/photo-1498049794561-7780e7231661",
+  ],
+  home: [
+    "https://images.unsplash.com/photo-1583847268964-b28dc8f51f92",
+  ],
+};
+
+function pickFallbackImageForCategory(category: string): string {
+  const key = (category || "").toLowerCase();
+  const pool =
+    Object.keys(FALLBACK_IMAGE_POOL).find((k) => key.includes(k)) ?? "default";
+  const images = FALLBACK_IMAGE_POOL[pool];
+  return images[Math.floor(Math.random() * images.length)];
+}
 
 function buildQuery(title: string, brand: string): string {
   const cleanTitle = title
@@ -70,10 +99,6 @@ export async function resolveImageForProduct(product: {
   return { productId: product.id, imageUrl: finalUrl, sourceEngine, searchQuery: query };
 }
 
-/**
- * Resolve images for a batch of products sequentially, capped to avoid
- * hammering the SearXNG instance and blowing serverless time limits.
- */
 export async function resolveImagesForProducts(
   productList: Array<{ id: number; title: string; brand: string; category: string }>,
   maxBatch = 25
