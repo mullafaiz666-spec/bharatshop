@@ -1,5 +1,4 @@
-# Fresh SearXNG verification run follows the f7f50d3 resolver deployment.
-# SearXNG image backend was tightened to stable image engines before this run.
+# Live catalog verification for product media and enrichment.
 name: BharatShop Catalog Maintenance
 
 on:
@@ -31,14 +30,17 @@ jobs:
           BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
         run: |
           set -euo pipefail
-          response=$(curl --silent --show-error --fail-with-body --retry 3 --retry-delay 5 \
+          tmp=$(mktemp)
+          trap 'rm -f "$tmp"' EXIT
+          curl --silent --show-error --fail-with-body --retry 3 --retry-delay 5 \
             -X POST "$BHARATSHOP_URL/api/catalog/image-resolve" \
             -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" \
             -H "Content-Type: application/json" \
-            --data '{"limit":10}')
-          echo "$response"
-          RESPONSE="$response" node <<'NODE'
-          const d = JSON.parse(process.env.RESPONSE);
+            --data '{"limit":10}' > "$tmp"
+          cat "$tmp"
+          node - "$tmp" <<'NODE'
+          const fs = require('fs');
+          const d = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
           const badResults = Array.isArray(d.results)
             ? d.results.filter(x => ["ERROR", "SEARCH_ERROR"].includes(String(x.status)))
             : [];
@@ -54,14 +56,17 @@ jobs:
           BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
         run: |
           set -euo pipefail
-          response=$(curl --silent --show-error --fail-with-body --retry 3 --retry-delay 5 \
+          tmp=$(mktemp)
+          trap 'rm -f "$tmp"' EXIT
+          curl --silent --show-error --fail-with-body --retry 3 --retry-delay 5 \
             -X POST "$BHARATSHOP_URL/api/catalog/fashion-enrich" \
             -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" \
             -H "Content-Type: application/json" \
-            --data '{"limit":200}')
-          echo "$response"
-          RESPONSE="$response" node <<'NODE'
-          const d = JSON.parse(process.env.RESPONSE);
+            --data '{"limit":200}' > "$tmp"
+          cat "$tmp"
+          node - "$tmp" <<'NODE'
+          const fs = require('fs');
+          const d = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
           const badResults = Array.isArray(d.results)
             ? d.results.filter(x => ["ERROR", "SEARCH_ERROR"].includes(String(x.status)))
             : [];
