@@ -7,18 +7,50 @@ export const dynamic = "force-dynamic";
 const STOP=new Set(["the","with","and","for","from","pack","piece","pieces","new","best","online","india","buy","sale","free"]);
 const FASHION=/(fashion|women|woman|men|man|saree|sari|kurti|kurta|dress|shirt|tshirt|t-shirt|jeans|trouser|petticoat|shapewear|lehenga|salwar|apparel|clothing|footwear|shoe|sandal|jewellery|jewelry)/i;
 const BAD=/(unsplash|placeholder|placehold|picsum|loremflickr|placekitten)/i;
+const SERP_MIN_INTERVAL_MS=Math.max(750,Number(process.env.SERPAPI_MIN_INTERVAL_MS||1200));
+const SERP_MAX_RETRIES=Math.max(1,Math.min(5,Number(process.env.SERPAPI_MAX_RETRIES||4)));
+let lastSerpRequestAt=0;
+let serpQueue=Promise.resolve();
 type ImageSearchResult={original?:string;link?:string;title?:string;source?:string;};
 type VideoSearchResult={link?:string;title?:string;source?:string;thumbnail?:string;};
 function tokens(s:string){return String(s||"").toLowerCase().replace(/[^a-z0-9]+/g," ").split(/\s+/).filter(x=>x.length>2&&!STOP.has(x));}
 function score(item:ImageSearchResult,p:any){const ts=tokens(p.title);const hay=`${item.title||""} ${item.source||""} ${item.link||""}`.toLowerCase();const hits=ts.filter(t=>hay.includes(t)).length;const ratio=ts.length?hits/ts.length:0;const brand=String(p.brand||"").trim().toLowerCase();return ratio+(brand&&brand!=="generic"&&hay.includes(brand)?0.25:0);}
 function videoScore(item:VideoSearchResult,p:any){const ts=tokens(`${p.title} ${p.brand!=="Generic"?p.brand:""}`);const hay=`${item.title||""} ${item.source||""} ${item.link||""}`.toLowerCase();return ts.length?ts.filter(t=>hay.includes(t)).length/ts.length:0;}
-async function searchImages(q:string,key:string){const u=new URL("https://serpapi.com/search.json");u.searchParams.set("engine","google_images");u.searchParams.set("q",q);u.searchParams.set("hl","en");u.searchParams.set("gl","in");u.searchParams.set("api_key",key);const r=await fetch(u,{cache:"no-store"});if(!r.ok)throw new Error(`SerpAPI images ${r.status}`);const d=await r.json();return Array.isArray(d.images_results)?d.images_results as ImageSearchResult[]:[];}
-async function searchVideos(q:string,key:string){const u=new URL("https://serpapi.com/search.json");u.searchParams.set("engine","google_videos");u.searchParams.set("q",q);u.searchParams.set("hl","en");u.searchParams.set("gl","in");u.searchParams.set("api_key",key);const r=await fetch(u,{cache:"no-store"});if(!r.ok)throw new Error(`SerpAPI videos ${r.status}`);const d=await r.json();return Array.isArray(d.video_results)?d.video_results as VideoSearchResult[]:[];}
+function sleep(ms:number){return new Promise(resolve=>setTimeout(resolve,ms));}
+async function throttleSerp(){
+  const previous=serpQueue;
+  let release!:()=>void;
+  serpQueue=new Promise<void>(resolve=>{release=resolve;});
+  await previous;
+  const wait=Math.max(0,SERP_MIN_INTERVAL_MS-(Date.now()-lastSerpRequestAt));
+  if(wait)await sleep(wait);
+  lastSerpRequestAt=Date.now();
+  release();
+}
+async function searchSerp(q:string,key:string,engine:"google_images"|"google_videos"){
+  let lastError="SerpAPI request failed";
+  for(let attempt=0;attempt<=SERP_MAX_RETRIES;attempt++){
+    await throttleSerp();
+    const u=new URL("https://serpapi.com/search.json");
+    u.searchParams.set("engine",engine);u.searchParams.set("q",q);u.searchParams.set("hl","en");u.searchParams.set("gl","in");u.searchParams.set("api_key",key);
+    const r=await fetch(u,{cache:"no-store"});
+    if(r.ok){const d=await r.json();return d;}
+    const retryAfter=Number(r.headers.get("retry-after")||0);
+    lastError=`SerpAPI ${engine.replace("google_","")} ${r.status}`;
+    if(r.status!==429||attempt>=SERP_MAX_RETRIES)throw new Error(lastError);
+    const backoff=Math.min(30000,Math.max(retryAfter*1000,2000*Math.pow(2,attempt)));
+    console.warn(`SerpAPI rate limited; retrying in ${backoff}ms (attempt ${attempt+1}/${SERP_MAX_RETRIES})`);
+    await sleep(backoff);
+  }
+  throw new Error(lastError);
+}
+async function searchImages(q:string,key:string){const d=await searchSerp(q,key,"google_images");return Array.isArray(d.images_results)?d.images_results as ImageSearchResult[]:[];}
+async function searchVideos(q:string,key:string){const d=await searchSerp(q,key,"google_videos");return Array.isArray(d.video_results)?d.video_results as VideoSearchResult[]:[];}
 export async function POST(req:Request){
  try{
   const token=req.headers.get("authorization")?.replace(/^Bearer\s+/i,"");if(!process.env.BHARATSHOP_AUTOMATION_TOKEN||token!==process.env.BHARATSHOP_AUTOMATION_TOKEN)return NextResponse.json({error:"Unauthorized"},{status:401});
   const key=process.env.SERPAPI_API_KEY;if(!key)return NextResponse.json({error:"SERPAPI_API_KEY is not configured"},{status:503});
-  const body=await req.json().catch(()=>({}));const limit=Math.max(1,Math.min(50,Number(body.limit||25)));
+  const body=await req.json().catch(()=>({}));const limit=Math.max(1,Math.min(25,Number(body.limit||10)));
   const all=await db.select().from(products).where(eq(products.status,"Published")).orderBy(asc(products.id));const imgs=await db.select().from(productImages);const counts=new Map<number,number>();
   for(const x of imgs){if(["WEB_IMAGE_EXACT_MATCH","WEB_SEARCH_MATCHED","VERIFIED"].includes(String(x.verificationStatus))&&!BAD.test(x.imageUrl))counts.set(x.productId,(counts.get(x.productId)||0)+1);}
   const candidates=all.filter(p=>(counts.get(p.id)||0)<8).slice(0,limit);let resolved=0,rejected=0,videosFound=0;const results:Array<Record<string,unknown>>=[];
@@ -26,7 +58,7 @@ export async function POST(req:Request){
    const fashion=FASHION.test(`${p.category} ${p.title}`);const base=`${p.title} ${p.brand!=="Generic"?p.brand:""}`;
    const queries=[`${base} exact product official image front`,`${base} exact product back side angle image`,`${base} exact product box packaging contents`,`${base} exact product colour variants colors`];
    let found:ImageSearchResult[]=[];let videos:VideoSearchResult[]=[];
-   try{for(const q of queries)found.push(...await searchImages(q,key));videos=await searchVideos(`${base} official product video demo unboxing`,key);}catch(e){results.push({productId:p.id,status:"SEARCH_ERROR",error:e instanceof Error?e.message:"search failed"});continue;}
+   try{for(const q of queries)found.push(...await searchImages(q,key));videos=await searchVideos(`${base} official product video demo unboxing`,key);}catch(e){const message=e instanceof Error?e.message:"search failed";results.push({productId:p.id,status:"SEARCH_ERROR",error:message,retryable:/429/.test(message)});continue;}
    const threshold=fashion?0.70:0.45;
    const ranked=found.filter(x=>x.original&&/^https?:\/\//i.test(x.original)&&x.link&&!BAD.test(x.original)).map(x=>({...x,score:score(x,p)})).sort((a,b)=>b.score-a.score);
    const selected:any[]=[];const seen=new Set<string>();
@@ -44,6 +76,7 @@ export async function POST(req:Request){
    }
    await db.update(products).set({imageUrl:selected[0].original!,updatedAt:new Date()}).where(eq(products.id,p.id));resolved++;results.push({productId:p.id,status:"COMPLETE_MEDIA_RESOLVED",imageCount:selected.length,videoCount:rankedVideos.length,scores:selected.map(x=>Number(x.score.toFixed(3))),sources:selected.map(x=>x.link)});
   }
-  return NextResponse.json({status:"COMPLETED",processed:candidates.length,resolved,rejected,videosFound,results,policy:"Every published product is onboarded with up to eight high-confidence exact product images covering front, back/side, packaging/contents and available colour variants. Matching product videos are discovered when available and stored for storefront playback. No placeholder images are accepted."});
+  const failed=results.filter(x=>x.status==="SEARCH_ERROR").length;
+  return NextResponse.json({status:"COMPLETED",processed:candidates.length,resolved,rejected,failed,videosFound,results,policy:"Every published product is onboarded with up to eight high-confidence exact product images covering front, back/side, packaging/contents and available colour variants. Matching product videos are discovered when available and stored for storefront playback. No placeholder images are accepted."});
  }catch(e){return NextResponse.json({error:e instanceof Error?e.message:"Media resolver failed"},{status:500});}
 }
