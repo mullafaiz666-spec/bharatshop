@@ -11,8 +11,9 @@ const globalForDb = globalThis as typeof globalThis & {
   __bharatShopPostgresPool?: Pool;
 };
 
-// Render/Postgres connections can be TLS-backed. Keep TLS enabled for hosted
-// Postgres while still allowing local development connections.
+// Vercel functions can outlive the upstream Render/Postgres connection. Keep
+// the pool deliberately small and short-lived so a stale socket is not reused
+// after the hosted database terminates it.
 const isLocalDatabase = /(?:localhost|127\.0\.0\.1)(?::\d+)?(?:\/|$)/i.test(databaseUrl);
 
 const pool =
@@ -20,14 +21,18 @@ const pool =
   new Pool({
     connectionString: databaseUrl,
     ssl: isLocalDatabase ? undefined : { rejectUnauthorized: false },
-    max: Number(process.env.DB_POOL_MAX ?? 10),
-    idleTimeoutMillis: Number(process.env.DB_IDLE_TIMEOUT_MS ?? 30_000),
+    max: Number(process.env.DB_POOL_MAX ?? 1),
+    idleTimeoutMillis: Number(process.env.DB_IDLE_TIMEOUT_MS ?? 1_000),
     connectionTimeoutMillis: Number(process.env.DB_CONNECTION_TIMEOUT_MS ?? 10_000),
-    maxUses: Number(process.env.DB_MAX_USES ?? 7500),
+    maxUses: Number(process.env.DB_MAX_USES ?? 25),
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 1_000,
   });
 
-// Reuse one pool across Next.js hot reloads and serverless/runtime module
-// re-evaluation. This prevents connection storms and stale local globals.
+pool.on("error", (error) => {
+  console.warn("Postgres pool connection reset:", error instanceof Error ? error.message : error);
+});
+
 globalForDb.__bharatShopPostgresPool = pool;
 
 export { pool };
