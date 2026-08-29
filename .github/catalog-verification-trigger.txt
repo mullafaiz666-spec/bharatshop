@@ -1,1 +1,1 @@
-Fresh catalog verification trigger from corrected workflow commit 267df854bf3bd55dfa47d23b3ecdddee24a578ae
+Fresh catalog verification trigger after multi-engine SearXNG fallback fix 7ce7f2279ef51d41ac89f8752b6e056e7e55e7a0
