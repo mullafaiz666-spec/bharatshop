@@ -1,0 +1,2 @@
+Fresh catalog verification trigger from the actual current main commit 035411fc7ce6841ad37a62a55071f44af03fd2ea.
+Verify: live image resolver -> SearXNG; images persisted in DB; CEO counts work without OpenAI.
