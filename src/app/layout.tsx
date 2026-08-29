@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import "./globals.css";
 import PwaInstall from "@/components/PwaInstall";
+import StorefrontPolish from "@/components/StorefrontPolish";
 
 export const metadata: Metadata = {
   title: "BharatShop Agent — AI Dropshipping Command Center",
@@ -38,6 +39,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       </head>
       <body className="bg-[#090D16] text-[#F8FAFC] antialiased min-h-screen">
         {children}
+        <StorefrontPolish />
         <PwaInstall />
       </body>
     </html>
