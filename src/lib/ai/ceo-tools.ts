@@ -30,10 +30,27 @@ export async function listPendingApprovals() {
   return result.rows;
 }
 
+/** Reject a catalogue product so one bad listing cannot block the rest of the catalogue. */
+export async function rejectProduct(productId?: number, productName?: string, reason = "Product failed verification") {
+  const selector = productId ? `p.id = $1` : `p.title ILIKE $1`;
+  const value = productId ? productId : `%${String(productName || "").trim()}%`;
+  const result = await pool.query(`SELECT p.id,p.title,p.sku,p.status FROM products p WHERE ${selector} ORDER BY p.id LIMIT 1`, [value]);
+  if (!result.rows.length) return { success: false, error: "Product not found", productId, productName };
+  const product = result.rows[0];
+  await pool.query(`UPDATE products SET status='Rejected', updated_at=NOW() WHERE id=$1`, [product.id]);
+  try {
+    await pool.query(`INSERT INTO ai_activity_logs (user_id,agent_name,action_type,message,metadata_json,status) VALUES (1,'AI CEO','PRODUCT_REJECTED',$1,$2,'SUCCESS')`, [
+      `Rejected ${product.title} (${product.sku}) so an unverified image cannot block the catalogue. Reason: ${reason}`,
+      JSON.stringify({ productId: product.id, sku: product.sku, reason })
+    ]);
+  } catch {}
+  return { success: true, productId: product.id, title: product.title, sku: product.sku, previousStatus: product.status, status: "Rejected", reason };
+}
+
 /** Ground the CEO in live application data. Never returns customer PII. */
 export async function inspectLiveBusinessData() {
   const [products, orders, storefrontOrders, activity, refreshes, approvals] = await Promise.all([
-    pool.query(`SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE status ILIKE 'Published')::int AS published, COUNT(*) FILTER (WHERE image_url IS NULL OR image_url='')::int AS missing_images FROM products`),
+    pool.query(`SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE status ILIKE 'Published')::int AS published, COUNT(*) FILTER (WHERE image_url IS NULL OR image_url='')::int AS missing_images, COUNT(*) FILTER (WHERE status ILIKE 'Rejected')::int AS rejected FROM products`),
     pool.query(`SELECT COUNT(*)::int AS total, COALESCE(SUM(customer_paid_inr),0)::numeric AS revenue, COALESCE(SUM(net_profit_inr),0)::numeric AS profit, COUNT(*) FILTER (WHERE fulfillment_status IN ('RECHECK_REQUIRED','Pending','Received'))::int AS pending FROM orders`),
     pool.query(`SELECT COUNT(*)::int AS total, COALESCE(SUM(total_amount_inr),0)::numeric AS revenue, COUNT(*) FILTER (WHERE fulfillment_status IN ('RECHECK_REQUIRED','Pending','Received'))::int AS pending FROM storefront_orders`),
     pool.query(`SELECT agent_name, action_type, message, status, profit_impact_inr, created_at FROM ai_activity_logs ORDER BY created_at DESC LIMIT 40`),
