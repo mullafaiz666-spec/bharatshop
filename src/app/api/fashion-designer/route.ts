@@ -30,7 +30,7 @@ function parseJson(text: string) {
 
 async function run(count: number) {
   if (!process.env.GEMINI_API_KEY && !process.env.GOOGLE_AI_API_KEY) throw new Error("GEMINI_API_KEY is required");
-  const safeCount = Math.max(10, Math.min(25, count));
+  const safeCount = Math.max(1, Math.min(25, count));
   const existing = await pool.query(`SELECT title,category,sales_count_24h,ai_score FROM products ORDER BY sales_count_24h DESC, ai_score DESC LIMIT 40`);
   const existingText = existing.rows.map((r: any) => `${r.title} | ${r.category} | 24h sales ${r.sales_count_24h} | score ${r.ai_score}`).join("\n");
   const prompt = `You are BharatShop's autonomous Indian fashion designer and commercial trend strategist. Research today's Indian fashion demand using Google Search grounding before deciding what to design. Create exactly ${safeCount} ORIGINAL, commercially printable product concepts for a print-on-demand brand. Prioritize designs that can be produced by Qikink, strong Indian market relevance, clear differentiation, healthy margin potential and fast social-media appeal. Do not copy logos, copyrighted characters, protected artwork or existing brand identities. Avoid claims that a trend is certain. Use current evidence to explain why each concept is worth testing. Existing catalogue (avoid duplicates):\n${existingText || "none"}\nReturn ONLY valid JSON matching this schema: ${JSON.stringify(DESIGN_SCHEMA)}`;
@@ -40,20 +40,25 @@ async function run(count: number) {
   const results: any[] = [];
   for (const design of plan.designs.slice(0, safeCount)) {
     try {
-      const image = await geminiImage(`Create the production-ready hero visual for this original fashion product concept. Show the exact garment design clearly and realistically, suitable for a premium ecommerce catalog. No fake brand logos, no copyrighted characters, no watermarks added by the prompt. Design brief: ${design.designBrief}. Garment: ${design.garment}. Colors: ${design.colorPalette}. Print method: ${design.printMethod}.`, { aspectRatio: "4:5", imageSize: process.env.GEMINI_IMAGE_SIZE || "1K" });
+      const imagePrompt = String(design.imagePrompt || `Premium ecommerce hero visual for ${design.designBrief}. Garment: ${design.garment}. Colors: ${design.colorPalette}. Print method: ${design.printMethod}.`);
+      const image = await geminiImage(`${imagePrompt}\nShow the exact garment design clearly and realistically, suitable for a premium ecommerce catalog. No fake brand logos, copyrighted characters, or watermarks.`, { aspectRatio: "4:5", imageSize: process.env.GEMINI_IMAGE_SIZE || "1K" });
+      if (!image) throw new Error("Google image generation returned no image");
+
       const sku = `AI-${new Date().toISOString().slice(0,10).replaceAll("-","")}-${Math.random().toString(36).slice(2,8).toUpperCase()}`;
       const rate = qikinkCostForDesign(String(design.garment || "Unisex Classic Crew T-Shirt"), String(design.printMethod || "DTF"));
-      const cost = rate.landedCostInr;
-      const target = Math.max(Number(design.priceTargetInr || 999), Math.ceil(cost / 0.55));
-      const profit = Math.max(0, target - cost);
+      const costBeforeShipping = rate.productBaseInr + rate.printingInr;
+      const totalLandedCost = rate.landedCostInr;
+      const target = Math.max(Number(design.priceTargetInr || 999), Math.ceil(totalLandedCost / 0.55));
+      const profit = Math.max(0, target - totalLandedCost);
       const margin = target ? (profit / target) * 100 : 0;
       const status = margin >= Number(process.env.MIN_AI_PRODUCT_MARGIN_PCT || 35) ? "AI_DRAFT" : "REJECTED_MARGIN";
 
-      const inserted = await pool.query(`INSERT INTO products (user_id,sku,title,category,image_url,brand,supplier_name,supplier_city,supplier_cost_inr,shipping_cost_inr,gst_pct,selling_price_inr,mrp_inr,custom_margin_pct,net_profit_inr,ai_score,viral_velocity_score,status,ai_marketing_copy,ai_target_audience,stock_count,moq) VALUES (1,$1,$2,$3,$4,'BharatShop AI','Qikink','India',$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,0,1) RETURNING id`, [sku, design.title, design.category, image, rate.landedCostInr, rate.shippingInr, rate.gstInr > 0 ? 5 : 5, target, Math.ceil(target * 1.2), margin, profit, Math.round(design.aiScore || 70), Math.round(design.viralVelocityScore || 70), status, `${design.trendReason}\nUGC hook: ${design.ugcHook}`, design.targetAudience]);
+      const inserted = await pool.query(`INSERT INTO products (user_id,sku,title,category,image_url,brand,supplier_name,supplier_city,supplier_cost_inr,shipping_cost_inr,gst_pct,selling_price_inr,mrp_inr,custom_margin_pct,net_profit_inr,ai_score,viral_velocity_score,status,ai_marketing_copy,ai_target_audience,stock_count,moq) VALUES (1,$1,$2,$3,$4,'BharatShop AI','Qikink','India',$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,0,1) RETURNING id`, [sku, design.title, design.category, image, costBeforeShipping, rate.shippingInr, 5, target, Math.ceil(target * 1.2), margin, profit, Math.round(design.aiScore || 70), Math.round(design.viralVelocityScore || 70), status, `${design.trendReason}\nUGC hook: ${design.ugcHook}`, design.targetAudience]);
       const productId = inserted.rows[0]?.id;
+      if (!productId) throw new Error("Database insert returned no product id");
       await pool.query(`INSERT INTO product_images (product_id,image_url,source_url,sort_order,alt_text,verification_status) VALUES ($1,$2,'GOOGLE_GEMINI_AI',0,$3,'AI_GENERATED')`, [productId, image, design.title]);
       await logGoogleMedia(productId, "FASHION_DESIGN", { title: design.title, aiScore: design.aiScore, status, marketSummary: plan.marketSummary, qikinkRate: rate });
-      results.push({ productId, sku, title: design.title, status, margin: Math.round(margin), qikink: { status: "RATE_CARD_MAPPED", ...rate } });
+      results.push({ productId, sku, title: design.title, status, margin: Math.round(margin), imagePersisted: true, qikink: { status: "RATE_CARD_MAPPED", ...rate } });
     } catch (error) {
       results.push({ title: design.title, status: "FAILED", error: error instanceof Error ? error.message : "unknown error" });
     }
