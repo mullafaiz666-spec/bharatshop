@@ -26,8 +26,8 @@ if (!isLocalDatabase) {
 
 // Render can terminate an active external TCP socket during maintenance,
 // failover, or outbound-network changes. Keep each connection disposable and
-// retry only the transient connection failures. Production data remains strictly
-// read/write through the existing application code; this layer never mutates data.
+// retry only transient connection failures. Production data remains strictly
+// controlled by the existing application code; this layer never mutates data.
 const pool = globalForDb.__bharatShopPostgresPool ?? new Pool({
   connectionString: databaseUrl,
   ssl: isLocalDatabase ? undefined : { rejectUnauthorized: false },
@@ -56,7 +56,7 @@ pool.query = (async (...args: any[]) => {
   let lastError: unknown;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      return await originalQuery(...args);
+      return await (originalQuery as (...queryArgs: any[]) => Promise<unknown>)(...args);
     } catch (error) {
       lastError = error;
       if (!isTransientConnectionError(error) || attempt === 2) throw error;
