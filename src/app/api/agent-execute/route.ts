@@ -8,6 +8,7 @@ const ALLOWED:Record<string,string>={
   "LISTING_PUBLISH":"/api/agents/listing",
   "IMAGE_RESOLVE":"/api/catalog/image-resolve",
   "FASHION_ENRICH":"/api/catalog/fashion-enrich",
+  "FASHION_STUDIO":"/api/fashion-studio",
   "ADVERTISING":"/api/agents/advertising",
   "ORDER_RECHECK":"/api/agents/recheck",
   "TRACKING":"/api/agents/tracking"
@@ -21,11 +22,11 @@ export async function POST(req:Request){
   const body=await req.json(); const action=String(body.actionType||"").toUpperCase(); const path=ALLOWED[action];
   if(!path)return NextResponse.json({error:`Action ${action} is not approved for execution`},{status:400});
   const payload=body.payload&&typeof body.payload==="object"?body.payload:{}; const agent=String(body.agentName||action);
-  if(action==="IMAGE_RESOLVE"){
+  if(action==="IMAGE_RESOLVE"||action==="FASHION_STUDIO"){
    const token=process.env.BHARATSHOP_AUTOMATION_TOKEN;if(!token)return NextResponse.json({error:"Automation token is not configured"},{status:503});
   }
   const origin=new URL(req.url).origin;
-  const headers:any={"Content-Type":"application/json"}; if(action==="IMAGE_RESOLVE")headers.authorization=`Bearer ${process.env.BHARATSHOP_AUTOMATION_TOKEN}`;
+  const headers:any={"Content-Type":"application/json"}; if(action==="IMAGE_RESOLVE"||action==="FASHION_STUDIO")headers.authorization=`Bearer ${process.env.BHARATSHOP_AUTOMATION_TOKEN}`;
   const response=await fetch(`${origin}${path}`,{method:"POST",headers,body:JSON.stringify(payload),cache:"no-store"});
   const raw=await response.text(); let data:any; try{data=JSON.parse(raw)}catch{data={raw:raw.slice(0,4000)}}
   const ok=response.ok && !data?.error && !["BLOCKED","NO_QUALIFIED_SOURCE","NO_QUALIFIED_PRODUCT"].includes(String(data?.status));
