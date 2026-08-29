@@ -1,44 +1,40 @@
 import pg from "pg";
 const { Pool } = pg;
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 2 });
-const SERPAPI_KEY = process.env.SERPAPI_API_KEY;
+const SEARXNG_URL = String(process.env.SEARXNG_URL || process.env.IMAGE_SEARCH_URL || "https://bharatshop-searxng.onrender.com").replace(/\/$/, "");
 const BATCH_SIZE = Math.max(1, Math.min(200, Number(process.env.IMAGE_RESOLVE_BATCH || 200)));
 const PLACEHOLDER = /(unsplash|placeholder|placehold|picsum|loremflickr|placekitten|stock-photo)/i;
 const FASHION = /(fashion|women|woman|men|man|saree|sari|kurti|kurta|dress|shirt|tshirt|t-shirt|jeans|trouser|lehenga|salwar|apparel|clothing|streetwear|oversized|hoodie|jogger|cargo|footwear|shoe|sandal)/i;
-const STOP = new Set(["the","with","and","for","from","pack","piece","pieces","new","best","online","india","buy","sale","official","product","image","supplier","brand"]);
+const STOP = new Set(["the","with","and","for","from","pack","piece","pieces","new","best","online","india","buy","sale","official","product","image","images","supplier","brand"]);
 function tokens(s) { return String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").split(/\s+/).filter(x => x.length > 2 && !STOP.has(x)); }
 function score(item, p) {
   const titleTokens = tokens(`${p.title} ${p.brand}`);
-  const hay = `${item.title || ""} ${item.source || ""} ${item.link || ""}`.toLowerCase();
+  const hay = `${item.title || ""} ${item.source || ""} ${item.sourceUrl || item.url || ""}`.toLowerCase();
   const productTokens = tokens(p.title);
   const hits = titleTokens.filter(t => hay.includes(t)).length;
   const productHits = productTokens.filter(t => hay.includes(t)).length;
   const ratio = titleTokens.length ? hits / titleTokens.length : 0;
   const brand = String(p.brand || "").trim().toLowerCase();
   const brandHit = brand && brand !== "generic" && hay.includes(brand);
-  // Prefer exact brand + at least one product token, but allow strong title matches for generic/no-brand products.
   if (brandHit && productHits >= 1) return ratio + 0.45;
   if (!brandHit && ratio >= 0.40) return ratio;
   return 0;
 }
 async function searchImages(q) {
-  const u = new URL("https://serpapi.com/search.json");
-  u.searchParams.set("engine", "google_images");
+  const u = new URL(`${SEARXNG_URL}/search`);
   u.searchParams.set("q", q);
-  u.searchParams.set("hl", "en");
-  u.searchParams.set("gl", "in");
-  u.searchParams.set("num", "20");
-  u.searchParams.set("api_key", SERPAPI_KEY);
-  const r = await fetch(u);
-  if (!r.ok) throw new Error(`SerpAPI ${r.status}`);
+  u.searchParams.set("categories", "images");
+  u.searchParams.set("format", "json");
+  u.searchParams.set("language", "en");
+  u.searchParams.set("safesearch", "1");
+  const r = await fetch(u, { headers: { accept: "application/json", "user-agent": "BharatShop/1.0" } });
+  if (!r.ok) throw new Error(`SearXNG ${r.status}`);
   const d = await r.json();
-  return Array.isArray(d.images_results) ? d.images_results : [];
+  return Array.isArray(d.results) ? d.results.map(x => ({ url: x.img_src || x.thumbnail_src, sourceUrl: x.url || x.source_url, title: x.title, source: x.source })) : [];
 }
 async function main() {
-  if (!SERPAPI_KEY) throw new Error("SERPAPI_API_KEY is required");
   const client = await pool.connect();
   try {
-    // Prioritize products that have no usable gallery, then products with fewer than 4 images.
     const { rows } = await client.query(`
       SELECT p.id,p.title,p.brand,p.category
       FROM products p
@@ -64,15 +60,15 @@ async function main() {
       }
       const unique = new Map();
       for (const x of candidates) {
-        const u = String(x.original || x.thumbnail || "").trim();
-        if (!/^https?:\/\//i.test(u) || PLACEHOLDER.test(u) || !x.link) continue;
+        const u = String(x.url || "").trim();
+        if (!/^https?:\/\//i.test(u) || PLACEHOLDER.test(u) || !x.sourceUrl) continue;
         const s = score(x, p);
         if (s <= 0) continue;
         if (!unique.has(u)) unique.set(u, { ...x, score: s });
       }
       const best = [...unique.values()].sort((a,b) => b.score-a.score).slice(0,8);
-      if (!best.length) {
-        console.log(JSON.stringify({ productId:p.id, status:"NO_EXACT_IMAGES" }));
+      if (best.length < 4) {
+        console.log(JSON.stringify({ productId:p.id, status:"NO_EXACT_IMAGES", images:best.length, provider:"searxng" }));
         continue;
       }
       await client.query("BEGIN");
@@ -80,14 +76,14 @@ async function main() {
       for (let i=0;i<best.length;i++) {
         const x=best[i];
         const label = fashion && i===0 ? "Product view" : fashion && i<4 ? "Style / variant view" : i<4 ? "Product view" : "Packaging / included items";
-        await client.query(`INSERT INTO product_images (product_id,image_url,source_url,sort_order,alt_text,verification_status) VALUES ($1,$2,$3,$4,$5,'WEB_IMAGE_EXACT_MATCH')`, [p.id,x.original || x.thumbnail,x.link,i,`${p.title} — ${label}`]);
+        await client.query(`INSERT INTO product_images (product_id,image_url,source_url,sort_order,alt_text,verification_status) VALUES ($1,$2,$3,$4,$5,'WEB_IMAGE_EXACT_MATCH')`, [p.id,x.url,x.sourceUrl,i,`${p.title} — ${label}`]);
       }
-      await client.query(`UPDATE products SET image_url=$2,updated_at=NOW() WHERE id=$1`, [p.id,best[0].original || best[0].thumbnail]);
+      await client.query(`UPDATE products SET image_url=$2,updated_at=NOW() WHERE id=$1`, [p.id,best[0].url]);
       await client.query("COMMIT");
       resolved++;
-      console.log(JSON.stringify({ productId:p.id,status:"GALLERY_RESOLVED",images:best.length,fashion }));
+      console.log(JSON.stringify({ productId:p.id,status:"GALLERY_RESOLVED",images:best.length,fashion,provider:"searxng" }));
     }
-    console.log(JSON.stringify({ status:"COMPLETED",processed:rows.length,resolved,batchSize:BATCH_SIZE }));
+    console.log(JSON.stringify({ status:"COMPLETED",provider:"searxng",processed:rows.length,resolved,batchSize:BATCH_SIZE }));
   } finally { client.release(); await pool.end(); }
 }
 main().catch(e=>{console.error(e);process.exit(1)});
