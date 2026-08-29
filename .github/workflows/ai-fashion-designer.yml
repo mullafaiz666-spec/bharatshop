@@ -1,0 +1,48 @@
+name: BharatShop AI Fashion Designer
+
+on:
+  schedule:
+    - cron: "30 3 * * *"
+  workflow_dispatch:
+    inputs:
+      count:
+        description: "Designs to create (10-25)"
+        required: false
+        default: "10"
+  push:
+    branches: [main]
+    paths:
+      - "src/app/api/fashion-designer/**"
+      - "src/lib/ai/google-media.ts"
+      - ".github/workflows/ai-fashion-designer.yml"
+
+jobs:
+  fashion-designer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run daily designer
+        env:
+          BHARATSHOP_URL: ${{ secrets.BHARATSHOP_URL }}
+          BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
+          DESIGN_COUNT: ${{ inputs.count || '10' }}
+        run: |
+          set -euo pipefail
+          test -n "$BHARATSHOP_URL"
+          test -n "$BHARATSHOP_AUTOMATION_TOKEN"
+          count="$DESIGN_COUNT"
+          if [ "$count" -lt 10 ] 2>/dev/null; then count=10; fi
+          if [ "$count" -gt 25 ] 2>/dev/null; then count=25; fi
+          curl --silent --show-error --fail-with-body --retry 3 --retry-delay 10 \
+            -X POST "$BHARATSHOP_URL/api/fashion-designer" \
+            -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data "{\"count\":$count}" | tee fashion-designer-result.json
+          node - fashion-designer-result.json <<'NODE'
+          const fs = require('fs');
+          const file = process.argv[2];
+          const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+          if (!data.success) throw new Error(data.error || 'designer failed');
+          const failed = (data.results || []).filter(x => x.status === 'FAILED');
+          if (failed.length === (data.results || []).length) throw new Error('all designer jobs failed');
+          console.log(JSON.stringify({requested:data.requested, generated:data.generated, failed:failed.length}, null, 2));
+          NODE
