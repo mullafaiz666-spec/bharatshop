@@ -10,9 +10,14 @@ const BAD=/(unsplash|placeholder|placehold|picsum|loremflickr|placekitten)/i;
 const SEARCH_URL=(process.env.IMAGE_SEARCH_URL||process.env.SEARXNG_URL||"https://bharatshop-searxng.onrender.com").replace(/\/$/,"");
 const MIN_INTERVAL_MS=Math.max(2500,Number(process.env.IMAGE_SEARCH_MIN_INTERVAL_MS||3000));
 const MAX_RETRIES=Math.max(1,Math.min(3,Number(process.env.IMAGE_SEARCH_MAX_RETRIES||2)));
-// Do not hard-code an engine that may not exist in the deployed SearXNG instance.
-// Leave empty by default so SearXNG uses its configured image engines. Set this env var only when a specific engine set is desired.
-const IMAGE_ENGINES=(process.env.SEARXNG_IMAGE_ENGINES||"").split(",").map(x=>x.trim()).filter(Boolean);
+// Prefer several known-good image engines when the deployment has an old
+// single-engine override (notably Startpage, which can return 502s). A
+// deployment may still override this explicitly with SEARXNG_IMAGE_ENGINES.
+const CONFIGURED_IMAGE_ENGINES=(process.env.SEARXNG_IMAGE_ENGINES||"").split(",").map(x=>x.trim()).filter(Boolean);
+const FALLBACK_IMAGE_ENGINES=["bing images","duckduckgo images","openverse","brave.images","startpage images"];
+const IMAGE_ENGINES=CONFIGURED_IMAGE_ENGINES.length===1&&/^startpage images$/i.test(CONFIGURED_IMAGE_ENGINES[0])
+  ? FALLBACK_IMAGE_ENGINES
+  : CONFIGURED_IMAGE_ENGINES;
 const VIDEO_ENGINES=(process.env.SEARXNG_VIDEO_ENGINES||"youtube").split(",").map(x=>x.trim()).filter(Boolean);
 let lastRequestAt=0;
 let requestQueue=Promise.resolve();
