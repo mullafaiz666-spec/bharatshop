@@ -1,0 +1,34 @@
+name: BharatShop CEO Cycle (5m)
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  cycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Verify production health
+        env:
+          BHARATSHOP_URL: ${{ secrets.BHARATSHOP_URL }}
+        run: |
+          set -euo pipefail
+          test -n "$BHARATSHOP_URL"
+          curl --silent --show-error --fail-with-body --retry 3 --retry-delay 5 "$BHARATSHOP_URL/api/health"
+          curl --silent --show-error --fail-with-body --retry 3 --retry-delay 5 "$BHARATSHOP_URL/api/storefront/products?limit=1"
+
+      - name: Run CEO cycle
+        env:
+          BHARATSHOP_URL: ${{ secrets.BHARATSHOP_URL }}
+          BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$BHARATSHOP_URL"
+          test -n "$BHARATSHOP_AUTOMATION_TOKEN"
+          curl --silent --show-error --fail-with-body --retry 3 --retry-delay 5 \
+            -X POST "$BHARATSHOP_URL/api/automation/ceo-cycle" \
+            -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data '{}'
