@@ -1,4 +1,5 @@
 # Fresh SearXNG verification run follows the f7f50d3 resolver deployment.
+# SearXNG image backend was tightened to stable image engines before this run.
 name: BharatShop Catalog Maintenance
 
 on:
