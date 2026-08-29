@@ -11,10 +11,9 @@ const globalForDb = globalThis as typeof globalThis & {
 
 const isLocalDatabase = /(?:localhost|127\.0\.0\.1)(?::\d+)?(?:\/|$)/i.test(rawDatabaseUrl);
 
-// The Render URL can contain sslmode=require/prefer. node-postgres parses SSL
-// query parameters from the URL and those values override the explicit `ssl`
-// object. Remove URL-level SSL options so the Node TLS configuration below is
-// authoritative and cannot be accidentally replaced by an inherited URL option.
+// Keep Render's external connection on TLS, but remove URL-level SSL options
+// so node-postgres cannot let a connection-string option override the explicit
+// TLS configuration below.
 let databaseUrl = rawDatabaseUrl;
 if (!isLocalDatabase) {
   try {
@@ -29,20 +28,21 @@ if (!isLocalDatabase) {
   }
 }
 
-// Render can terminate an active external TCP socket during maintenance,
-// failover, or outbound-network changes. Keep each connection disposable and
-// retry only transient connection failures. Production data remains strictly
-// controlled by the existing application code; this layer never mutates data.
-const pool = globalForDb.__bharatShopPostgresPool ?? new Pool({
-  connectionString: databaseUrl,
-  ssl: isLocalDatabase ? undefined : { rejectUnauthorized: false },
-  max: 1,
-  idleTimeoutMillis: 1_000,
-  connectionTimeoutMillis: Number(process.env.DB_CONNECTION_TIMEOUT_MS ?? 15_000),
-  maxUses: 1,
-  keepAlive: false,
-  allowExitOnIdle: true,
-});
+const makePool = () =>
+  new Pool({
+    connectionString: databaseUrl,
+    ssl: isLocalDatabase ? undefined : { rejectUnauthorized: false },
+    max: 1,
+    idleTimeoutMillis: 1_000,
+    connectionTimeoutMillis: Number(process.env.DB_CONNECTION_TIMEOUT_MS ?? 15_000),
+    maxUses: 1,
+    keepAlive: false,
+    allowExitOnIdle: true,
+  });
+
+const pool = globalForDb.__bharatShopPostgresPool ?? makePool();
+
+globalForDb.__bharatShopPostgresPool = pool;
 
 pool.on("error", (error) => {
   console.warn(
@@ -51,17 +51,30 @@ pool.on("error", (error) => {
   );
 });
 
-const originalQuery = pool.query.bind(pool);
 const isTransientConnectionError = (error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
   return /connection terminated|connection reset|ECONNRESET|EPIPE|socket hang up|Connection terminated unexpectedly/i.test(message);
 };
 
+// A terminated Render socket can survive inside a serverless pool long enough
+// to make the next request fail too. The first retry therefore uses a brand-new
+// Pool/socket, then closes that disposable pool. Production data is never
+// mutated by this layer.
+const originalQuery = pool.query.bind(pool);
 pool.query = (async (...args: any[]) => {
   let lastError: unknown;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      return await (originalQuery as (...queryArgs: any[]) => Promise<unknown>)(...args);
+      if (attempt === 0) {
+        return await (originalQuery as (...queryArgs: any[]) => Promise<unknown>)(...args);
+      }
+
+      const freshPool = makePool();
+      try {
+        return await freshPool.query(...args);
+      } finally {
+        await freshPool.end().catch(() => undefined);
+      }
     } catch (error) {
       lastError = error;
       if (!isTransientConnectionError(error) || attempt === 2) throw error;
@@ -70,8 +83,6 @@ pool.query = (async (...args: any[]) => {
   }
   throw lastError;
 }) as typeof pool.query;
-
-globalForDb.__bharatShopPostgresPool = pool;
 
 export { pool };
 export const db = drizzle(pool);
