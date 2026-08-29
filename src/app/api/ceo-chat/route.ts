@@ -56,15 +56,28 @@ function naturalFallback(question: string, live: any, selectedAgent: string, rea
   const q = question.trim().toLowerCase();
   const activities = Array.isArray(live?.recentActivity) ? live.recentActivity : [];
   const blocked = activities.filter((a:any) => /block|warn|fail|error|missing|unavailable/i.test(`${a.status} ${a.message}`));
+  const total = Number(live?.products?.total ?? 0);
+  const missing = Number(live?.products?.missing_images ?? 0);
+  const published = Number(live?.products?.published ?? 0);
   if (/^(hi|hello|hey|good morning|good afternoon|good evening)\b/.test(q)) return "Hey! Good to hear from you. What would you like me to take care of?";
-  if (/\bhow are you\b|\bhow's it going\b|\bhow are things\b/.test(q)) return "I'm good, thanks! How are you?";
+  if (/\bhow are you\b|\bhow's it going\b|\bhow are things\b/.test(q)) return "I'm good, thanks! I'm here and ready to keep BharatShop moving.";
+  if (/\bhow'?s your team\b|\bhow is your team\b|\bteam\b.*\bdoing\b/.test(q)) return `The BharatShop team is online. ${selectedAgent} is ready; I currently see ${total} catalogue products, ${published} published, and ${missing} with a missing primary image.`;
+  if (/\ball\s+(the\s+)?products?\s+have\s+images\b|\bproducts?\b.*\bimages?\b|\bimage count\b/.test(q)) return `I checked the live catalogue: ${total} products total, ${published} published, and ${missing} currently missing a primary image. So I cannot truthfully say all products have images yet.`;
   if (/\bthank(s| you)\b/.test(q)) return "You're welcome. I'm on it.";
   if (/\bwho are you\b/.test(q)) return "I'm the BharatShop AI CEO. I can talk with you naturally, inspect the live business, coordinate the agents and take supported actions for you.";
   if (/\b(block|stuck|issue|problem|why)\b/.test(q)) return blocked.length ? `I found the blocker: ${blocked[0].message}. One product should not stop the operation; I can reject/skip the affected listing and keep the rest moving.` : `I don't see a confirmed blocker for ${selectedAgent} in the latest live activity.`;
-  if (/\b(status|dashboard|what's happening)\b/.test(q)) return `We're live. I currently see ${live?.products?.total ?? "an unknown number of"} products and ${live?.internalOrders?.total ?? 0} internal orders. ${live?.pendingApprovals?.length ? `${live.pendingApprovals.length} approval(s) are waiting.` : "Nothing is waiting for approval."}`;
+  if (/\b(status|dashboard|what's happening)\b/.test(q)) return `We're live. I currently see ${total} products and ${live?.internalOrders?.total ?? 0} internal orders. ${live?.pendingApprovals?.length ? `${live.pendingApprovals.length} approval(s) are waiting.` : "Nothing is waiting for approval."}`;
   if (/\b(audit|recent work|what happened)\b/.test(q)) return activities.length ? `I checked the latest live activity for ${selectedAgent}. ${activities.slice(0,3).map((a:any)=>String(a.message || a.action_type)).filter(Boolean).join("; ")}` : `I don't have enough recorded activity to claim recent work for ${selectedAgent}.`;
-  if (reason) return `I couldn't complete that action because the AI service reported ${reason}. I won't pretend it succeeded.`;
+  if (reason) return `The language service is temporarily unavailable, so I checked the live BharatShop evidence instead. ${total ? `${total} products are recorded, with ${missing} currently missing a primary image.` : "I don't have enough live evidence to make a stronger claim."}`;
   return "I understand. Tell me what you want changed and I'll work from the live BharatShop evidence.";
+}
+
+function canAnswerLocally(question: string) {
+  return /^(hi|hello|hey|good morning|good afternoon|good evening)\b/i.test(question.trim())
+    || /\bhow are you\b|\bhow's it going\b|\bhow are things\b|\bhow'?s your team\b|\bhow is your team\b|\bteam\b.*\bdoing\b/i.test(question)
+    || /\ball\s+(the\s+)?products?\s+have\s+images\b|\bproducts?\b.*\bimages?\b|\bimage count\b/i.test(question)
+    || /\bthank(s| you)\b|\bwho are you\b/i.test(question)
+    || /\b(block|stuck|issue|problem|why)\b|\b(status|dashboard|what's happening)\b|\b(audit|recent work|what happened)\b/i.test(question);
 }
 
 export async function POST(req: Request) {
@@ -85,6 +98,11 @@ export async function POST(req: Request) {
         const result = await fashionStudio(slash.command, context.productId ? Number(context.productId) : undefined, context.productName ? String(context.productName) : undefined, undefined, slash.rest);
         return NextResponse.json({ reply: result.success ? `${slash.command} completed. Generated ${result.generated} image(s)${result.productId ? ` and attached them to product ${result.productId}.` : "."}` : `${slash.command} failed: ${result.error}`, mode: "fashion-studio-live", result });
       }
+    }
+
+    // These intents are deterministic and should never be blocked by an LLM quota/rate limit.
+    if (canAnswerLocally(question)) {
+      return NextResponse.json({ reply: naturalFallback(question, live, selectedAgent), mode: "evidence-safe-local" });
     }
 
     const apiKey = process.env.OPENAI_API_KEY;
