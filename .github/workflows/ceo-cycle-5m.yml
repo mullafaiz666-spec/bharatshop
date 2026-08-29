@@ -1,9 +1,11 @@
 name: BharatShop CEO Cycle (5m)
 
 on:
-  schedule:
-    - cron: "*/5 * * * *"
   workflow_dispatch:
+
+concurrency:
+  group: bharatshop-ceo-cycle
+  cancel-in-progress: true
 
 jobs:
   cycle:
