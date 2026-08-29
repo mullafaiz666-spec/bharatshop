@@ -2,13 +2,14 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { productImages, productDetails, products } from "@/db/schema";
 import { desc } from "drizzle-orm";
-import { ensureDemoDataSeeded } from "@/lib/seed";
 
 const BAD_IMAGE=/(?:unsplash\.com|source\.unsplash\.com|via\.placeholder\.com|placeholder\.com|placehold\.co|placehold\.it|dummyimage\.com|picsum\.photos|loremflickr\.com|placekitten\.com)/i;
 const cleanUrl=(value:unknown)=>{const url=String(value||"").trim();return /^https?:\/\//i.test(url)&&!BAD_IMAGE.test(url)?url:""};
 const APPROVED=new Set(["VERIFIED","WEB_SEARCH_MATCHED","WEB_IMAGE_EXACT_MATCH"]);
 export async function GET(req:Request){
- await ensureDemoDataSeeded();const {searchParams}=new URL(req.url);const category=searchParams.get("category")||"";const search=searchParams.get("search")||searchParams.get("query")||"";const sort=searchParams.get("sort")||"aiScore";const limit=Math.min(Math.max(parseInt(searchParams.get("limit")||"24",10)||24,1),96);const page=Math.max(parseInt(searchParams.get("page")||"1",10)||1,1);const featured=searchParams.get("featured")==="true";
+ const {searchParams}=new URL(req.url);const category=searchParams.get("category")||"";const search=searchParams.get("search")||searchParams.get("query")||"";const sort=searchParams.get("sort")||"aiScore";const limit=Math.min(Math.max(parseInt(searchParams.get("limit")||"24",10)||24,1),96);const page=Math.max(parseInt(searchParams.get("page")||"1",10)||1,1);const featured=searchParams.get("featured")==="true";
+ // Storefront is read-only against production. AI/demo seed data must never be
+ // created implicitly by a customer request or used to repair production.
  const all=await db.select().from(products).orderBy(desc(products.aiScore));const imageRows=await db.select().from(productImages);const detailRows=await db.select().from(productDetails);const detailMap=new Map(detailRows.map(x=>[x.productId,x]));const galleryMap=new Map<number,{url:string;label:string;order:number}[]>();
  for(const row of imageRows){const url=cleanUrl(row.imageUrl);if(!url||!APPROVED.has(String(row.verificationStatus)))continue;const current=galleryMap.get(row.productId)||[];if(!current.some(x=>x.url===url))current.push({url,label:String(row.altText||"").trim(),order:Number(row.sortOrder)||0});galleryMap.set(row.productId,current.sort((a,b)=>a.order-b.order).slice(0,8));}
  let filtered=all.filter(p=>p.status==="Published");if(featured)filtered=filtered.filter(p=>p.aiScore>=92);if(category&&category!=="ALL")filtered=filtered.filter(p=>p.category===category);if(search){const q=search.toLowerCase().trim();filtered=filtered.filter(p=>p.title.toLowerCase().includes(q)||p.brand.toLowerCase().includes(q)||p.category.toLowerCase().includes(q));}
