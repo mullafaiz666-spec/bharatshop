@@ -1,5 +1,6 @@
 import { pool } from "@/db";
 import { serpSearch } from "@/lib/ai/agent-tools";
+import { resolveProductMedia } from "@/lib/ai/media-resolver";
 
 async function ensureApprovalTable() {
   await pool.query(`CREATE TABLE IF NOT EXISTS ceo_approvals (
@@ -39,21 +40,15 @@ export async function inspectLiveBusinessData() {
     pool.query(`SELECT run_at,total_products_updated,total_products_added,total_products_dropped,avg_ai_score,top_category,total_projected_profit_inr,status FROM product_refresh_logs ORDER BY run_at DESC LIMIT 5`),
     listPendingApprovals(),
   ]);
-  return {
-    products: products.rows[0],
-    internalOrders: orders.rows[0],
-    storefrontOrders: storefrontOrders.rows[0],
-    recentActivity: activity.rows,
-    refreshes: refreshes.rows,
-    pendingApprovals: approvals,
-    inspectedAt: new Date().toISOString(),
-  };
+  return { products: products.rows[0], internalOrders: orders.rows[0], storefrontOrders: storefrontOrders.rows[0], recentActivity: activity.rows, refreshes: refreshes.rows, pendingApprovals: approvals, inspectedAt: new Date().toISOString() };
 }
 
 export async function researchWeb(query: string) {
   const data = await serpSearch(query);
-  return {
-    organic: Array.isArray(data.organic_results) ? data.organic_results.slice(0, 8).map((x: any) => ({ title: x.title, link: x.link, snippet: x.snippet })) : [],
-    shopping: Array.isArray(data.shopping_results) ? data.shopping_results.slice(0, 8).map((x: any) => ({ title: x.title, link: x.link, price: x.price, source: x.source })) : [],
-  };
+  return { organic: Array.isArray(data.organic_results) ? data.organic_results.slice(0, 8).map((x: any) => ({ title: x.title, link: x.link, snippet: x.snippet })) : [], shopping: Array.isArray(data.shopping_results) ? data.shopping_results.slice(0, 8).map((x: any) => ({ title: x.title, link: x.link, price: x.price, source: x.source })) : [] };
+}
+
+/** Search Google Images for a specific catalogue product and save only high-confidence matches. */
+export async function resolveProductImages(productId?: number, productName?: string) {
+  return resolveProductMedia(productId, productName);
 }
