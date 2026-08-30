@@ -4,6 +4,9 @@ import {users} from "@/db/schema";
 import {eq} from "drizzle-orm";
 import {randomBytes,pbkdf2Sync} from "node:crypto";
 
+// This endpoint must never be evaluated as static page data during `next build`.
+export const dynamic = "force-dynamic";
+
 function hash(password:string){
   const salt=randomBytes(16).toString("hex");
   const digest=pbkdf2Sync(password,salt,120000,64,"sha512").toString("hex");
