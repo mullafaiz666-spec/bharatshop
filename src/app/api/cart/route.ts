@@ -4,6 +4,9 @@ import { cartItems, products, aiActivityLogs } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
 import { ensureDemoDataSeeded } from "@/lib/seed";
 
+// Cart is database-backed and must never be statically evaluated during a production build.
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   await ensureDemoDataSeeded();
   const all = await db.select().from(cartItems).orderBy(desc(cartItems.addedAt));
