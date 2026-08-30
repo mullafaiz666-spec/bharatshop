@@ -16,7 +16,7 @@ const createPool = (): Pool => {
     throw new Error("DATABASE_URL is required at runtime");
   }
 
-  const isLocalDatabase = /(?:localhost|127\.0\.0\.1)(?::\d+)?(?:\/|$)/i.test(rawDatabaseUrl);
+  const isLocalDatabase = /(?:localhost|127\.0\.0\.1|\.railway\.internal)(?::\d+)?(?:\/|$)/i.test(rawDatabaseUrl);
 
   let databaseUrl = rawDatabaseUrl;
   if (!isLocalDatabase) {
