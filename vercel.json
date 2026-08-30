@@ -1,4 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "regions": ["pdx1"]
+  "regions": ["pdx1"],
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://veloraskart-agent-production.up.railway.app/api/:path*"
+    }
+  ]
 }
