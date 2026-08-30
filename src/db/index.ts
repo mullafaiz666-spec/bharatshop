@@ -1,35 +1,40 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 
-const rawDatabaseUrl = process.env.DATABASE_URL;
-
-if (!rawDatabaseUrl) throw new Error("DATABASE_URL is required");
-
 const globalForDb = globalThis as typeof globalThis & {
   __bharatShopPostgresPool?: Pool;
 };
 
-const isLocalDatabase = /(?:localhost|127\.0\.0\.1)(?::\d+)?(?:\/|$)/i.test(rawDatabaseUrl);
+const isTransientConnectionError = (error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error);
+  return /connection terminated|connection reset|ECONNRESET|EPIPE|socket hang up|Connection terminated unexpectedly/i.test(message);
+};
 
-// Keep Render's external connection on TLS, but remove URL-level SSL options
-// so node-postgres cannot let a connection-string option override the explicit
-// TLS configuration below.
-let databaseUrl = rawDatabaseUrl;
-if (!isLocalDatabase) {
-  try {
-    const parsed = new URL(rawDatabaseUrl);
-    parsed.searchParams.delete("sslmode");
-    parsed.searchParams.delete("sslcert");
-    parsed.searchParams.delete("sslkey");
-    parsed.searchParams.delete("sslrootcert");
-    databaseUrl = parsed.toString();
-  } catch {
-    // Let pg report malformed connection strings explicitly.
+const createPool = (): Pool => {
+  const rawDatabaseUrl = process.env.DATABASE_URL;
+  if (!rawDatabaseUrl) {
+    throw new Error("DATABASE_URL is required at runtime");
   }
-}
 
-const makePool = () =>
-  new Pool({
+  const isLocalDatabase = /(?:localhost|127\.0\.0\.1)(?::\d+)?(?:\/|$)/i.test(rawDatabaseUrl);
+
+  // Keep Render's external connection on TLS, but remove URL-level SSL options
+  // so node-postgres cannot let a connection-string option override explicit TLS.
+  let databaseUrl = rawDatabaseUrl;
+  if (!isLocalDatabase) {
+    try {
+      const parsed = new URL(rawDatabaseUrl);
+      parsed.searchParams.delete("sslmode");
+      parsed.searchParams.delete("sslcert");
+      parsed.searchParams.delete("sslkey");
+      parsed.searchParams.delete("sslrootcert");
+      databaseUrl = parsed.toString();
+    } catch {
+      // Let pg report malformed connection strings explicitly at runtime.
+    }
+  }
+
+  const pool = new Pool({
     connectionString: databaseUrl,
     ssl: isLocalDatabase ? undefined : { rejectUnauthorized: false },
     max: 1,
@@ -40,52 +45,62 @@ const makePool = () =>
     allowExitOnIdle: true,
   });
 
-const pool = globalForDb.__bharatShopPostgresPool ?? makePool();
+  pool.on("error", (error) => {
+    console.warn(
+      "Postgres pooled connection discarded:",
+      error instanceof Error ? error.message : error,
+    );
+  });
 
-globalForDb.__bharatShopPostgresPool = pool;
-
-pool.on("error", (error) => {
-  console.warn(
-    "Postgres pooled connection discarded:",
-    error instanceof Error ? error.message : error,
-  );
-});
-
-const isTransientConnectionError = (error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error);
-  return /connection terminated|connection reset|ECONNRESET|EPIPE|socket hang up|Connection terminated unexpectedly/i.test(message);
+  return pool;
 };
 
-// A terminated Render socket can survive inside a serverless pool long enough
-// to make the next request fail too. The first retry therefore uses a brand-new
-// Pool/socket, then closes that disposable pool. Production data is never
-// mutated by this layer.
-const originalQuery = pool.query.bind(pool);
-pool.query = (async (...args: any[]) => {
+const getPool = (): Pool => {
+  if (!globalForDb.__bharatShopPostgresPool) {
+    globalForDb.__bharatShopPostgresPool = createPool();
+  }
+  return globalForDb.__bharatShopPostgresPool;
+};
+
+// The module itself is safe to import during `next build`: DATABASE_URL is
+// deliberately read only when the first database operation actually occurs.
+// A Proxy preserves the existing `pool.query(...)` call sites while deferring
+// creation of the real pg Pool until runtime.
+export const pool = new Proxy({} as Pool, {
+  get(_target, property, receiver) {
+    const value = Reflect.get(getPool() as object, property, receiver);
+    return typeof value === "function" ? value.bind(getPool()) : value;
+  },
+  set(_target, property, value) {
+    Reflect.set(getPool() as object, property, value);
+    return true;
+  },
+});
+
+export const db = drizzle(pool);
+
+// Executes a query with recovery from stale/reset serverless sockets.
+// This is intentionally separate from module initialization so builds never
+// require a live database connection.
+export async function queryWithRetry<T>(
+  query: (pool: Pool) => Promise<T>,
+): Promise<T> {
   let lastError: unknown;
+
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      if (attempt === 0) {
-        return await (originalQuery as (...queryArgs: any[]) => Promise<unknown>)(...args);
-      }
-
-      const freshPool = makePool();
-      try {
-        // Pool.query has several overloads; this wrapper deliberately forwards
-        // the original argument tuple unchanged, so use the implementation
-        // signature here rather than trying to model every pg overload.
-        return await (freshPool.query as (...queryArgs: any[]) => Promise<unknown>)(...args);
-      } finally {
-        await freshPool.end().catch(() => undefined);
-      }
+      return await query(getPool());
     } catch (error) {
       lastError = error;
       if (!isTransientConnectionError(error) || attempt === 2) throw error;
+
+      // Drop the stale global pool before the next attempt so a fresh socket is used.
+      const stalePool = globalForDb.__bharatShopPostgresPool;
+      globalForDb.__bharatShopPostgresPool = undefined;
+      await stalePool?.end().catch(() => undefined);
       await new Promise((resolve) => setTimeout(resolve, 150 * (attempt + 1)));
     }
   }
-  throw lastError;
-}) as typeof pool.query;
 
-export { pool };
-export const db = drizzle(pool);
+  throw lastError;
+}
