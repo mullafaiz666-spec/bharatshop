@@ -5,7 +5,7 @@
     "dev": "next dev",
     "build": "next build",
     "db:push": "drizzle-kit push --force",
-    "start": "next start -H 0.0.0.0 -p ${PORT:-10000}",
+    "start": "drizzle-kit push --force && next start -H 0.0.0.0 -p ${PORT:-10000}",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"
   },
