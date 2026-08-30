@@ -1,0 +1,14 @@
+use_default_settings: true
+
+general:
+  instance_name: "BharatShop Image Search"
+
+search:
+  formats:
+    - html
+    - json
+
+server:
+  secret_key: "bharatshop-searxng-8f2a91c4d6e73b0912aa"
+  limiter: false
+  image_proxy: false
