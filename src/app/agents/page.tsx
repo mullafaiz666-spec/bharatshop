@@ -11,7 +11,7 @@ const agents = [
 export default function AgentStudio() {
   const [agent, setAgent] = useState<(typeof agents)[number]["id"]>("marketing");
   const [objective, setObjective] = useState("");
-  const [result, setResult] = useState<unknown>(null);
+  const [result, setResult] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [approve, setApprove] = useState(false);
 
@@ -19,8 +19,9 @@ export default function AgentStudio() {
     setBusy(true); setResult(null);
     try {
       const response = await fetch("/api/agents", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ agent, objective, approveActions: approve }) });
-      setResult(await response.json());
-    } catch (error) { setResult({ error: String(error) }); }
+      const data = await response.json();
+      setResult(JSON.stringify(data, null, 2));
+    } catch (error) { setResult(JSON.stringify({ error: String(error) }, null, 2)); }
     finally { setBusy(false); }
   }
 
@@ -33,6 +34,6 @@ export default function AgentStudio() {
     <textarea value={objective} onChange={(e) => setObjective(e.target.value)} placeholder="Tell the agent what you want to accomplish…" rows={6} style={{ width: "100%", padding: 16, borderRadius: 14, border: "1px solid #ddd", fontSize: 16, boxSizing: "border-box" }} />
     {agent === "automation" && <label style={{ display: "block", margin: "14px 0" }}><input type="checkbox" checked={approve} onChange={(e) => setApprove(e.target.checked)} /> Allow approved mutating actions to execute</label>}
     <button disabled={busy || !objective.trim()} onClick={run} style={{ marginTop: 14, padding: "12px 20px", borderRadius: 10, border: 0, background: "#111", color: "white" }}>{busy ? "Running…" : "Run agent"}</button>
-    {result && <pre style={{ marginTop: 24, padding: 18, borderRadius: 14, background: "#f6f6f6", overflow: "auto", whiteSpace: "pre-wrap" }}>{JSON.stringify(result, null, 2)}</pre>}
+    {result !== null && <pre style={{ marginTop: 24, padding: 18, borderRadius: 14, background: "#f6f6f6", overflow: "auto", whiteSpace: "pre-wrap" }}>{result}</pre>}
   </main>;
 }
