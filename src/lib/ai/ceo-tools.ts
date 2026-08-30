@@ -1,6 +1,6 @@
 import { pool } from "@/db";
 import { serpSearch } from "@/lib/ai/agent-tools";
-import { resolveProductMedia } from "@/lib/ai/media-resolver";
+import { resolveVerifiedProductMedia } from "@/lib/ai/media-resolver";
 import { FASHION_COMMANDS, runFashionCommand } from "@/lib/ai/fashion-studio";
 
 async function ensureApprovalTable() {
@@ -53,7 +53,7 @@ export async function researchWeb(query: string) {
   const data = await serpSearch(query);
   return { organic: Array.isArray(data.organic_results) ? data.organic_results.slice(0, 8).map((x: any) => ({ title: x.title, link: x.link, snippet: x.snippet })) : [], shopping: Array.isArray(data.shopping_results) ? data.shopping_results.slice(0, 8).map((x: any) => ({ title: x.title, link: x.link, price: x.price, source: x.source })) : [] };
 }
-export async function resolveProductImages(productId?: number, productName?: string) { return resolveProductMedia(productId, productName); }
+export async function resolveProductImages(productId?: number, productName?: string) { return resolveVerifiedProductMedia(productId, productName); }
 export async function fashionStudio(command: string, productId?: number, productName?: string, count?: number, extraPrompt?: string) {
   return runFashionCommand({ command, productId, productName, count, extraPrompt });
 }
