@@ -2,3 +2,4 @@ import {NextResponse} from "next/server";
 import {db} from "@/db";
 import {sellerApplications} from "@/db/schema";
 export async function POST(req:Request){try{const b=await req.json();const name=String(b.name||"").trim(),email=String(b.email||"").trim().toLowerCase(),phone=String(b.phone||"").trim(),storeName=String(b.storeName||"").trim(),category=String(b.category||"").trim();if(!name||!email||!phone||!storeName||!category)return NextResponse.json({error:"All seller fields are required"},{status:400});const [row]=await db.insert(sellerApplications).values({name,email,phone,storeName,category}).returning({id:sellerApplications.id,status:sellerApplications.status});return NextResponse.json({ok:true,application:row});}catch(e){return NextResponse.json({error:e instanceof Error?e.message:"Unable to submit application"},{status:503})}}
+export const dynamic = "force-dynamic";

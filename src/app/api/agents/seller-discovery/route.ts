@@ -30,3 +30,5 @@ export async function GET(req:Request){
 
 export async function POST(req:Request){
  try{const b=await req.json().catch(()=>({}));const state=String(b.state||"Maharashtra").trim();const city=String(b.city||"Mumbai").trim();const category=String(b.category||"GenZ fashion").trim();if(!state||!city||!category)return NextResponse.json({error:"State, city and category are required"},{status:400});const found=await discover(state,city,category);if(!found.configured)return NextResponse.json(found,{status:503});let saved=0;for(const x of found.results){await db.insert(sellerLeads).values(x).onConflictDoNothing();saved++;}return NextResponse.json({ok:true,market:{state,city,category},discovered:found.results.length,saved,leads:found.results});}catch(e){return NextResponse.json({error:e instanceof Error?e.message:"Seller discovery failed"},{status:503});}}
+
+export const dynamic = "force-dynamic";

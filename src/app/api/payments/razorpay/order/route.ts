@@ -56,3 +56,5 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Razorpay order creation failed" }, { status: 500 });
   }
 }
+
+export const dynamic = "force-dynamic";

@@ -336,3 +336,5 @@ export async function POST(req: Request) {
 
   return NextResponse.json({ error: `Unknown action: ${action}` }, { status: 400 });
 }
+
+export const dynamic = "force-dynamic";

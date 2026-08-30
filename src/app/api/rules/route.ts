@@ -78,3 +78,5 @@ export async function DELETE(req: Request) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Error" }, { status: 500 });
   }
 }
+
+export const dynamic = "force-dynamic";

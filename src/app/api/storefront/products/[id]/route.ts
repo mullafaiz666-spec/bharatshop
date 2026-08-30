@@ -9,3 +9,5 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   if (!found[0]) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.json({ product: found[0] });
 }
+
+export const dynamic = "force-dynamic";

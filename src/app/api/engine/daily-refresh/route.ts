@@ -174,3 +174,5 @@ export async function GET() {
     .limit(10);
   return NextResponse.json({ refreshLogs: logs });
 }
+
+export const dynamic = "force-dynamic";

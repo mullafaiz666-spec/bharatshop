@@ -18,8 +18,6 @@ const createPool = (): Pool => {
 
   const isLocalDatabase = /(?:localhost|127\.0\.0\.1)(?::\d+)?(?:\/|$)/i.test(rawDatabaseUrl);
 
-  // Keep Render's external connection on TLS, but remove URL-level SSL options
-  // so node-postgres cannot let a connection-string option override explicit TLS.
   let databaseUrl = rawDatabaseUrl;
   if (!isLocalDatabase) {
     try {
@@ -62,10 +60,6 @@ const getPool = (): Pool => {
   return globalForDb.__bharatShopPostgresPool;
 };
 
-// The module itself is safe to import during `next build`: DATABASE_URL is
-// deliberately read only when the first database operation actually occurs.
-// A Proxy preserves the existing `pool.query(...)` call sites while deferring
-// creation of the real pg Pool until runtime.
 export const pool = new Proxy({} as Pool, {
   get(_target, property, receiver) {
     const value = Reflect.get(getPool() as object, property, receiver);
@@ -77,11 +71,27 @@ export const pool = new Proxy({} as Pool, {
   },
 });
 
-export const db = drizzle(pool);
+// `db` must stay lazy too: drizzle(pool) touches pool properties immediately,
+// which would trigger a real connection attempt at module-import time (i.e.
+// during `next build`, before DATABASE_URL exists). Deferring behind a Proxy
+// keeps import-time side effects at zero.
+type DbInstance = ReturnType<typeof drizzle>;
+let dbInstance: DbInstance | undefined;
 
-// Executes a query with recovery from stale/reset serverless sockets.
-// This is intentionally separate from module initialization so builds never
-// require a live database connection.
+const getDb = (): DbInstance => {
+  if (!dbInstance) {
+    dbInstance = drizzle(getPool());
+  }
+  return dbInstance;
+};
+
+export const db = new Proxy({} as DbInstance, {
+  get(_target, property, receiver) {
+    const value = Reflect.get(getDb() as object, property, receiver);
+    return typeof value === "function" ? value.bind(getDb()) : value;
+  },
+}) as DbInstance;
+
 export async function queryWithRetry<T>(
   query: (pool: Pool) => Promise<T>,
 ): Promise<T> {
@@ -94,7 +104,6 @@ export async function queryWithRetry<T>(
       lastError = error;
       if (!isTransientConnectionError(error) || attempt === 2) throw error;
 
-      // Drop the stale global pool before the next attempt so a fresh socket is used.
       const stalePool = globalForDb.__bharatShopPostgresPool;
       globalForDb.__bharatShopPostgresPool = undefined;
       await stalePool?.end().catch(() => undefined);

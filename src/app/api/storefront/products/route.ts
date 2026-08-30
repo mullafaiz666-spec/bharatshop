@@ -19,3 +19,5 @@ export async function GET(req:Request){
  const catCounts:Record<string,number>={};all.filter(p=>p.status==="Published").forEach(p=>{catCounts[p.category]=(catCounts[p.category]||0)+1;});
  return NextResponse.json({products:customerProducts,total,page,totalPages:Math.ceil(total/limit),categoryCount:catCounts});
 }
+
+export const dynamic = "force-dynamic";

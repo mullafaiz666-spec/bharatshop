@@ -36,3 +36,5 @@ export async function PATCH(req: Request) {
     await db.update(orders).set({ ...(fulfillmentStatus && { fulfillmentStatus }), ...(trackingCode && { supplierTrackingCode: String(trackingCode) }), ...(carrierName && { carrierName: String(carrierName) }), ...(fulfillmentStatus === "Delivered" && { fulfilledAt: new Date() }) }).where(eq(orders.orderNumber, updated.orderRef)); return NextResponse.json({ order: updated });
   } catch (err: unknown) { return NextResponse.json({ error: err instanceof Error ? err.message : "Error" }, { status: 500 }); }
 }
+
+export const dynamic = "force-dynamic";

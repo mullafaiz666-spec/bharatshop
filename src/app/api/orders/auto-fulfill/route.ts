@@ -30,3 +30,5 @@ export async function POST() {
     return NextResponse.json({ success: false, error: err instanceof Error ? err.message : "Purchase queue preparation failed" }, { status: 500 });
   }
 }
+
+export const dynamic = "force-dynamic";
