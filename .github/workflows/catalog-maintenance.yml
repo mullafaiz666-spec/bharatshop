@@ -1,8 +1,9 @@
 # Live catalog verification for product media and enrichment.
-# Intentionally manual-only while production routing/database stability is being verified.
 name: BharatShop Catalog Maintenance
 
 on:
+  schedule:
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 concurrency:
