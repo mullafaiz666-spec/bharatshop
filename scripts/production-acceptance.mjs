@@ -2,7 +2,7 @@
 
 const BASE_URL = String(process.env.BASE_URL || "https://bharatshop-9w4a.onrender.com").replace(/\/$/, "");
 const AUTOMATION_TOKEN = process.env.BHARATSHOP_AUTOMATION_TOKEN || "";
-const RUN_IMAGE_RESOLVER = process.env.RUN_IMAGE_RESOLVER === "true";
+const RUN_IMAGE_RESOLVER = process.env.RUN_IMAGE_RESOLVER !== "false";
 const RUN_CEO = process.env.RUN_CEO !== "false";
 
 const gates = [];
@@ -19,26 +19,33 @@ async function request(path, options = {}) {
   return { response, data };
 }
 
+function imageStats(data) {
+  const rows = Array.isArray(data?.products) ? data.products : [];
+  const urls = rows.flatMap(p => Array.isArray(p.imageUrls) ? p.imageUrls : []).filter(Boolean).map(String);
+  const https = urls.filter(u => /^https:\/\//i.test(u));
+  return { rows, urls, https };
+}
+
 async function main() {
   console.log(`Production acceptance target: ${BASE_URL}`);
 
   try {
     const health = await request("/api/health");
     gate("Render → HTTP → PostgreSQL", health.response.status === 200 && health.data?.ok === true, `HTTP ${health.response.status}, ok=${health.data?.ok}`);
+    gate("Provider readiness", health.response.status === 200 && health.data?.providers?.openai === true && health.data?.providers?.anthropic === true, `OpenAI=${health.data?.providers?.openai ?? "?"}, Anthropic=${health.data?.providers?.anthropic ?? "?"}`);
   } catch (error) {
     gate("Render → HTTP → PostgreSQL", false, error.message);
+    gate("Provider readiness", false, "health endpoint unavailable");
     console.error("BLOCKED: production hostname is not reachable from this runner.");
     process.exit(2);
   }
 
   try {
     const products = await request("/api/storefront/products?limit=24");
-    const rows = Array.isArray(products.data?.products) ? products.data.products : [];
-    const dbBacked = rows.length > 0 && rows.every(p => Number.isInteger(Number(p.id)) && p.title && p.sku);
-    gate("Products", products.response.status === 200 && dbBacked, `HTTP ${products.response.status}, returned=${rows.length}, total=${products.data?.total ?? "?"}`);
-    const imageRows = rows.flatMap(p => Array.isArray(p.imageUrls) ? p.imageUrls : []).filter(Boolean);
-    const httpsImages = imageRows.filter(u => /^https:\/\//i.test(String(u)));
-    gate("Images", imageRows.length > 0 && httpsImages.length === imageRows.length, `images=${imageRows.length}, https=${httpsImages.length}`);
+    const stats = imageStats(products.data);
+    const dbBacked = stats.rows.length > 0 && stats.rows.every(p => Number.isInteger(Number(p.id)) && p.title && p.sku);
+    gate("Products", products.response.status === 200 && dbBacked, `HTTP ${products.response.status}, returned=${stats.rows.length}, total=${products.data?.total ?? "?"}`);
+    gate("Images", stats.urls.length > 0 && stats.https.length === stats.urls.length, `images=${stats.urls.length}, https=${stats.https.length}`);
   } catch (error) {
     gate("Products", false, error.message);
     gate("Images", false, "product endpoint unavailable");
@@ -55,14 +62,20 @@ async function main() {
           body: JSON.stringify({ limit: 1 }),
         });
         const first = Array.isArray(resolved.data?.results) ? resolved.data.results[0] : null;
-        const ok = resolved.response.status === 200 && resolved.data?.status === "COMPLETED" && first?.status === "COMPLETE_MEDIA_RESOLVED";
-        gate("Image Resolver", ok, `HTTP ${resolved.response.status}, status=${resolved.data?.status ?? "?"}, first=${first?.status ?? "?"}, error=${first?.error ?? "none"}, message=${first?.message ?? "none"}`);
+        const ok = resolved.response.status === 200 && resolved.data?.status === "COMPLETED" && first?.status === "COMPLETE_MEDIA_RESOLVED" && Number(first?.imageCount || 0) > 0;
+        gate("Image Resolver", ok, `HTTP ${resolved.response.status}, status=${resolved.data?.status ?? "?"}, first=${first?.status ?? "?"}, imageCount=${first?.imageCount ?? 0}, error=${first?.error ?? "none"}`);
+
+        const after = await request("/api/storefront/products?limit=24");
+        const afterStats = imageStats(after.data);
+        gate("Images after Resolver", after.response.status === 200 && afterStats.urls.length > 0 && afterStats.https.length === afterStats.urls.length, `HTTP ${after.response.status}, images=${afterStats.urls.length}, https=${afterStats.https.length}`);
       } catch (error) {
         gate("Image Resolver", false, error.message);
+        gate("Images after Resolver", false, "resolver verification did not complete");
       }
     }
   } else {
-    gate("Image Resolver", true, "implementation present; live resolver mutation skipped (set RUN_IMAGE_RESOLVER=true to execute)");
+    gate("Image Resolver", false, "RUN_IMAGE_RESOLVER=false — live resolver execution is required for acceptance");
+    gate("Images after Resolver", false, "live resolver execution skipped");
   }
 
   if (RUN_CEO) {
@@ -74,25 +87,30 @@ async function main() {
       });
       const trace = Array.isArray(ceo.data?.toolExecutions) ? ceo.data.toolExecutions : [];
       const live = ceo.response.status === 200 && ceo.data?.mode === "ai-agent-live" && Boolean(ceo.data?.reply);
-      gate("CEO/OpenAI → Agent → Tool → Tool Result", live, `HTTP ${ceo.response.status}, mode=${ceo.data?.mode ?? "?"}, code=${ceo.data?.code ?? "?"}, error=${ceo.data?.error ?? "none"}, tools=${trace.length}`);
+      gate("CEO/OpenAI → Agent → Tool → Tool Result", live && trace.length > 0, `HTTP ${ceo.response.status}, mode=${ceo.data?.mode ?? "?"}, tools=${trace.length}, error=${ceo.data?.error ?? "none"}`);
       gate("Evidence → Audit", live && trace.length > 0 && trace.every(x => x.auditId), `tool audits=${trace.filter(x => x.auditId).length}/${trace.length}`);
+      gate("Natural Response", live && typeof ceo.data?.reply === "string" && ceo.data.reply.trim().length > 0, `replyLength=${String(ceo.data?.reply || "").trim().length}`);
 
       const audit = await request("/api/agent-audit");
       const records = Array.isArray(audit.data?.records) ? audit.data.records : [];
       const hasDecision = records.some(r => r.event_type === "CEO_DECISION");
       const lastDecision = records.find(r => r.event_type === "CEO_DECISION");
       const evidence = lastDecision?.evidence && typeof lastDecision.evidence === "object" ? lastDecision.evidence : {};
-      const providerStatus = evidence.providerStatus ?? "n/a";
-      gate("Decision", audit.response.status === 200 && hasDecision, `HTTP ${audit.response.status}, records=${records.length}, CEO_DECISION=${hasDecision}, lastStatus=${lastDecision?.status ?? "?"}, providerStatus=${providerStatus}, summary=${String(lastDecision?.summary ?? "").slice(0,140)}`);
+      gate("Decision", audit.response.status === 200 && hasDecision, `HTTP ${audit.response.status}, records=${records.length}, CEO_DECISION=${hasDecision}, lastStatus=${lastDecision?.status ?? "?"}`);
+      gate("Persisted evidence reference", Boolean(lastDecision?.evidence_id), `evidence_id=${lastDecision?.evidence_id ?? "missing"}`);
     } catch (error) {
       gate("CEO/OpenAI → Agent → Tool → Tool Result", false, error.message);
       gate("Evidence → Audit", false, "CEO request did not complete");
+      gate("Natural Response", false, "CEO request did not complete");
       gate("Decision", false, "CEO request did not complete");
+      gate("Persisted evidence reference", false, "CEO request did not complete");
     }
   } else {
     gate("CEO/OpenAI → Agent → Tool → Tool Result", false, "RUN_CEO=false");
     gate("Evidence → Audit", false, "RUN_CEO=false");
+    gate("Natural Response", false, "RUN_CEO=false");
     gate("Decision", false, "RUN_CEO=false");
+    gate("Persisted evidence reference", false, "RUN_CEO=false");
   }
 
   try {
@@ -102,6 +120,11 @@ async function main() {
   } catch (error) {
     gate("Approval", false, error.message);
   }
+
+  // No destructive production action is synthesized by this acceptance runner.
+  // Action → Verified Result remains a hard gate until a real, approval-aware
+  // action is executed and its resulting state is re-read from production.
+  gate("Action → Verified Result", false, "No real approval-aware production action was executed by this acceptance runner");
 
   const failed = gates.filter(g => !g.ok);
   console.log(`\nAcceptance result: ${failed.length ? "BLOCKED" : "PASS"}`);
