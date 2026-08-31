@@ -42,10 +42,10 @@ export default function CEOChat() {
     try {
       const r = await fetch("/api/ceo-chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: q, messages: next, context }) });
       const d = await r.json();
-      setMessages(v => [...v, { role: "assistant", content: d.reply || d.error || "CEO decision unavailable." }]);
+      setMessages(v => [...v, { role: "assistant", content: d.reply || d.error || "AI CEO is unavailable." }]);
       void refreshApprovals();
     } catch {
-      setMessages(v => [...v, { role: "assistant", content: "CEO decision service is unavailable. Do not make a consequential supplier purchase without a successful re-check." }]);
+      setMessages(v => [...v, { role: "assistant", content: "AI CEO is unavailable right now." }]);
     } finally { setBusy(false); }
   }
 
