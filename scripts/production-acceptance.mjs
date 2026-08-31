@@ -56,8 +56,9 @@ async function main() {
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${AUTOMATION_TOKEN}` },
           body: JSON.stringify({ limit: 1 }),
         });
-        const ok = resolved.response.status === 200 && resolved.data?.status === "COMPLETED";
-        gate("Image Resolver", ok, `HTTP ${resolved.response.status}, processed=${resolved.data?.processed ?? "?"}, resolved=${resolved.data?.resolved ?? "?"}, needsImages=${resolved.data?.needsImages ?? "?"}`);
+        const first = Array.isArray(resolved.data?.results) ? resolved.data.results[0] : null;
+        const ok = resolved.response.status === 200 && resolved.data?.status === "COMPLETED" && first?.status === "COMPLETE_MEDIA_RESOLVED";
+        gate("Image Resolver", ok, `HTTP ${resolved.response.status}, status=${resolved.data?.status ?? "?"}, first=${first?.status ?? "?"}, error=${first?.error ?? "none"}, message=${first?.message ?? "none"}`);
       } catch (error) {
         gate("Image Resolver", false, error.message);
       }
@@ -75,13 +76,14 @@ async function main() {
       });
       const trace = Array.isArray(ceo.data?.toolExecutions) ? ceo.data.toolExecutions : [];
       const live = ceo.response.status === 200 && ceo.data?.mode === "ai-agent-live" && Boolean(ceo.data?.reply);
-      gate("CEO/OpenAI → Agent → Tool → Tool Result", live, `HTTP ${ceo.response.status}, mode=${ceo.data?.mode ?? "?"}, tools=${trace.length}`);
+      gate("CEO/OpenAI → Agent → Tool → Tool Result", live, `HTTP ${ceo.response.status}, mode=${ceo.data?.mode ?? "?"}, code=${ceo.data?.code ?? "?"}, error=${ceo.data?.error ?? "none"}, tools=${trace.length}`);
       gate("Evidence → Audit", live && trace.length > 0 && trace.every(x => x.auditId), `tool audits=${trace.filter(x => x.auditId).length}/${trace.length}`);
 
       const audit = await request("/api/agent-audit");
       const records = Array.isArray(audit.data?.records) ? audit.data.records : [];
       const hasDecision = records.some(r => r.event_type === "CEO_DECISION");
-      gate("Decision", audit.response.status === 200 && hasDecision, `HTTP ${audit.response.status}, records=${records.length}, CEO_DECISION=${hasDecision}`);
+      const lastDecision = records.find(r => r.event_type === "CEO_DECISION");
+      gate("Decision", audit.response.status === 200 && hasDecision, `HTTP ${audit.response.status}, records=${records.length}, CEO_DECISION=${hasDecision}, lastStatus=${lastDecision?.status ?? "?"}, lastSummary=${String(lastDecision?.summary ?? "").slice(0,160)}`);
     } catch (error) {
       gate("CEO/OpenAI → Agent → Tool → Tool Result", false, error.message);
       gate("Evidence → Audit", false, "CEO request did not complete");
