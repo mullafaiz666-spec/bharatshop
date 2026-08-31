@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createApproval, inspectLiveBusinessData, researchWeb, listPendingApprovals, resolveProductImages, rejectProduct, fashionStudio, listFashionCommands } from "@/lib/ai/ceo-tools";
+import { recordAudit, recordToolExecution } from "@/lib/ai/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -37,16 +38,29 @@ const tools = [
   { type: "function", name: "list_pending_approvals", description: "List pending human approvals.", parameters: { type: "object", properties: {}, additionalProperties: false } }
 ];
 
-async function runTool(name: string, args: any) {
-  if (name === "inspect_live_business_data") return inspectLiveBusinessData();
-  if (name === "research_web") return researchWeb(String(args.query || ""));
-  if (name === "resolve_product_images") return resolveProductImages(args.product_id ? Number(args.product_id) : undefined, args.product_name ? String(args.product_name) : undefined);
-  if (name === "fashion_studio") return fashionStudio(String(args.command || ""), args.product_id ? Number(args.product_id) : undefined, args.product_name ? String(args.product_name) : undefined, args.count ? Number(args.count) : undefined, args.extra_prompt ? String(args.extra_prompt) : undefined);
-  if (name === "list_fashion_commands") return listFashionCommands();
-  if (name === "reject_product") return rejectProduct(args.product_id ? Number(args.product_id) : undefined, args.product_name ? String(args.product_name) : undefined, String(args.reason || "No verified exact-product image available; skipping this listing so the catalogue can continue."));
-  if (name === "create_approval") return createApproval({ title: String(args.title), actionType: String(args.action_type), payload: args.payload ?? {}, reason: String(args.reason), riskLevel: String(args.risk_level) });
-  if (name === "list_pending_approvals") return listPendingApprovals();
-  throw new Error(`Unknown CEO tool: ${name}`);
+async function runTool(name: string, args: any, agentName: string, trace: any[], approvalId?: number) {
+  const startedAt = Date.now();
+  let result: any;
+  try {
+    if (name === "inspect_live_business_data") result = await inspectLiveBusinessData();
+    else if (name === "research_web") result = await researchWeb(String(args.query || ""));
+    else if (name === "resolve_product_images") result = await resolveProductImages(args.product_id ? Number(args.product_id) : undefined, args.product_name ? String(args.product_name) : undefined);
+    else if (name === "fashion_studio") result = await fashionStudio(String(args.command || ""), args.product_id ? Number(args.product_id) : undefined, args.product_name ? String(args.product_name) : undefined, args.count ? Number(args.count) : undefined, args.extra_prompt ? String(args.extra_prompt) : undefined);
+    else if (name === "list_fashion_commands") result = listFashionCommands();
+    else if (name === "reject_product") result = await rejectProduct(args.product_id ? Number(args.product_id) : undefined, args.product_name ? String(args.product_name) : undefined, String(args.reason || "No verified exact-product image available; skipping this listing so the catalogue can continue."));
+    else if (name === "create_approval") result = await createApproval({ title: String(args.title), actionType: String(args.action_type), payload: args.payload ?? {}, reason: String(args.reason), riskLevel: String(args.risk_level) });
+    else if (name === "list_pending_approvals") result = await listPendingApprovals();
+    else throw new Error(`Unknown CEO tool: ${name}`);
+  } catch (e) {
+    result = { error: e instanceof Error ? e.message : "Tool failed" };
+  }
+  try {
+    const audit = await recordToolExecution(agentName, name, args, result, startedAt, approvalId);
+    trace.push({ auditId: audit.id, tool: name, input: args, result, status: audit.status, createdAt: audit.created_at });
+  } catch (e) {
+    trace.push({ auditId: null, tool: name, input: args, result, status: "AUDIT_FAILED", auditError: e instanceof Error ? e.message : "Audit write failed" });
+  }
+  return result;
 }
 
 function slashCommand(question: string) { const m = question.match(/^(\/[a-z0-9]+)(?:\s+(.+))?$/i); return m ? { command: m[1].toLowerCase(), rest: (m[2] || "").trim() } : null; }
@@ -71,12 +85,12 @@ function canAnswerLocally(question: string) { return /^(hi|hello|hey|good mornin
 export async function POST(req: Request) {
   try {
     const body = await req.json(); const messages = Array.isArray(body.messages) ? body.messages.slice(-30) : []; const question = String(body.question || messages.at(-1)?.content || "").trim(); if (!question) return NextResponse.json({ error: "Question required" }, { status: 400 }); const context = body.context ?? {}; const selectedAgent = String(context.selectedAgent || "AI CEO"); let live:any=null; try { live=await inspectLiveBusinessData(); } catch {}
-    const slash = slashCommand(question); if (slash) { const known=listFashionCommands().some(x=>x.command===slash.command); if(known){const result=await fashionStudio(slash.command,context.productId?Number(context.productId):undefined,context.productName?String(context.productName):undefined,undefined,slash.rest);return NextResponse.json({reply:result.success?`${slash.command} is done. I generated ${result.generated} image(s)${result.productId?` and attached them to product ${result.productId}.`:"."}`:`I couldn't complete ${slash.command}: ${result.error}`,mode:"fashion-studio-live",result});}}
+    const slash = slashCommand(question); if (slash) { const known=listFashionCommands().some(x=>x.command===slash.command); if(known){const trace:any[]=[];const result=await runTool("fashion_studio",{command:slash.command,extra_prompt:slash.rest,product_id:context.productId,product_name:context.productName},selectedAgent,trace);const reply=result?.success?`${slash.command} is done. I generated ${result.generated} image(s)${result.productId?` and attached them to product ${result.productId}.`:"."}`:`I couldn't complete ${slash.command}: ${result?.error || "unknown error"}`;try{await recordAudit({agentName:selectedAgent,eventType:"CEO_DECISION",status:result?.success?"SUCCESS":"FAILED",summary:result?.success?`CEO completed ${slash.command}.`:`CEO could not complete ${slash.command}.`,evidence:{question,selectedAgent,toolExecutions:trace,decision:reply}});}catch{}return NextResponse.json({reply,mode:"fashion-studio-live",result});}}
     if (canAnswerLocally(question)) return NextResponse.json({reply:naturalFallback(question,live,selectedAgent),mode:"evidence-safe-local"});
     const apiKey=process.env.OPENAI_API_KEY; if(!apiKey)return NextResponse.json({reply:naturalFallback(question,live,selectedAgent,"OPENAI_API_KEY missing"),mode:"evidence-safe-fallback"});
     const instructions=`${BASE_SYSTEM}\n\nSELECTED AGENT: ${selectedAgent}\n${AGENT_FOCUS[selectedAgent]||"Stay focused on the selected agent's domain."}`;
     const input:any[]=[{role:"developer",content:`LIVE BUSINESS EVIDENCE: ${JSON.stringify({...context,liveEvidence:live}).slice(0,24000)}`}]; for(const m of messages){const content=String(m?.content||"").trim();if(content)input.push({role:m?.role==="assistant"?"assistant":"user",content});} if(!input.some((x:any)=>x.role==="user"&&x.content===question))input.push({role:"user",content:question});
-    let responseData:any=null; for(let round=0;round<8;round++){const r=await fetch("https://api.openai.com/v1/responses",{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${apiKey}`},body:JSON.stringify({model:process.env.OPENAI_MODEL||"gpt-5",instructions,input,tools,tool_choice:"auto"})});if(!r.ok)return NextResponse.json({reply:naturalFallback(question,live,selectedAgent,`AI provider ${r.status}`),mode:"evidence-safe-fallback"});responseData=await r.json();const output=Array.isArray(responseData.output)?responseData.output:[];input.push(...output);const calls=output.filter((x:any)=>x.type==="function_call");if(!calls.length)break;for(const call of calls){let args:any={};try{args=JSON.parse(call.arguments||"{}")}catch{}let result:any;try{result=await runTool(call.name,args)}catch(e){result={error:e instanceof Error?e.message:"Tool failed"}}input.push({type:"function_call_output",call_id:call.call_id,output:JSON.stringify(result).slice(0,30000)});}}
-    const reply=String(responseData?.output_text||"").trim(); return NextResponse.json({reply:reply||naturalFallback(question,live,selectedAgent,"empty response"),mode:reply?"ai-agent-live":"evidence-safe-fallback"});
+    let responseData:any=null; const trace:any[]=[]; for(let round=0;round<8;round++){const r=await fetch("https://api.openai.com/v1/responses",{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${apiKey}`},body:JSON.stringify({model:process.env.OPENAI_MODEL||"gpt-5",instructions,input,tools,tool_choice:"auto"})});if(!r.ok)return NextResponse.json({reply:naturalFallback(question,live,selectedAgent,`AI provider ${r.status}`),mode:"evidence-safe-fallback"});responseData=await r.json();const output=Array.isArray(responseData.output)?responseData.output:[];input.push(...output);const calls=output.filter((x:any)=>x.type==="function_call");if(!calls.length)break;for(const call of calls){let args:any={};try{args=JSON.parse(call.arguments||"{}")}catch{args={_parseError:"Invalid function arguments"}}const result=await runTool(call.name,args,selectedAgent,trace);input.push({type:"function_call_output",call_id:call.call_id,output:JSON.stringify(result).slice(0,30000)});}}
+    const reply=String(responseData?.output_text||"").trim(); const finalReply=reply||naturalFallback(question,live,selectedAgent,"empty response"); try{await recordAudit({agentName:selectedAgent,eventType:"CEO_DECISION",status:reply?"SUCCESS":"FALLBACK",summary:reply?"CEO produced a decision after live tool/evidence processing.":"CEO returned an evidence-safe fallback.",evidence:{question,selectedAgent,toolExecutions:trace,decision:finalReply}});}catch{} return NextResponse.json({reply:finalReply,mode:reply?"ai-agent-live":"evidence-safe-fallback"});
   } catch(error){return NextResponse.json({error:error instanceof Error?error.message:"Agent chat failed"},{status:500});}
 }
