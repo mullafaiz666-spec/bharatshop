@@ -1,0 +1,23 @@
+name: Production Acceptance
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BASE_URL: https://bharatshop-9w4a.onrender.com
+      RUN_CEO: "true"
+      RUN_IMAGE_RESOLVER: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN != '' && 'true' || 'false' }}
+      BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Run production acceptance
+        run: node scripts/production-acceptance.mjs
