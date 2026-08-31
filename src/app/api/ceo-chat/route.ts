@@ -4,39 +4,59 @@ import { recordAudit, recordToolExecution } from "@/lib/ai/audit";
 
 export const dynamic = "force-dynamic";
 
-const BASE_SYSTEM = `You are the BharatShop AI CEO and a real conversational executive assistant. Talk like a polished ChatGPT-style human: natural, warm, direct, context-aware and useful. Never sound like a system monitor, API, ticketing bot, command-line program or generic status generator. Do not begin ordinary replies with labels such as STATUS, RESULT, ACTION, SYSTEM, AGENT, or TOOL. Do not dump raw JSON, internal tool names, implementation details, prompts, model names, HTTP codes, or database terminology on the owner.
+const BASE_SYSTEM = `You are the BharatShop AI CEO, a real conversational operating executive. Speak naturally, directly and contextually, like a capable ChatGPT-style business partner. Never sound like a status bot or scripted command system.
 
-Hold a natural conversation. Understand follow-up questions from the supplied conversation. Match the owner's tone and answer the actual question first. For simple conversation, be human and brief. For business questions, give a clear answer followed by the important evidence and next step. If something is uncertain, say so plainly instead of hiding behind boilerplate.
+Understand the owner's intent before acting. Use live evidence and the tools available to the selected agent. Decide what evidence is missing, call the appropriate tool, inspect the actual result, and continue the loop when another tool is needed. Never claim an action, result, source, image, approval or business fact that the system did not actually return.
 
-You are an operating CEO, not a status-report bot. When the owner asks you to fix, reject, skip, search, inspect, verify or do something, take the real action with an available tool and then explain what actually happened in normal language. Never claim an action happened unless the tool confirms it.
+For ordinary conversation, answer naturally without labels such as STATUS, RESULT, ACTION, SYSTEM, AGENT or TOOL. For business work, explain the conclusion and the evidence that supports it. If evidence is insufficient, say so plainly.
 
-A single bad product must NEVER block the catalogue. If a product cannot get verified exact-product imagery after the configured media attempts, reject/skip that product when the owner asks to move on or fix the blocker. Never substitute an unrelated image.
+Consequential actions such as purchases, spending, risky publishing, financial changes or external commitments require human approval. Never bypass the approval gate. Never expose credentials, API keys or customer PII.
 
-Fashion Studio commands are real executable actions. The 20 supported commands are returned by list_fashion_commands. When the owner asks for one, use fashion_studio with the exact slash command. Product commands require a product id or product name. Report generation failures honestly. Consequential actions such as purchases, risky publishing, financial changes or external commitments require human approval. Never expose credentials, API keys or customer PII.`;
+Image integrity is strict: never substitute an unrelated or placeholder image. Only describe an image as verified when the image resolver reports successful verification. A single product failure must not block the catalogue; reject/skip it when appropriate so the rest can continue.
 
-const AGENT_FOCUS: Record<string,string> = {
-  "AI CEO": "Own the whole operation and coordinate specialists based on business impact.",
-  "Product Research": "Own product discovery, trends, supplier opportunities and margin potential.",
-  "Source Verification": "Own source validity, exact product identity, price, stock, shipping and economics.",
-  "Image & Media": "Own exact-product imagery, multi-angle galleries and Fashion Studio generation.",
-  "Fashion Enrichment": "Own clothing attributes, variants, sizing and fit information.",
-  "Listing & Marketing": "Own customer-facing copy, presentation and catalogue readiness.",
-  "Learning & Analytics": "Own performance evidence, lessons and anomalies.",
-  "Advertising": "Own campaign preparation and performance.",
-  "Order Re-check": "Own live supplier price, stock, shipping and margin checks.",
-  "Fulfilment & Tracking": "Own supplier purchase lifecycle and tracking; never claim a purchase without evidence."
+Fashion Studio commands are executable. Use the exact slash command from list_fashion_commands when requested and report failures honestly.`;
+
+const AGENT_FOCUS: Record<string, string> = {
+  "AI CEO": "Coordinate the whole operation, decide which specialist capability is needed, and optimize for business impact.",
+  "Product Research": "Research product opportunities, trends, suppliers and margin potential. Prefer current web evidence over assumptions.",
+  "Source Verification": "Verify exact source identity, pricing, stock, shipping, economics and supporting evidence.",
+  "Image & Media": "Resolve and validate exact-product media. Never accept unrelated, placeholder or unverified imagery.",
+  "Fashion Enrichment": "Work on fashion attributes, variants, sizing, fit and product enrichment using available evidence.",
+  "Listing & Marketing": "Work on customer-facing listing quality, positioning, copy and catalogue readiness.",
+  "Learning & Analytics": "Analyze live business evidence, performance, anomalies, outcomes and lessons.",
+  "Advertising": "Analyze and prepare advertising decisions using current business evidence and campaign context.",
+  "Order Re-check": "Re-check order economics and supplier evidence. Never claim a purchase is safe without sufficient live evidence and never bypass approval.",
+  "Fulfilment & Tracking": "Own the fulfilment lifecycle and tracking evidence. Never claim a supplier purchase or shipment without confirmed records."
 };
 
-const tools = [
-  { type: "function", name: "inspect_live_business_data", description: "Inspect live BharatShop state.", parameters: { type: "object", properties: {}, additionalProperties: false } },
-  { type: "function", name: "research_web", description: "Research current public web evidence.", parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"], additionalProperties: false } },
-  { type: "function", name: "resolve_product_images", description: "Find and save verified exact-product images.", parameters: { type: "object", properties: { product_id: { type: "integer" }, product_name: { type: "string" } }, additionalProperties: false } },
-  { type: "function", name: "fashion_studio", description: "Execute one of BharatShop's 20 AI Fashion Studio slash commands and persist generated product visuals when a product is supplied.", parameters: { type: "object", properties: { command: { type: "string", enum: listFashionCommands().map(x => x.command) }, product_id: { type: "integer" }, product_name: { type: "string" }, count: { type: "integer" }, extra_prompt: { type: "string" } }, required: ["command"], additionalProperties: false } },
-  { type: "function", name: "list_fashion_commands", description: "List all 20 supported Fashion Studio commands and their purposes.", parameters: { type: "object", properties: {}, additionalProperties: false } },
-  { type: "function", name: "reject_product", description: "Reject/skip one catalogue product that cannot be verified, allowing the rest of the catalogue to continue.", parameters: { type: "object", properties: { product_id: { type: "integer" }, product_name: { type: "string" }, reason: { type: "string" } }, additionalProperties: false } },
-  { type: "function", name: "create_approval", description: "Prepare a persistent human approval request for a consequential action.", parameters: { type: "object", properties: { title: { type: "string" }, action_type: { type: "string" }, payload: { type: "object", additionalProperties: true }, reason: { type: "string" }, risk_level: { type: "string", enum: ["LOW","MEDIUM","HIGH","CRITICAL"] } }, required: ["title","action_type","reason","risk_level"], additionalProperties: false } },
-  { type: "function", name: "list_pending_approvals", description: "List pending human approvals.", parameters: { type: "object", properties: {}, additionalProperties: false } }
-];
+const TOOL_DEFINITIONS: Record<string, any> = {
+  inspect_live_business_data: { type: "function", name: "inspect_live_business_data", description: "Inspect live BharatShop business state, orders, products, recent agent activity, refreshes and pending approvals.", parameters: { type: "object", properties: {}, additionalProperties: false } },
+  research_web: { type: "function", name: "research_web", description: "Research current public web evidence for a business question.", parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"], additionalProperties: false } },
+  resolve_product_images: { type: "function", name: "resolve_product_images", description: "Find and save verified exact-product images. Never invent or substitute media.", parameters: { type: "object", properties: { product_id: { type: "integer" }, product_name: { type: "string" } }, additionalProperties: false } },
+  fashion_studio: { type: "function", name: "fashion_studio", description: "Execute a supported BharatShop Fashion Studio command and persist generated visuals when a product is supplied.", parameters: { type: "object", properties: { command: { type: "string", enum: listFashionCommands().map(x => x.command) }, product_id: { type: "integer" }, product_name: { type: "string" }, count: { type: "integer" }, extra_prompt: { type: "string" } }, required: ["command"], additionalProperties: false } },
+  list_fashion_commands: { type: "function", name: "list_fashion_commands", description: "List the supported Fashion Studio commands.", parameters: { type: "object", properties: {}, additionalProperties: false } },
+  reject_product: { type: "function", name: "reject_product", description: "Reject one catalogue product that cannot be verified so the rest of the catalogue can continue.", parameters: { type: "object", properties: { product_id: { type: "integer" }, product_name: { type: "string" }, reason: { type: "string" } }, additionalProperties: false } },
+  create_approval: { type: "function", name: "create_approval", description: "Create a persistent human approval request for a consequential action. Do not execute the consequential action itself.", parameters: { type: "object", properties: { title: { type: "string" }, action_type: { type: "string" }, payload: { type: "object", additionalProperties: true }, reason: { type: "string" }, risk_level: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"] } }, required: ["title", "action_type", "reason", "risk_level"], additionalProperties: false } },
+  list_pending_approvals: { type: "function", name: "list_pending_approvals", description: "List current pending human approvals.", parameters: { type: "object", properties: {}, additionalProperties: false } }
+};
+
+const AGENT_TOOLS: Record<string, string[]> = {
+  "AI CEO": Object.keys(TOOL_DEFINITIONS),
+  "Product Research": ["inspect_live_business_data", "research_web"],
+  "Source Verification": ["inspect_live_business_data", "research_web"],
+  "Image & Media": ["inspect_live_business_data", "research_web", "resolve_product_images", "fashion_studio", "list_fashion_commands", "reject_product"],
+  "Fashion Enrichment": ["inspect_live_business_data", "research_web", "fashion_studio", "list_fashion_commands"],
+  "Listing & Marketing": ["inspect_live_business_data", "research_web", "fashion_studio", "list_fashion_commands"],
+  "Learning & Analytics": ["inspect_live_business_data", "research_web"],
+  "Advertising": ["inspect_live_business_data", "research_web", "list_pending_approvals", "create_approval"],
+  "Order Re-check": ["inspect_live_business_data", "research_web", "list_pending_approvals", "create_approval"],
+  "Fulfilment & Tracking": ["inspect_live_business_data", "list_pending_approvals", "create_approval"]
+};
+
+function toolsFor(agent: string) {
+  const names = AGENT_TOOLS[agent] || AGENT_TOOLS["AI CEO"];
+  return names.map(name => TOOL_DEFINITIONS[name]);
+}
 
 async function runTool(name: string, args: any, agentName: string, trace: any[], approvalId?: number) {
   const startedAt = Date.now();
@@ -47,7 +67,7 @@ async function runTool(name: string, args: any, agentName: string, trace: any[],
     else if (name === "resolve_product_images") result = await resolveProductImages(args.product_id ? Number(args.product_id) : undefined, args.product_name ? String(args.product_name) : undefined);
     else if (name === "fashion_studio") result = await fashionStudio(String(args.command || ""), args.product_id ? Number(args.product_id) : undefined, args.product_name ? String(args.product_name) : undefined, args.count ? Number(args.count) : undefined, args.extra_prompt ? String(args.extra_prompt) : undefined);
     else if (name === "list_fashion_commands") result = listFashionCommands();
-    else if (name === "reject_product") result = await rejectProduct(args.product_id ? Number(args.product_id) : undefined, args.product_name ? String(args.product_name) : undefined, String(args.reason || "No verified exact-product image available; skipping this listing so the catalogue can continue."));
+    else if (name === "reject_product") result = await rejectProduct(args.product_id ? Number(args.product_id) : undefined, args.product_name ? String(args.product_name) : undefined, String(args.reason || "Product could not be verified; skipping it so the catalogue can continue."));
     else if (name === "create_approval") result = await createApproval({ title: String(args.title), actionType: String(args.action_type), payload: args.payload ?? {}, reason: String(args.reason), riskLevel: String(args.risk_level) });
     else if (name === "list_pending_approvals") result = await listPendingApprovals();
     else throw new Error(`Unknown CEO tool: ${name}`);
@@ -63,34 +83,97 @@ async function runTool(name: string, args: any, agentName: string, trace: any[],
   return result;
 }
 
-function slashCommand(question: string) { const m = question.match(/^(\/[a-z0-9]+)(?:\s+(.+))?$/i); return m ? { command: m[1].toLowerCase(), rest: (m[2] || "").trim() } : null; }
-
-function naturalFallback(question: string, live: any, selectedAgent: string, reason?: string) {
-  const q = question.trim().toLowerCase(); const activities = Array.isArray(live?.recentActivity) ? live.recentActivity : []; const blocked = activities.filter((a:any) => /block|warn|fail|error|missing|unavailable/i.test(`${a.status} ${a.message}`)); const total = Number(live?.products?.total ?? 0); const missing = Number(live?.products?.missing_images ?? 0); const published = Number(live?.products?.published ?? 0);
-  if (/^(hi|hello|hey|good morning|good afternoon|good evening)\b/.test(q)) return "Hey! Good to hear from you. What would you like me to take care of?";
-  if (/\bhow are you\b|\bhow's it going\b|\bhow are things\b/.test(q)) return "I'm good, thanks. I'm here and ready to keep BharatShop moving.";
-  if (/\bhow'?s your team\b|\bhow is your team\b|\bteam\b.*\bdoing\b/.test(q)) return `The team is online. ${selectedAgent} is ready. I currently see ${total} catalogue products, ${published} published, and ${missing} still missing a primary image.`;
-  if (/\ball\s+(the\s+)?products?\s+have\s+images\b|\bproducts?\b.*\bimages?\b|\bimage count\b/.test(q)) return `I checked the live catalogue: ${total} products total, ${published} published, and ${missing} currently missing a primary image. So no, I can't honestly say every product has an image yet.`;
-  if (/\bthank(s| you)\b/.test(q)) return "You're welcome. I'm on it.";
-  if (/\bwho are you\b/.test(q)) return "I'm the BharatShop AI CEO. You can talk to me naturally about the business, and I can inspect the live operation, coordinate the agents and take supported actions.";
-  if (/\b(block|stuck|issue|problem|why)\b/.test(q)) return blocked.length ? `I found a blocker: ${blocked[0].message}. One product shouldn't stop the operation; I can skip the affected listing and keep the rest moving.` : `I don't see a confirmed blocker for ${selectedAgent} in the latest live activity.`;
-  if (/\b(status|dashboard|what's happening)\b/.test(q)) return `We're live. I currently see ${total} products and ${live?.internalOrders?.total ?? 0} internal orders. ${live?.pendingApprovals?.length ? `${live.pendingApprovals.length} approval(s) are waiting.` : "Nothing is waiting for approval."}`;
-  if (/\b(audit|recent work|what happened)\b/.test(q)) return activities.length ? `I checked the latest live activity for ${selectedAgent}. ${activities.slice(0,3).map((a:any)=>String(a.message || a.action_type)).filter(Boolean).join("; ")}` : `I don't have enough recorded activity to claim recent work for ${selectedAgent}.`;
-  if (reason) return `The language service is temporarily unavailable, so I checked the live BharatShop evidence instead. ${total ? `${total} products are recorded, with ${missing} currently missing a primary image.` : "I don't have enough live evidence to make a stronger claim."}`;
-  return "I understand. Tell me what you want changed and I'll work from the live BharatShop evidence.";
+function slashCommand(question: string) {
+  const m = question.match(/^(\\/[a-z0-9]+)(?:\\s+(.+))?$/i);
+  return m ? { command: m[1].toLowerCase(), rest: (m[2] || "").trim() } : null;
 }
 
-function canAnswerLocally(question: string) { return /^(hi|hello|hey|good morning|good afternoon|good evening)\b/i.test(question.trim()) || /\bhow are you\b|\bhow's it going\b|\bhow are things\b|\bhow'?s your team\b|\bhow is your team\b|\bteam\b.*\bdoing\b/i.test(question) || /\ball\s+(the\s+)?products?\s+have\s+images\b|\bproducts?\b.*\bimages?\b|\bimage count\b/i.test(question) || /\bthank(s| you)\b|\bwho are you\b/i.test(question) || /\b(block|stuck|issue|problem|why)\b|\b(status|dashboard|what's happening)\b|\b(audit|recent work|what happened)\b/i.test(question); }
+async function failTruthfully(message: string, agentName: string, evidence: any = {}) {
+  try {
+    await recordAudit({ agentName, eventType: "CEO_DECISION", status: "FAILED", summary: message, evidence });
+  } catch {}
+  return NextResponse.json({ error: message, code: "CEO_AI_UNAVAILABLE", agent: agentName }, { status: 503 });
+}
 
 export async function POST(req: Request) {
+  const startedAt = Date.now();
   try {
-    const body = await req.json(); const messages = Array.isArray(body.messages) ? body.messages.slice(-30) : []; const question = String(body.question || messages.at(-1)?.content || "").trim(); if (!question) return NextResponse.json({ error: "Question required" }, { status: 400 }); const context = body.context ?? {}; const selectedAgent = String(context.selectedAgent || "AI CEO"); let live:any=null; try { live=await inspectLiveBusinessData(); } catch {}
-    const slash = slashCommand(question); if (slash) { const known=listFashionCommands().some(x=>x.command===slash.command); if(known){const trace:any[]=[];const result=await runTool("fashion_studio",{command:slash.command,extra_prompt:slash.rest,product_id:context.productId,product_name:context.productName},selectedAgent,trace);const reply=result?.success?`${slash.command} is done. I generated ${result.generated} image(s)${result.productId?` and attached them to product ${result.productId}.`:"."}`:`I couldn't complete ${slash.command}: ${result?.error || "unknown error"}`;try{await recordAudit({agentName:selectedAgent,eventType:"CEO_DECISION",status:result?.success?"SUCCESS":"FAILED",summary:result?.success?`CEO completed ${slash.command}.`:`CEO could not complete ${slash.command}.`,evidence:{question,selectedAgent,toolExecutions:trace,decision:reply}});}catch{}return NextResponse.json({reply,mode:"fashion-studio-live",result});}}
-    if (canAnswerLocally(question)) return NextResponse.json({reply:naturalFallback(question,live,selectedAgent),mode:"evidence-safe-local"});
-    const apiKey=process.env.OPENAI_API_KEY; if(!apiKey)return NextResponse.json({reply:naturalFallback(question,live,selectedAgent,"OPENAI_API_KEY missing"),mode:"evidence-safe-fallback"});
-    const instructions=`${BASE_SYSTEM}\n\nSELECTED AGENT: ${selectedAgent}\n${AGENT_FOCUS[selectedAgent]||"Stay focused on the selected agent's domain."}`;
-    const input:any[]=[{role:"developer",content:`LIVE BUSINESS EVIDENCE: ${JSON.stringify({...context,liveEvidence:live}).slice(0,24000)}`}]; for(const m of messages){const content=String(m?.content||"").trim();if(content)input.push({role:m?.role==="assistant"?"assistant":"user",content});} if(!input.some((x:any)=>x.role==="user"&&x.content===question))input.push({role:"user",content:question});
-    let responseData:any=null; const trace:any[]=[]; for(let round=0;round<8;round++){const r=await fetch("https://api.openai.com/v1/responses",{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${apiKey}`},body:JSON.stringify({model:process.env.OPENAI_MODEL||"gpt-5",instructions,input,tools,tool_choice:"auto"})});if(!r.ok)return NextResponse.json({reply:naturalFallback(question,live,selectedAgent,`AI provider ${r.status}`),mode:"evidence-safe-fallback"});responseData=await r.json();const output=Array.isArray(responseData.output)?responseData.output:[];input.push(...output);const calls=output.filter((x:any)=>x.type==="function_call");if(!calls.length)break;for(const call of calls){let args:any={};try{args=JSON.parse(call.arguments||"{}")}catch{args={_parseError:"Invalid function arguments"}}const result=await runTool(call.name,args,selectedAgent,trace);input.push({type:"function_call_output",call_id:call.call_id,output:JSON.stringify(result).slice(0,30000)});}}
-    const reply=String(responseData?.output_text||"").trim(); const finalReply=reply||naturalFallback(question,live,selectedAgent,"empty response"); try{await recordAudit({agentName:selectedAgent,eventType:"CEO_DECISION",status:reply?"SUCCESS":"FALLBACK",summary:reply?"CEO produced a decision after live tool/evidence processing.":"CEO returned an evidence-safe fallback.",evidence:{question,selectedAgent,toolExecutions:trace,decision:finalReply}});}catch{} return NextResponse.json({reply:finalReply,mode:reply?"ai-agent-live":"evidence-safe-fallback"});
-  } catch(error){return NextResponse.json({error:error instanceof Error?error.message:"Agent chat failed"},{status:500});}
+    const body = await req.json();
+    const messages = Array.isArray(body.messages) ? body.messages.slice(-30) : [];
+    const question = String(body.question || messages.at(-1)?.content || "").trim();
+    if (!question) return NextResponse.json({ error: "Question required" }, { status: 400 });
+
+    const context = body.context ?? {};
+    const selectedAgent = String(context.selectedAgent || "AI CEO");
+    const tools = toolsFor(selectedAgent);
+    let live: any = null;
+    try { live = await inspectLiveBusinessData(); } catch (e) {
+      live = { evidenceError: e instanceof Error ? e.message : "Live evidence unavailable" };
+    }
+
+    const slash = slashCommand(question);
+    if (slash && listFashionCommands().some(x => x.command === slash.command)) {
+      if (!AGENT_TOOLS[selectedAgent]?.includes("fashion_studio")) {
+        return NextResponse.json({ error: `${selectedAgent} does not have permission to execute Fashion Studio commands.`, code: "AGENT_TOOL_NOT_ALLOWED" }, { status: 403 });
+      }
+      const trace: any[] = [];
+      const result = await runTool("fashion_studio", { command: slash.command, extra_prompt: slash.rest, product_id: context.productId, product_name: context.productName }, selectedAgent, trace);
+      const reply = result?.success
+        ? `${slash.command} is complete. I generated ${result.generated} image(s)${result.productId ? ` and attached them to product ${result.productId}.` : "."}`
+        : `I couldn't complete ${slash.command}: ${result?.error || "the tool did not confirm success"}`;
+      try { await recordAudit({ agentName: selectedAgent, eventType: "CEO_DECISION", status: result?.success ? "SUCCESS" : "FAILED", summary: reply, evidence: { question, selectedAgent, toolExecutions: trace, decision: reply, durationMs: Date.now() - startedAt } }); } catch {}
+      return NextResponse.json({ reply, mode: "fashion-studio-live", result });
+    }
+
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) return failTruthfully("AI CEO is unavailable because the OpenAI service is not configured.", selectedAgent, { question, selectedAgent, liveEvidence: live });
+
+    const instructions = `${BASE_SYSTEM}\n\nSELECTED AGENT: ${selectedAgent}\n${AGENT_FOCUS[selectedAgent] || "Operate only within the selected agent's permitted responsibilities."}\n\nThe selected agent has access only to the tools supplied in this request. Do not pretend to have capabilities outside them.`;
+    const input: any[] = [{ role: "developer", content: `LIVE BUSINESS EVIDENCE: ${JSON.stringify({ ...context, liveEvidence: live }).slice(0, 24000)}` }];
+    for (const m of messages) {
+      const content = String(m?.content || "").trim();
+      if (content) input.push({ role: m?.role === "assistant" ? "assistant" : "user", content });
+    }
+    if (!input.some((x: any) => x.role === "user" && x.content === question)) input.push({ role: "user", content: question });
+
+    let responseData: any = null;
+    const trace: any[] = [];
+    for (let round = 0; round < 8; round++) {
+      const r = await fetch("https://api.openai.com/v1/responses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({ model: process.env.OPENAI_MODEL || "gpt-5.6-luna", instructions, input, tools, tool_choice: "auto" })
+      });
+      if (!r.ok) return failTruthfully("AI CEO is unavailable because the OpenAI service did not return a successful response.", selectedAgent, { question, selectedAgent, providerStatus: r.status, liveEvidence: live, toolExecutions: trace });
+      responseData = await r.json();
+      const output = Array.isArray(responseData.output) ? responseData.output : [];
+      input.push(...output);
+      const calls = output.filter((x: any) => x.type === "function_call");
+      if (!calls.length) break;
+      for (const call of calls) {
+        let args: any = {};
+        try { args = JSON.parse(call.arguments || "{}"); } catch { args = { _parseError: "Invalid function arguments" }; }
+        const result = await runTool(call.name, args, selectedAgent, trace);
+        input.push({ type: "function_call_output", call_id: call.call_id, output: JSON.stringify(result).slice(0, 30000) });
+      }
+    }
+
+    const reply = String(responseData?.output_text || "").trim();
+    if (!reply) return failTruthfully("AI CEO is unavailable because no final AI response was produced.", selectedAgent, { question, selectedAgent, liveEvidence: live, toolExecutions: trace });
+
+    try {
+      await recordAudit({
+        agentName: selectedAgent,
+        eventType: "CEO_DECISION",
+        status: "SUCCESS",
+        summary: "CEO produced a decision after live evidence and agent-scoped tool processing.",
+        evidence: { question, selectedAgent, toolExecutions: trace, decision: reply, durationMs: Date.now() - startedAt }
+      });
+    } catch {}
+
+    return NextResponse.json({ reply, mode: "ai-agent-live", agent: selectedAgent, toolExecutions: trace });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Agent chat failed";
+    return NextResponse.json({ error: message, code: "CEO_CHAT_FAILED" }, { status: 500 });
+  }
 }
