@@ -21,7 +21,7 @@ export async function POST(req: Request) {
 
     const images = await db.select().from(productImages).where(eq(productImages.productId, p.id));
     const verifiedImage = images.find(i =>
-      ["VERIFIED", "WEB_SEARCH_MATCHED", "WEB_IMAGE_EXACT_MATCH"].includes(String(i.verificationStatus)) &&
+      ["VERIFIED", "WEB_SEARCH_MATCHED", "WEB_IMAGE_EXACT_MATCH", "AI_VISION_VERIFIED"].includes(String(i.verificationStatus)) &&
       /^https?:\/\//i.test(i.imageUrl) && /^https?:\/\//i.test(i.sourceUrl),
     );
     if (!verifiedImage) return NextResponse.json({ status: "BLOCKED", error: "No verified source-backed image" }, { status: 422 });
@@ -50,5 +50,5 @@ export async function POST(req: Request) {
 }
 
 export async function GET() {
-  return NextResponse.json({ agent: "Listing-Creative-Agent", status: process.env.OPENAI_API_KEY ? "ready" : "blocked_missing_keys", publicationGate: "CEO", capabilities: ["openai_copy", "positioning", "creative", "publication_gate"] });
+  return NextResponse.json({ agent: "Listing-Creative-Agent", status: process.env.OPENAI_API_KEY ? "ready" : "blocked_missing_keys", publicationGate: "CEO", capabilities: ["openai_copy", "positioning", "creative", "verified_image_gate", "publication_gate"] });
 }
