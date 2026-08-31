@@ -1,1 +1,2 @@
 Railway deployment trigger for the production main branch. Source of truth is the latest main commit.
+Acceptance remediation trigger: 2026-08-31 production-chain verification.
