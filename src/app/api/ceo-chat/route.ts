@@ -84,8 +84,10 @@ async function runTool(name: string, args: any, agentName: string, trace: any[],
 }
 
 function slashCommand(question: string) {
-  const m = question.match(/^(\/ [a-z0-9]+)(?:\s+(.+))?$/i);
-  return m ? { command: m[1].replace("/ ", "/").toLowerCase(), rest: (m[2] || "").trim() } : null;
+  const parts = question.trim().split(" ");
+  const command = (parts.shift() || "").toLowerCase();
+  if (!/^\/[a-z0-9]+$/i.test(command)) return null;
+  return { command, rest: parts.join(" ").trim() };
 }
 
 async function failTruthfully(message: string, agentName: string, evidence: any = {}) {
