@@ -84,14 +84,12 @@ async function runTool(name: string, args: any, agentName: string, trace: any[],
 }
 
 function slashCommand(question: string) {
-  const m = question.match(/^(\\/[a-z0-9]+)(?:\\s+(.+))?$/i);
-  return m ? { command: m[1].toLowerCase(), rest: (m[2] || "").trim() } : null;
+  const m = question.match(/^(\/ [a-z0-9]+)(?:\s+(.+))?$/i);
+  return m ? { command: m[1].replace("/ ", "/").toLowerCase(), rest: (m[2] || "").trim() } : null;
 }
 
 async function failTruthfully(message: string, agentName: string, evidence: any = {}) {
-  try {
-    await recordAudit({ agentName, eventType: "CEO_DECISION", status: "FAILED", summary: message, evidence });
-  } catch {}
+  try { await recordAudit({ agentName, eventType: "CEO_DECISION", status: "FAILED", summary: message, evidence }); } catch {}
   return NextResponse.json({ error: message, code: "CEO_AI_UNAVAILABLE", agent: agentName }, { status: 503 });
 }
 
@@ -107,20 +105,14 @@ export async function POST(req: Request) {
     const selectedAgent = String(context.selectedAgent || "AI CEO");
     const tools = toolsFor(selectedAgent);
     let live: any = null;
-    try { live = await inspectLiveBusinessData(); } catch (e) {
-      live = { evidenceError: e instanceof Error ? e.message : "Live evidence unavailable" };
-    }
+    try { live = await inspectLiveBusinessData(); } catch (e) { live = { evidenceError: e instanceof Error ? e.message : "Live evidence unavailable" }; }
 
     const slash = slashCommand(question);
     if (slash && listFashionCommands().some(x => x.command === slash.command)) {
-      if (!AGENT_TOOLS[selectedAgent]?.includes("fashion_studio")) {
-        return NextResponse.json({ error: `${selectedAgent} does not have permission to execute Fashion Studio commands.`, code: "AGENT_TOOL_NOT_ALLOWED" }, { status: 403 });
-      }
+      if (!AGENT_TOOLS[selectedAgent]?.includes("fashion_studio")) return NextResponse.json({ error: `${selectedAgent} does not have permission to execute Fashion Studio commands.`, code: "AGENT_TOOL_NOT_ALLOWED" }, { status: 403 });
       const trace: any[] = [];
       const result = await runTool("fashion_studio", { command: slash.command, extra_prompt: slash.rest, product_id: context.productId, product_name: context.productName }, selectedAgent, trace);
-      const reply = result?.success
-        ? `${slash.command} is complete. I generated ${result.generated} image(s)${result.productId ? ` and attached them to product ${result.productId}.` : "."}`
-        : `I couldn't complete ${slash.command}: ${result?.error || "the tool did not confirm success"}`;
+      const reply = result?.success ? `${slash.command} is complete. I generated ${result.generated} image(s)${result.productId ? ` and attached them to product ${result.productId}.` : "."}` : `I couldn't complete ${slash.command}: ${result?.error || "the tool did not confirm success"}`;
       try { await recordAudit({ agentName: selectedAgent, eventType: "CEO_DECISION", status: result?.success ? "SUCCESS" : "FAILED", summary: reply, evidence: { question, selectedAgent, toolExecutions: trace, decision: reply, durationMs: Date.now() - startedAt } }); } catch {}
       return NextResponse.json({ reply, mode: "fashion-studio-live", result });
     }
@@ -130,20 +122,13 @@ export async function POST(req: Request) {
 
     const instructions = `${BASE_SYSTEM}\n\nSELECTED AGENT: ${selectedAgent}\n${AGENT_FOCUS[selectedAgent] || "Operate only within the selected agent's permitted responsibilities."}\n\nThe selected agent has access only to the tools supplied in this request. Do not pretend to have capabilities outside them.`;
     const input: any[] = [{ role: "developer", content: `LIVE BUSINESS EVIDENCE: ${JSON.stringify({ ...context, liveEvidence: live }).slice(0, 24000)}` }];
-    for (const m of messages) {
-      const content = String(m?.content || "").trim();
-      if (content) input.push({ role: m?.role === "assistant" ? "assistant" : "user", content });
-    }
+    for (const m of messages) { const content = String(m?.content || "").trim(); if (content) input.push({ role: m?.role === "assistant" ? "assistant" : "user", content }); }
     if (!input.some((x: any) => x.role === "user" && x.content === question)) input.push({ role: "user", content: question });
 
     let responseData: any = null;
     const trace: any[] = [];
     for (let round = 0; round < 8; round++) {
-      const r = await fetch("https://api.openai.com/v1/responses", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify({ model: process.env.OPENAI_MODEL || "gpt-5.6-luna", instructions, input, tools, tool_choice: "auto" })
-      });
+      const r = await fetch("https://api.openai.com/v1/responses", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` }, body: JSON.stringify({ model: process.env.OPENAI_MODEL || "gpt-5.6-luna", instructions, input, tools, tool_choice: "auto" }) });
       if (!r.ok) return failTruthfully("AI CEO is unavailable because the OpenAI service did not return a successful response.", selectedAgent, { question, selectedAgent, providerStatus: r.status, liveEvidence: live, toolExecutions: trace });
       responseData = await r.json();
       const output = Array.isArray(responseData.output) ? responseData.output : [];
@@ -161,16 +146,7 @@ export async function POST(req: Request) {
     const reply = String(responseData?.output_text || "").trim();
     if (!reply) return failTruthfully("AI CEO is unavailable because no final AI response was produced.", selectedAgent, { question, selectedAgent, liveEvidence: live, toolExecutions: trace });
 
-    try {
-      await recordAudit({
-        agentName: selectedAgent,
-        eventType: "CEO_DECISION",
-        status: "SUCCESS",
-        summary: "CEO produced a decision after live evidence and agent-scoped tool processing.",
-        evidence: { question, selectedAgent, toolExecutions: trace, decision: reply, durationMs: Date.now() - startedAt }
-      });
-    } catch {}
-
+    try { await recordAudit({ agentName: selectedAgent, eventType: "CEO_DECISION", status: "SUCCESS", summary: "CEO produced a decision after live evidence and agent-scoped tool processing.", evidence: { question, selectedAgent, toolExecutions: trace, decision: reply, durationMs: Date.now() - startedAt } }); } catch {}
     return NextResponse.json({ reply, mode: "ai-agent-live", agent: selectedAgent, toolExecutions: trace });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Agent chat failed";
