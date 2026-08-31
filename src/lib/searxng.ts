@@ -1,4 +1,7 @@
 // IMAGE SEARCH CLIENT — SearXNG primary, SerpAPI fallback
+// IMPORTANT: image-search providers often return proxied/CDN URLs without a
+// .jpg/.png extension. Do not reject those URLs here; the media resolver
+// performs the authoritative content-type/download gate before Claude Vision.
 
 export interface SearXNGImageResult {
   url: string;
@@ -16,11 +19,10 @@ function getSearxngBaseUrl(): string | null {
   return url ? url.replace(/\/+$/, "") : null;
 }
 
-function isLikelyImageUrl(url: string): boolean {
+function isCandidateHttpUrl(url: string): boolean {
   try {
     const u = new URL(url);
-    if (u.protocol !== "https:" && u.protocol !== "http:") return false;
-    return /\.(jpe?g|png|webp|gif|avif)(\?.*)?$/i.test(u.pathname) || u.hostname.includes("images");
+    return u.protocol === "https:" || u.protocol === "http:";
   } catch {
     return false;
   }
@@ -42,7 +44,7 @@ async function serpApiImageSearch(query: string, limit: number, timeoutMs: numbe
     const out: SearXNGImageResult[] = [];
     for (const r of data?.images_results || []) {
       const image = String(r.original || r.thumbnail || "");
-      if (!image || !isLikelyImageUrl(image)) continue;
+      if (!image || !isCandidateHttpUrl(image)) continue;
       out.push({
         url: image,
         thumbnailUrl: typeof r.thumbnail === "string" ? r.thumbnail : undefined,
@@ -82,8 +84,10 @@ export async function searxngImageSearch(
         const data = await res.json().catch(() => null) as { results?: Array<Record<string, unknown>> } | null;
         const results: SearXNGImageResult[] = [];
         for (const r of data?.results || []) {
+          // Prefer img_src. Some SearXNG engines return a CDN/proxy URL here
+          // that has no image extension, so extension-based filtering is wrong.
           const img = String((r.img_src as string) || (r.url as string) || "");
-          if (!img || !isLikelyImageUrl(img)) continue;
+          if (!img || !isCandidateHttpUrl(img)) continue;
           results.push({
             url: img,
             thumbnailUrl: typeof r.thumbnail_src === "string" ? r.thumbnail_src : undefined,
