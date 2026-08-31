@@ -22,9 +22,8 @@ async function request(path, options = {}) {
 async function main() {
   console.log(`Production acceptance target: ${BASE_URL}`);
 
-  let health;
   try {
-    health = await request("/api/health");
+    const health = await request("/api/health");
     gate("Render → HTTP → PostgreSQL", health.response.status === 200 && health.data?.ok === true, `HTTP ${health.response.status}, ok=${health.data?.ok}`);
   } catch (error) {
     gate("Render → HTTP → PostgreSQL", false, error.message);
@@ -32,9 +31,8 @@ async function main() {
     process.exit(2);
   }
 
-  let products;
   try {
-    products = await request("/api/storefront/products?limit=24");
+    const products = await request("/api/storefront/products?limit=24");
     const rows = Array.isArray(products.data?.products) ? products.data.products : [];
     const dbBacked = rows.length > 0 && rows.every(p => Number.isInteger(Number(p.id)) && p.title && p.sku);
     gate("Products", products.response.status === 200 && dbBacked, `HTTP ${products.response.status}, returned=${rows.length}, total=${products.data?.total ?? "?"}`);
@@ -83,7 +81,9 @@ async function main() {
       const records = Array.isArray(audit.data?.records) ? audit.data.records : [];
       const hasDecision = records.some(r => r.event_type === "CEO_DECISION");
       const lastDecision = records.find(r => r.event_type === "CEO_DECISION");
-      gate("Decision", audit.response.status === 200 && hasDecision, `HTTP ${audit.response.status}, records=${records.length}, CEO_DECISION=${hasDecision}, lastStatus=${lastDecision?.status ?? "?"}, lastSummary=${String(lastDecision?.summary ?? "").slice(0,160)}`);
+      const evidence = lastDecision?.evidence && typeof lastDecision.evidence === "object" ? lastDecision.evidence : {};
+      const providerStatus = evidence.providerStatus ?? "n/a";
+      gate("Decision", audit.response.status === 200 && hasDecision, `HTTP ${audit.response.status}, records=${records.length}, CEO_DECISION=${hasDecision}, lastStatus=${lastDecision?.status ?? "?"}, providerStatus=${providerStatus}, summary=${String(lastDecision?.summary ?? "").slice(0,140)}`);
     } catch (error) {
       gate("CEO/OpenAI → Agent → Tool → Tool Result", false, error.message);
       gate("Evidence → Audit", false, "CEO request did not complete");
