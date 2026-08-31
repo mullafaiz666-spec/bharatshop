@@ -7,6 +7,10 @@ The repository contains a Next.js application shell, PostgreSQL-backed catalog/o
 Set these only in Render environment variables; never commit secrets:
 
 - `DATABASE_URL` — production PostgreSQL connection string
+- `OPENAI_API_KEY` — production OpenAI API key used by the AI CEO
+- `OPENAI_MODEL` — optional; defaults to `gpt-5.6-luna`
+- `ANTHROPIC_API_KEY` — production Anthropic API key used by exact-product image verification
+- `ANTHROPIC_VISION_MODEL` — optional; defaults to `claude-sonnet-5`
 - `RAZORPAY_KEY_ID` — Razorpay public key ID
 - `RAZORPAY_KEY_SECRET` — Razorpay server secret
 - `RAZORPAY_WEBHOOK_SECRET` — exact secret configured in Razorpay Webhooks
@@ -19,6 +23,34 @@ Set these only in Render environment variables; never commit secrets:
 - `DEFAULT_DROPSHIP_SHIPPING_INR` — verified shipping estimate
 - `MIN_DROPSHIP_MARGIN_PCT=35`
 - `CJ_LIVE_FULFILLMENT_ENABLED=false` until supplier account, payment method, shipping, returns and tax rules are tested
+
+Never put any of these secret values in GitHub, `render.yaml`, client-side code, logs, or chat messages.
+
+## AI provider readiness
+
+`GET /api/health` now reports only non-secret readiness booleans for `openai` and `anthropic`, plus the selected model names. It never returns the secret values.
+
+The production acceptance runner treats both providers being configured as a hard gate. A successful HTTP response alone is not sufficient.
+
+## Render configuration
+
+In the Render production service, open **Environment → Environment Variables** and add `OPENAI_API_KEY` and `ANTHROPIC_API_KEY`. Save with a deploy/redeploy so the running service receives the values. Do not use GitHub Actions secrets as a substitute for runtime environment variables.
+
+## Image verification
+
+The image resolver follows:
+
+`PostgreSQL cache → SearXNG candidate search → reachable image download → Claude vision verification → persisted AI_VISION_VERIFIED image`
+
+Only images that pass the configured confidence threshold are written to the product image records. A missing Anthropic key causes the resolver to fail truthfully rather than saving unverified images.
+
+## CEO execution chain
+
+The CEO path must prove:
+
+`CEO → Agent → Tool → Tool Result → Evidence → Audit → Decision → Approval → Action → Verified Result → Natural Response`
+
+Tool execution records are persisted as evidence before the audit record references that evidence. Consequential actions must not bypass human approval.
 
 ## Razorpay checkout flow
 
@@ -54,13 +86,20 @@ Campaign records/copy are not proof that Google, Meta, Instagram or email ads we
 
 Do not auto-submit a supplier order merely because a customer order exists. Verify payment status, address, product-to-supplier mapping, current supplier price/inventory, destination shipping availability, expected margin, tax treatment and refund/return policy first.
 
-## End-to-end test
+## End-to-end acceptance
 
-1. `GET /api/health` — database health.
-2. Create a storefront test order using `RAZORPAY` in Razorpay test mode.
-3. Create its Razorpay order server-side.
-4. Complete/fail the test payment and confirm webhook status changes.
-5. Confirm an invalid webhook signature is rejected.
-6. Verify the supplier product link and live inventory before fulfillment.
-7. Keep live supplier fulfillment disabled until the full test passes.
-8. Keep advertising draft/paused until attribution and budget controls are verified.
+Run `node scripts/production-acceptance.mjs` against the production hostname. The runner now requires provider readiness, executes the image resolver by default, re-reads storefront images after resolution, requires an actual CEO tool call and persisted evidence/audit, requires a natural AI response, and keeps `Action → Verified Result` as a hard gate rather than simulating a destructive production action.
+
+1. `GET /api/health` — Render, PostgreSQL and provider readiness.
+2. `GET /api/storefront/products` — PostgreSQL-backed products.
+3. Run image resolution with a valid automation token.
+4. Re-read products and require real HTTPS verified images.
+5. Call `/api/ceo-chat` and require an actual AI response.
+6. Require a real agent-scoped tool invocation and returned result.
+7. Require persisted evidence and an audit record referencing it.
+8. Require a persisted CEO decision.
+9. Verify approval handling for consequential actions.
+10. Execute only a real, approval-aware action appropriate for the acceptance environment.
+11. Re-read the changed state and persist the verified result.
+12. Return the CEO's natural response based on the verified result.
+13. Mark PASS only when every gate is green.
