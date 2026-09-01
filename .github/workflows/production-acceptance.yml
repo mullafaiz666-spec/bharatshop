@@ -11,6 +11,7 @@ jobs:
     timeout-minutes: 15
     env:
       BASE_URL: https://bharatshop-9w4a.onrender.com
+      BHARATSHOP_URL: https://bharatshop-9w4a.onrender.com
       RUN_CEO: "true"
       RUN_IMAGE_RESOLVER: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN != '' && 'true' || 'false' }}
       BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
