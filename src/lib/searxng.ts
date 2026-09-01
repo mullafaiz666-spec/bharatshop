@@ -11,9 +11,27 @@ export interface SearXNGImageResult {
   height?: number;
 }
 
+export class SearXNGRateLimitError extends Error {
+  readonly status = 429;
+  readonly retryAfterMs: number;
+  constructor(retryAfterMs: number) {
+    super(`SearXNG rate limited (429); retry after ${Math.ceil(retryAfterMs / 1000)}s`);
+    this.name = "SearXNGRateLimitError";
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+
 const DEFAULT_TIMEOUT_MS = 15000;
 const MAX_429_RETRIES = 3;
 const RETRY_BASE_MS = 2500;
+const CACHE_TTL_MS = 10 * 60 * 1000;
+const FAILURE_TTL_MS = 10 * 60 * 1000;
+const MAX_CACHE_ENTRIES = 500;
+const MAX_CONCURRENT_SEARCHES = 1;
+
+const searchCache = new Map<string, { expiresAt: number; results: SearXNGImageResult[]; error?: SearXNGRateLimitError }>();
+let activeSearches = 0;
+const waiters: Array<() => void> = [];
 
 function getSearxngBaseUrl(): string | null {
   const url = process.env.SEARXNG_URL;
@@ -47,8 +65,34 @@ function imageCandidates(result: Record<string, unknown>): string[] {
 
 function retryDelayMs(attempt: number, retryAfter?: string | null): number {
   const seconds = Number.parseFloat(String(retryAfter || ""));
-  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1000, 15000);
-  return RETRY_BASE_MS * 2 ** attempt;
+  const retryAfterDate = retryAfter && Number.isNaN(seconds) ? Date.parse(retryAfter) : NaN;
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1000, 30000);
+  if (Number.isFinite(retryAfterDate)) return Math.min(Math.max(0, retryAfterDate - Date.now()), 30000);
+  const exponential = RETRY_BASE_MS * 2 ** attempt;
+  return Math.min(exponential, 30000) * (0.75 + Math.random() * 0.5);
+}
+
+function cacheKey(query: string, limit: number): string {
+  return `${query.trim().toLowerCase().replace(/\s+/g, " ")}|${limit}`;
+}
+
+function putCache(key: string, value: { results: SearXNGImageResult[]; error?: SearXNGRateLimitError }, ttl: number) {
+  while (searchCache.size >= MAX_CACHE_ENTRIES) searchCache.delete(searchCache.keys().next().value!);
+  searchCache.set(key, { ...value, expiresAt: Date.now() + ttl });
+}
+
+async function acquireSlot(): Promise<void> {
+  if (activeSearches < MAX_CONCURRENT_SEARCHES) {
+    activeSearches += 1;
+    return;
+  }
+  await new Promise<void>(resolve => waiters.push(resolve));
+  activeSearches += 1;
+}
+
+function releaseSlot() {
+  activeSearches = Math.max(0, activeSearches - 1);
+  waiters.shift()?.();
 }
 
 export async function searxngImageSearch(
@@ -56,68 +100,89 @@ export async function searxngImageSearch(
   opts: { limit?: number; timeoutMs?: number } = {},
 ): Promise<SearXNGImageResult[]> {
   if (!query.trim()) return [];
-  const limit = opts.limit ?? 8;
+  const limit = Math.max(1, Math.min(12, opts.limit ?? 8));
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const base = getSearxngBaseUrl();
   if (!base) throw new Error("SEARXNG_URL is not configured");
 
+  const key = cacheKey(query, limit);
+  const cached = searchCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) {
+    if (cached.error) throw cached.error;
+    return cached.results;
+  }
+  if (cached) searchCache.delete(key);
+
+  const engines = process.env.SEARXNG_IMAGE_ENGINES || "bing images";
   const searchUrl = `${base}/search?` + new URLSearchParams({
     q: query,
     categories: "images",
-    engines: "bing images,startpage images",
+    engines,
     format: "json",
     safesearch: "0",
     language: "en",
     pageno: "1",
   }).toString();
 
-  for (let attempt = 0; attempt <= MAX_429_RETRIES; attempt += 1) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const res = await fetch(searchUrl, {
-        signal: controller.signal,
-        headers: {
-          Accept: "application/json",
-          "Accept-Language": "en-US,en;q=0.9",
-          "User-Agent": "Mozilla/5.0 (compatible; BharatShop/1.0; +https://bharatshop-9w4a.onrender.com)",
-        },
-        cache: "no-store",
-      });
-      if (res.status === 429 && attempt < MAX_429_RETRIES) {
-        await new Promise(resolve => setTimeout(resolve, retryDelayMs(attempt, res.headers.get("retry-after"))));
-        continue;
-      }
-      if (!res.ok) throw new Error(`SearXNG returned ${res.status}`);
-      const contentType = res.headers.get("content-type") || "";
-      if (!contentType.includes("application/json")) throw new Error("SearXNG returned a non-JSON response");
-      const data = await res.json().catch(() => null) as { results?: Array<Record<string, unknown>> } | null;
-      const results: SearXNGImageResult[] = [];
-      const seen = new Set<string>();
-      for (const r of data?.results || []) {
-        const candidates = imageCandidates(r);
-        if (!candidates.length) continue;
-        const url = candidates[0];
-        if (seen.has(url)) continue;
-        seen.add(url);
-        results.push({
-          url,
-          thumbnailUrl: isCandidateHttpUrl(r.thumbnail_src)
-            ? String(r.thumbnail_src)
-            : (isCandidateHttpUrl(r.thumbnail) ? String(r.thumbnail) : undefined),
-          sourceUrl: isCandidateHttpUrl(r.url) ? String(r.url) : undefined,
-          title: typeof r.title === "string" ? r.title : undefined,
-          width: typeof r.img_width === "number" ? r.img_width : undefined,
-          height: typeof r.img_height === "number" ? r.img_height : undefined,
+  await acquireSlot();
+  try {
+    for (let attempt = 0; attempt <= MAX_429_RETRIES; attempt += 1) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const res = await fetch(searchUrl, {
+          signal: controller.signal,
+          headers: {
+            Accept: "application/json",
+            "Accept-Language": "en-US,en;q=0.9",
+            "User-Agent": "Mozilla/5.0 (compatible; BharatShop/1.0; +https://bharatshop-9w4a.onrender.com)",
+          },
+          cache: "no-store",
         });
-        if (results.length >= limit) break;
+        if (res.status === 429) {
+          const delay = retryDelayMs(attempt, res.headers.get("retry-after"));
+          if (attempt < MAX_429_RETRIES) {
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+          const error = new SearXNGRateLimitError(delay);
+          putCache(key, { results: [], error }, FAILURE_TTL_MS);
+          throw error;
+        }
+        if (!res.ok) throw new Error(`SearXNG returned ${res.status}`);
+        const contentType = res.headers.get("content-type") || "";
+        if (!contentType.includes("application/json")) throw new Error("SearXNG returned a non-JSON response");
+        const data = await res.json().catch(() => null) as { results?: Array<Record<string, unknown>> } | null;
+        const results: SearXNGImageResult[] = [];
+        const seen = new Set<string>();
+        for (const r of data?.results || []) {
+          const candidates = imageCandidates(r);
+          if (!candidates.length) continue;
+          const url = candidates[0];
+          if (seen.has(url)) continue;
+          seen.add(url);
+          results.push({
+            url,
+            thumbnailUrl: isCandidateHttpUrl(r.thumbnail_src)
+              ? String(r.thumbnail_src)
+              : (isCandidateHttpUrl(r.thumbnail) ? String(r.thumbnail) : undefined),
+            sourceUrl: isCandidateHttpUrl(r.url) ? String(r.url) : undefined,
+            title: typeof r.title === "string" ? r.title : undefined,
+            width: typeof r.img_width === "number" ? r.img_width : undefined,
+            height: typeof r.img_height === "number" ? r.img_height : undefined,
+          });
+          if (results.length >= limit) break;
+        }
+        putCache(key, { results }, CACHE_TTL_MS);
+        return results;
+      } finally {
+        clearTimeout(timeout);
       }
-      return results;
-    } finally {
-      clearTimeout(timeout);
     }
+    return [];
+  } finally {
+    releaseSlot();
   }
-  return [];
 }
 
 export function isSearxngConfigured(): boolean {
