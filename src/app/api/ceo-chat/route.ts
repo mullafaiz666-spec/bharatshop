@@ -71,28 +71,43 @@ async function runTool(name: string, args: any, agentName: string, trace: any[],
     else if (name === "create_approval") result = await createApproval({ title: String(args.title), actionType: String(args.action_type), payload: args.payload ?? {}, reason: String(args.reason), riskLevel: String(args.risk_level) });
     else if (name === "list_pending_approvals") result = await listPendingApprovals();
     else throw new Error(`Unknown CEO tool: ${name}`);
-  } catch (e) {
-    result = { error: e instanceof Error ? e.message : "Tool failed" };
-  }
+  } catch (e) { result = { error: e instanceof Error ? e.message : "Tool failed" }; }
   try {
     const audit = await recordToolExecution(agentName, name, args, result, startedAt, approvalId);
     trace.push({ auditId: audit.id, tool: name, input: args, result, status: audit.status, createdAt: audit.created_at });
-  } catch (e) {
-    trace.push({ auditId: null, tool: name, input: args, result, status: "AUDIT_FAILED", auditError: e instanceof Error ? e.message : "Audit write failed" });
-  }
+  } catch (e) { trace.push({ auditId: null, tool: name, input: args, result, status: "AUDIT_FAILED", auditError: e instanceof Error ? e.message : "Audit write failed" }); }
   return result;
 }
 
-function slashCommand(question: string) {
-  const parts = question.trim().split(" ");
-  const command = (parts.shift() || "").toLowerCase();
-  if (!/^\/[a-z0-9]+$/i.test(command)) return null;
-  return { command, rest: parts.join(" ").trim() };
-}
+function slashCommand(question: string) { const parts = question.trim().split(" "); const command = (parts.shift() || "").toLowerCase(); if (!/^\/[a-z0-9]+$/i.test(command)) return null; return { command, rest: parts.join(" ").trim() }; }
 
 async function failTruthfully(message: string, agentName: string, evidence: any = {}) {
   try { await recordAudit({ agentName, eventType: "CEO_DECISION", status: "FAILED", summary: message, evidence }); } catch {}
-  return NextResponse.json({ error: message, code: "CEO_AI_UNAVAILABLE", agent: agentName }, { status: 503 });
+  return NextResponse.json({ error: message, code: "CEO_AI_UNAVAILABLE", agent: agentName, provider: evidence.providerError ? { status: evidence.providerStatus, error: evidence.providerError } : undefined }, { status: 503 });
+}
+
+function chatTools(agent: string) { return toolsFor(agent).map((tool: any) => ({ type: "function", function: { name: tool.name, description: tool.description, parameters: tool.parameters } })); }
+
+async function readProviderError(r: Response) { const text = await r.text(); try { const data = JSON.parse(text); return String(data?.error?.message || data?.message || text.slice(0, 1200)); } catch { return text.slice(0, 1200); } }
+
+async function runChatCompletions(apiKey: string, model: string, instructions: string, question: string, trace: any[], selectedAgent: string) {
+  const messages: any[] = [{ role: "system", content: instructions }, { role: "user", content: question }];
+  const tools = chatTools(selectedAgent);
+  for (let round = 0; round < 8; round++) {
+    const r = await fetch("https://api.openai.com/v1/chat/completions", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` }, body: JSON.stringify({ model, messages, tools, tool_choice: "auto" }) });
+    if (!r.ok) return { ok: false, status: r.status, error: await readProviderError(r) };
+    const data = await r.json(); const message = data?.choices?.[0]?.message;
+    if (!message) return { ok: false, status: 502, error: "OpenAI returned no assistant message" };
+    messages.push(message);
+    const calls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
+    if (!calls.length) return { ok: true, reply: String(message.content || "").trim() };
+    for (const call of calls) {
+      let args: any = {}; try { args = JSON.parse(call.function?.arguments || "{}"); } catch { args = { _parseError: "Invalid function arguments" }; }
+      const result = await runTool(String(call.function?.name || ""), args, selectedAgent, trace);
+      messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(result).slice(0, 30000) });
+    }
+  }
+  return { ok: false, status: 502, error: "OpenAI tool loop exceeded the maximum number of rounds" };
 }
 
 export async function POST(req: Request) {
@@ -102,18 +117,15 @@ export async function POST(req: Request) {
     const messages = Array.isArray(body.messages) ? body.messages.slice(-30) : [];
     const question = String(body.question || messages.at(-1)?.content || "").trim();
     if (!question) return NextResponse.json({ error: "Question required" }, { status: 400 });
-
     const context = body.context ?? {};
     const selectedAgent = String(context.selectedAgent || "AI CEO");
     const tools = toolsFor(selectedAgent);
-    let live: any = null;
-    try { live = await inspectLiveBusinessData(); } catch (e) { live = { evidenceError: e instanceof Error ? e.message : "Live evidence unavailable" }; }
+    let live: any = null; try { live = await inspectLiveBusinessData(); } catch (e) { live = { evidenceError: e instanceof Error ? e.message : "Live evidence unavailable" }; }
 
     const slash = slashCommand(question);
     if (slash && listFashionCommands().some(x => x.command === slash.command)) {
       if (!AGENT_TOOLS[selectedAgent]?.includes("fashion_studio")) return NextResponse.json({ error: `${selectedAgent} does not have permission to execute Fashion Studio commands.`, code: "AGENT_TOOL_NOT_ALLOWED" }, { status: 403 });
-      const trace: any[] = [];
-      const result = await runTool("fashion_studio", { command: slash.command, extra_prompt: slash.rest, product_id: context.productId, product_name: context.productName }, selectedAgent, trace);
+      const trace: any[] = []; const result = await runTool("fashion_studio", { command: slash.command, extra_prompt: slash.rest, product_id: context.productId, product_name: context.productName }, selectedAgent, trace);
       const reply = result?.success ? `${slash.command} is complete. I generated ${result.generated} image(s)${result.productId ? ` and attached them to product ${result.productId}.` : "."}` : `I couldn't complete ${slash.command}: ${result?.error || "the tool did not confirm success"}`;
       try { await recordAudit({ agentName: selectedAgent, eventType: "CEO_DECISION", status: result?.success ? "SUCCESS" : "FAILED", summary: reply, evidence: { question, selectedAgent, toolExecutions: trace, decision: reply, durationMs: Date.now() - startedAt } }); } catch {}
       return NextResponse.json({ reply, mode: "fashion-studio-live", result });
@@ -121,35 +133,34 @@ export async function POST(req: Request) {
 
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) return failTruthfully("AI CEO is unavailable because the OpenAI service is not configured.", selectedAgent, { question, selectedAgent, liveEvidence: live });
+    const model = process.env.OPENAI_MODEL || "gpt-5.6-luna";
+    const instructions = `${BASE_SYSTEM}\n\nSELECTED AGENT: ${selectedAgent}\n${AGENT_FOCUS[selectedAgent] || "Operate only within the selected agent's permitted responsibilities."}\n\nThe selected agent has access only to the tools supplied in this request. Do not pretend to have capabilities outside them.\n\nLIVE BUSINESS EVIDENCE: ${JSON.stringify({ ...context, liveEvidence: live }).slice(0, 24000)}`;
+    const trace: any[] = [];
 
-    const instructions = `${BASE_SYSTEM}\n\nSELECTED AGENT: ${selectedAgent}\n${AGENT_FOCUS[selectedAgent] || "Operate only within the selected agent's permitted responsibilities."}\n\nThe selected agent has access only to the tools supplied in this request. Do not pretend to have capabilities outside them.`;
-    const input: any[] = [{ role: "developer", content: `LIVE BUSINESS EVIDENCE: ${JSON.stringify({ ...context, liveEvidence: live }).slice(0, 24000)}` }];
+    // Prefer the Responses API. If the provider rejects that request, retry with
+    // the same real OpenAI model through Chat Completions so a transient API
+    // contract/provider incompatibility cannot falsely disable the CEO.
+    const input: any[] = [{ role: "developer", content: instructions }];
     for (const m of messages) { const content = String(m?.content || "").trim(); if (content) input.push({ role: m?.role === "assistant" ? "assistant" : "user", content }); }
     if (!input.some((x: any) => x.role === "user" && x.content === question)) input.push({ role: "user", content: question });
-
-    let responseData: any = null;
-    const trace: any[] = [];
-    for (let round = 0; round < 8; round++) {
-      const r = await fetch("https://api.openai.com/v1/responses", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` }, body: JSON.stringify({ model: process.env.OPENAI_MODEL || "gpt-5.6-luna", instructions, input, tools, tool_choice: "auto" }) });
-      if (!r.ok) return failTruthfully("AI CEO is unavailable because the OpenAI service did not return a successful response.", selectedAgent, { question, selectedAgent, providerStatus: r.status, liveEvidence: live, toolExecutions: trace });
-      responseData = await r.json();
-      const output = Array.isArray(responseData.output) ? responseData.output : [];
-      input.push(...output);
-      const calls = output.filter((x: any) => x.type === "function_call");
-      if (!calls.length) break;
-      for (const call of calls) {
-        let args: any = {};
-        try { args = JSON.parse(call.arguments || "{}"); } catch { args = { _parseError: "Invalid function arguments" }; }
-        const result = await runTool(call.name, args, selectedAgent, trace);
-        input.push({ type: "function_call_output", call_id: call.call_id, output: JSON.stringify(result).slice(0, 30000) });
+    let responseFailure: { status: number; error: string } | null = null;
+    try {
+      for (let round = 0; round < 8; round++) {
+        const r = await fetch("https://api.openai.com/v1/responses", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` }, body: JSON.stringify({ model, instructions, input, tools, tool_choice: "auto" }) });
+        if (!r.ok) { responseFailure = { status: r.status, error: await readProviderError(r) }; break; }
+        const responseData = await r.json(); const output = Array.isArray(responseData.output) ? responseData.output : []; input.push(...output);
+        const calls = output.filter((x: any) => x.type === "function_call");
+        if (!calls.length) { const reply = String(responseData?.output_text || "").trim(); if (reply) { try { await recordAudit({ agentName: selectedAgent, eventType: "CEO_DECISION", status: "SUCCESS", summary: "CEO produced a decision after live evidence and agent-scoped tool processing.", evidence: { question, selectedAgent, toolExecutions: trace, decision: reply, durationMs: Date.now() - startedAt } }); } catch {} return NextResponse.json({ reply, mode: "ai-agent-live", agent: selectedAgent, toolExecutions: trace }); } responseFailure = { status: 502, error: "OpenAI Responses API returned no final response" }; break; }
+        for (const call of calls) { let args: any = {}; try { args = JSON.parse(call.arguments || "{}"); } catch { args = { _parseError: "Invalid function arguments" }; } const result = await runTool(call.name, args, selectedAgent, trace); input.push({ type: "function_call_output", call_id: call.call_id, output: JSON.stringify(result).slice(0, 30000) }); }
       }
+    } catch (e) { responseFailure = { status: 502, error: e instanceof Error ? e.message : "OpenAI Responses request failed" }; }
+
+    const fallback = await runChatCompletions(apiKey, model, instructions, question, trace, selectedAgent);
+    if (fallback.ok && fallback.reply) {
+      try { await recordAudit({ agentName: selectedAgent, eventType: "CEO_DECISION", status: "SUCCESS", summary: "CEO produced a decision through the OpenAI fallback path after live evidence and agent-scoped tool processing.", evidence: { question, selectedAgent, toolExecutions: trace, decision: fallback.reply, providerPath: "chat-completions-fallback", responsesFailure: responseFailure, durationMs: Date.now() - startedAt } }); } catch {}
+      return NextResponse.json({ reply: fallback.reply, mode: "ai-agent-live", agent: selectedAgent, toolExecutions: trace, providerPath: "chat-completions-fallback" });
     }
-
-    const reply = String(responseData?.output_text || "").trim();
-    if (!reply) return failTruthfully("AI CEO is unavailable because no final AI response was produced.", selectedAgent, { question, selectedAgent, liveEvidence: live, toolExecutions: trace });
-
-    try { await recordAudit({ agentName: selectedAgent, eventType: "CEO_DECISION", status: "SUCCESS", summary: "CEO produced a decision after live evidence and agent-scoped tool processing.", evidence: { question, selectedAgent, toolExecutions: trace, decision: reply, durationMs: Date.now() - startedAt } }); } catch {}
-    return NextResponse.json({ reply, mode: "ai-agent-live", agent: selectedAgent, toolExecutions: trace });
+    return failTruthfully("AI CEO is unavailable because the OpenAI service did not return a successful response.", selectedAgent, { question, selectedAgent, providerStatus: fallback.status || responseFailure?.status, providerError: fallback.error || responseFailure?.error, liveEvidence: live, toolExecutions: trace });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Agent chat failed";
     return NextResponse.json({ error: message, code: "CEO_CHAT_FAILED" }, { status: 500 });
