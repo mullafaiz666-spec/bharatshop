@@ -35,8 +35,6 @@ function imageCandidates(result: Record<string, unknown>): string[] {
     const url = String(value || "").trim();
     if (isCandidateHttpUrl(url) && !out.includes(url)) out.push(url);
   };
-  // SearXNG image results normally expose img_src. Keep alternate fields
-  // because different engines can populate thumbnail_src/thumbnail/formats.
   add(result.img_src);
   add(result.thumbnail_src);
   add(result.thumbnail);
@@ -66,6 +64,7 @@ export async function searxngImageSearch(
   const searchUrl = `${base}/search?` + new URLSearchParams({
     q: query,
     categories: "images",
+    engines: "bing images,startpage images",
     format: "json",
     safesearch: "0",
     language: "en",
