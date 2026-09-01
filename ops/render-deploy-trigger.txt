@@ -1,0 +1,2 @@
+Render production deployment trigger for commit a022fc8952db0e63ac07a126cb86125ed00868c8.
+This file is intentionally harmless; changing it forces a new main-branch deployment when Render auto-deploy is enabled.
