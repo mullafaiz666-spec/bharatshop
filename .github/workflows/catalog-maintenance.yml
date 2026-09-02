@@ -27,7 +27,7 @@ jobs:
           test -n "$BHARATSHOP_AUTOMATION_TOKEN"
           node scripts/catalog-live-bootstrap.mjs | tee catalog-bootstrap.json
 
-      - name: Discover real product candidates when catalog is empty
+      - name: Discover real product candidates
         env:
           BHARATSHOP_URL: ${{ secrets.BHARATSHOP_URL }}
           BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
@@ -46,41 +46,24 @@ jobs:
           BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
         run: |
           set -euo pipefail
-          tmp=$(mktemp)
-          trap 'rm -f "$tmp"' EXIT
           curl --silent --show-error --fail-with-body --retry 3 --retry-delay 5 \
             -X POST "$BHARATSHOP_URL/api/catalog/image-resolve" \
             -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" \
             -H "Content-Type: application/json" \
-            --data '{"limit":2}' > "$tmp"
-          cat "$tmp"
-          node - "$tmp" <<'NODE'
-          const fs = require('fs');
-          const d = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-          const badResults = Array.isArray(d.results)
-            ? d.results.filter(x => ["ERROR", "SEARCH_ERROR", "VERIFICATION_FAILED"].includes(String(x.status)))
-            : [];
-          if (d.error || Number(d.errors || 0) > 0 || badResults.length > 0) {
-            console.error("Catalog media resolver reported an application/provider failure:", JSON.stringify({error:d.error, errors:d.errors, badResults}, null, 2));
-            process.exit(1);
-          }
+            --data '{"limit":10}' | tee media-resolve.json
+          node - <<'NODE'
+          const fs=require('fs'); const d=JSON.parse(fs.readFileSync('media-resolve.json','utf8'));
+          const bad=(d.results||[]).filter(x=>["ERROR","SEARCH_ERROR","VERIFICATION_FAILED"].includes(String(x.status)));
+          if(d.error||Number(d.errors||0)>0||bad.length) throw new Error(`Media resolver failure: ${JSON.stringify({error:d.error,errors:d.errors,bad})}`);
           NODE
 
       - name: Enforce real media publication gate
         run: |
           set -euo pipefail
           node - <<'NODE'
-          const fs = require('fs');
-          const text = fs.readFileSync('catalog-bootstrap.json', 'utf8');
-          const lines = text.trim().split(/\r?\n/).filter(Boolean);
-          let d;
-          try { d = JSON.parse(lines.at(-1)); } catch (e) { throw new Error(`Bootstrap did not return JSON: ${e.message}`); }
-          const results = Array.isArray(d.results) ? d.results : [];
-          const published = results.find(x => x && x.status === 'COMPLETE_MEDIA_RESOLVED' && x.publicationGate === 'PASS' && Number(x.imageCount) >= 4 && Array.isArray(x.images) && x.images.filter(i => /^https:\/\//i.test(String(i?.url || ''))).length >= 4);
-          if (!published) {
-            console.error(JSON.stringify({status:d.status,processed:d.processed,resolved:d.resolved,blocked:d.blocked,results,gateAfter:d.gateAfter,research:fs.existsSync('research-products.json')?JSON.parse(fs.readFileSync('research-products.json','utf8')):null},null,2));
-            throw new Error('CATALOG ACCEPTANCE GATE FAILED: no product has >=4 verified HTTPS images and publicationGate=PASS');
-          }
+          const fs=require('fs'); const d=JSON.parse(fs.readFileSync('media-resolve.json','utf8'));
+          const published=(d.results||[]).find(x=>x&&x.status==='COMPLETE_MEDIA_RESOLVED'&&x.publicationGate==='PASS'&&Number(x.imageCount)>=4&&Array.isArray(x.images)&&x.images.filter(i=>/^https:\/\//i.test(String(i?.url||''))&&Number(i?.confidence)>=0.75).length>=4);
+          if(!published){console.error(JSON.stringify({resolver:d,research:fs.existsSync('research-products.json')?JSON.parse(fs.readFileSync('research-products.json','utf8')):null},null,2));throw new Error('CATALOG ACCEPTANCE GATE FAILED: no product has >=4 Claude-verified HTTPS images and publicationGate=PASS');}
           console.log(JSON.stringify({acceptedProductId:published.productId,product:published.product,verifiedImages:published.imageCount,publicationGate:published.publicationGate,provider:published.provider,imageUrls:published.images.map(i=>i.url)},null,2));
           NODE
 
@@ -89,13 +72,12 @@ jobs:
           BHARATSHOP_URL: ${{ secrets.BHARATSHOP_URL }}
         run: |
           set -euo pipefail
-          curl --silent --show-error --fail-with-body --retry 3 --retry-delay 5 "$BHARATSHOP_URL/api/storefront/products?limit=24" > storefront.json
+          curl --silent --show-error --fail-with-body --retry 3 --retry-delay 5 "$BHARATSHOP_URL/api/storefront/products?limit=96" > storefront.json
           cat storefront.json
           node - <<'NODE'
-          const fs = require('fs');
-          const d = JSON.parse(fs.readFileSync('storefront.json', 'utf8'));
-          const good = (d.products || []).find(p => Array.isArray(p.imageUrls) && p.imageUrls.filter(u => /^https:\/\//i.test(String(u || ''))).length >= 4 && /^https:\/\//i.test(String(p.imageUrl || '')));
-          if (!good) throw new Error('STOREFRONT ACCEPTANCE GATE FAILED: no published product exposes >=4 real HTTPS images');
+          const fs=require('fs'); const d=JSON.parse(fs.readFileSync('storefront.json','utf8'));
+          const good=(d.products||[]).find(p=>Array.isArray(p.imageUrls)&&p.imageUrls.filter(u=>/^https:\/\//i.test(String(u||''))).length>=4&&/^https:\/\//i.test(String(p.imageUrl||'')));
+          if(!good) throw new Error('STOREFRONT ACCEPTANCE GATE FAILED: no published product exposes >=4 real HTTPS images');
           console.log(JSON.stringify({productId:good.id,sku:good.sku,title:good.title,imageUrl:good.imageUrl,imageUrls:good.imageUrls},null,2));
           NODE
 
@@ -105,20 +87,11 @@ jobs:
           BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
         run: |
           set -euo pipefail
-          tmp=$(mktemp)
-          trap 'rm -f "$tmp"' EXIT
           curl --silent --show-error --fail-with-body --retry 3 --retry-delay 5 \
             -X POST "$BHARATSHOP_URL/api/catalog/fashion-enrich" \
             -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" \
             -H "Content-Type: application/json" \
-            --data '{"limit":200}' > "$tmp"
-          cat "$tmp"
-          node - "$tmp" <<'NODE'
-          const fs = require('fs');
-          const d = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-          const badResults = Array.isArray(d.results) ? d.results.filter(x => ["ERROR", "SEARCH_ERROR"].includes(String(x.status))) : [];
-          if (d.error || Number(d.errors || 0) > 0 || badResults.length > 0) {
-            console.error("Fashion enrichment reported an application failure:", JSON.stringify({error:d.error,errors:d.errors,badResults},null,2));
-            process.exit(1);
-          }
+            --data '{"limit":200}' | tee fashion-enrich.json
+          node - <<'NODE'
+          const fs=require('fs'); const d=JSON.parse(fs.readFileSync('fashion-enrich.json','utf8')); const bad=(d.results||[]).filter(x=>["ERROR","SEARCH_ERROR"].includes(String(x.status))); if(d.error||Number(d.errors||0)>0||bad.length) throw new Error(`Fashion enrichment failure: ${JSON.stringify({error:d.error,errors:d.errors,bad})}`);
           NODE
