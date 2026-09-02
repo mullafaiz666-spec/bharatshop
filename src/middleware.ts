@@ -1,0 +1,26 @@
+import { NextRequest, NextResponse } from "next/server";
+
+const ADMIN_PATHS = [
+  "/dashboard",
+  "/api/overview",
+  "/api/ceo-chat",
+  "/api/ceo-approvals",
+  "/api/agent-audit",
+  "/api/agents",
+  "/api/catalog",
+];
+
+export function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+  const protectedPath = ADMIN_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+  if (!protectedPath) return NextResponse.next();
+
+  const session = request.cookies.get("bharatshop_admin_session")?.value;
+  if (!session) {
+    if (pathname.startsWith("/api/")) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.redirect(new URL("/admin-login", request.url));
+  }
+  return NextResponse.next();
+}
+
+export const config = { matcher: ["/dashboard/:path*", "/api/:path*"] };
