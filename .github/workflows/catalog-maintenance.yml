@@ -25,7 +25,45 @@ jobs:
           set -euo pipefail
           test -n "$BHARATSHOP_URL"
           test -n "$BHARATSHOP_AUTOMATION_TOKEN"
-          node scripts/catalog-live-bootstrap.mjs
+          node scripts/catalog-live-bootstrap.mjs | tee catalog-bootstrap.json
+
+      - name: Enforce real media publication gate
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const fs = require('fs');
+          const text = fs.readFileSync('catalog-bootstrap.json', 'utf8');
+          const lines = text.trim().split(/\r?\n/).filter(Boolean);
+          let d;
+          try { d = JSON.parse(lines.at(-1)); } catch (e) { throw new Error(`Bootstrap did not return JSON: ${e.message}`); }
+          const results = Array.isArray(d.results) ? d.results : [];
+          const published = results.find(x =>
+            x && x.status === 'COMPLETE_MEDIA_RESOLVED' &&
+            x.publicationGate === 'PASS' &&
+            Number(x.imageCount) >= 4 &&
+            Array.isArray(x.images) &&
+            x.images.filter(i => /^https:\/\//i.test(String(i?.url || ''))).length >= 4
+          );
+          if (!published) {
+            console.error(JSON.stringify({
+              status: d.status,
+              processed: d.processed,
+              resolved: d.resolved,
+              blocked: d.blocked,
+              results,
+              gateAfter: d.gateAfter,
+            }, null, 2));
+            throw new Error('CATALOG ACCEPTANCE GATE FAILED: no product has >=4 verified HTTPS images and publicationGate=PASS');
+          }
+          console.log(JSON.stringify({
+            acceptedProductId: published.productId,
+            product: published.product,
+            verifiedImages: published.imageCount,
+            publicationGate: published.publicationGate,
+            provider: published.provider,
+            imageUrls: published.images.map(i => i.url),
+          }, null, 2));
+          NODE
 
       - name: Resolve complete product media
         env:
@@ -51,6 +89,26 @@ jobs:
             console.error("Catalog media resolver reported an application failure:", JSON.stringify({error:d.error, errors:d.errors, badResults}, null, 2));
             process.exit(1);
           }
+          NODE
+
+      - name: Verify storefront has real published images
+        env:
+          BHARATSHOP_URL: ${{ secrets.BHARATSHOP_URL }}
+        run: |
+          set -euo pipefail
+          curl --silent --show-error --fail-with-body --retry 3 --retry-delay 5 \
+            "$BHARATSHOP_URL/api/storefront/products?limit=24" > storefront.json
+          cat storefront.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const d = JSON.parse(fs.readFileSync('storefront.json', 'utf8'));
+          const good = (d.products || []).find(p =>
+            Array.isArray(p.imageUrls) &&
+            p.imageUrls.filter(u => /^https:\/\//i.test(String(u || ''))).length >= 4 &&
+            /^https:\/\//i.test(String(p.imageUrl || ''))
+          );
+          if (!good) throw new Error('STOREFRONT ACCEPTANCE GATE FAILED: no published product exposes >=4 real HTTPS images');
+          console.log(JSON.stringify({productId:good.id, sku:good.sku, title:good.title, imageUrl:good.imageUrl, imageUrls:good.imageUrls}, null, 2));
           NODE
 
       - name: Enrich clothing sizes and variants
