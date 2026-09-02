@@ -1,0 +1,29 @@
+name: BharatShop Continuous Research
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: bharatshop-continuous-research
+  cancel-in-progress: true
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BHARATSHOP_URL: https://bharatshop-9w4a.onrender.com
+      BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
+    steps:
+      - name: Run research-learning cycle
+        run: |
+          set -euo pipefail
+          test -n "$BHARATSHOP_AUTOMATION_TOKEN"
+          curl --fail-with-body --silent --show-error \
+            --max-time 120 \
+            -X POST "$BHARATSHOP_URL/api/agents/research" \
+            -H "Content-Type: application/json" \
+            -H "x-bharatshop-automation-token: $BHARATSHOP_AUTOMATION_TOKEN" \
+            --data '{"limit":8}'
