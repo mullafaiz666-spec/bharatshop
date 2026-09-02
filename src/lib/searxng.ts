@@ -22,10 +22,10 @@ export class SearXNGRateLimitError extends Error {
 }
 
 const DEFAULT_TIMEOUT_MS = 15000;
-const MAX_429_RETRIES = 3;
+const MAX_429_RETRIES = 2;
 const RETRY_BASE_MS = 2500;
 const CACHE_TTL_MS = 10 * 60 * 1000;
-const FAILURE_TTL_MS = 10 * 60 * 1000;
+const FAILURE_TTL_MS = 30 * 1000;
 const MAX_CACHE_ENTRIES = 500;
 const MAX_CONCURRENT_SEARCHES = 1;
 
@@ -36,6 +36,16 @@ const waiters: Array<() => void> = [];
 function getSearxngBaseUrl(): string | null {
   const url = process.env.SEARXNG_URL;
   return url ? url.replace(/\/+$/, "") : null;
+}
+
+function configuredImageEngines(): string[] {
+  // Keep one upstream by default. A comma/semicolon-separated fallback list can
+  // be supplied in production, e.g. "bing images,startpage images". Engines are
+  // tried sequentially so a rate-limited upstream never causes parallel hammering.
+  return (process.env.SEARXNG_IMAGE_ENGINES || "bing images,startpage images")
+    .split(/[,;]/)
+    .map(x => x.trim())
+    .filter(Boolean);
 }
 
 function isCandidateHttpUrl(url: unknown): url is string {
@@ -95,6 +105,74 @@ function releaseSlot() {
   waiters.shift()?.();
 }
 
+async function searchEngine(
+  base: string,
+  query: string,
+  limit: number,
+  timeoutMs: number,
+  engine: string,
+): Promise<SearXNGImageResult[]> {
+  const searchUrl = `${base}/search?` + new URLSearchParams({
+    q: query,
+    categories: "images",
+    engines: engine,
+    format: "json",
+    safesearch: "0",
+    language: "en",
+    pageno: "1",
+  }).toString();
+
+  for (let attempt = 0; attempt <= MAX_429_RETRIES; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(searchUrl, {
+        signal: controller.signal,
+        headers: {
+          Accept: "application/json",
+          "Accept-Language": "en-US,en;q=0.9",
+          "User-Agent": "Mozilla/5.0 (compatible; BharatShop/1.0; +https://bharatshop-9w4a.onrender.com)",
+        },
+        cache: "no-store",
+      });
+      if (res.status === 429) {
+        const delay = retryDelayMs(attempt, res.headers.get("retry-after"));
+        if (attempt < MAX_429_RETRIES) {
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+        throw new SearXNGRateLimitError(delay);
+      }
+      if (!res.ok) throw new Error(`SearXNG returned ${res.status}`);
+      const contentType = res.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) throw new Error("SearXNG returned a non-JSON response");
+      const data = await res.json().catch(() => null) as { results?: Array<Record<string, unknown>> } | null;
+      const results: SearXNGImageResult[] = [];
+      const seen = new Set<string>();
+      for (const r of data?.results || []) {
+        const candidates = imageCandidates(r);
+        if (!candidates.length) continue;
+        const url = candidates[0];
+        if (seen.has(url)) continue;
+        seen.add(url);
+        results.push({
+          url,
+          thumbnailUrl: isCandidateHttpUrl(r.thumbnail_src) ? String(r.thumbnail_src) : (isCandidateHttpUrl(r.thumbnail) ? String(r.thumbnail) : undefined),
+          sourceUrl: isCandidateHttpUrl(r.url) ? String(r.url) : undefined,
+          title: typeof r.title === "string" ? r.title : undefined,
+          width: typeof r.img_width === "number" ? r.img_width : undefined,
+          height: typeof r.img_height === "number" ? r.img_height : undefined,
+        });
+        if (results.length >= limit) break;
+      }
+      return results;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+  return [];
+}
+
 export async function searxngImageSearch(
   query: string,
   opts: { limit?: number; timeoutMs?: number } = {},
@@ -113,73 +191,33 @@ export async function searxngImageSearch(
   }
   if (cached) searchCache.delete(key);
 
-  const engines = process.env.SEARXNG_IMAGE_ENGINES || "bing images";
-  const searchUrl = `${base}/search?` + new URLSearchParams({
-    q: query,
-    categories: "images",
-    engines,
-    format: "json",
-    safesearch: "0",
-    language: "en",
-    pageno: "1",
-  }).toString();
-
   await acquireSlot();
   try {
-    for (let attempt = 0; attempt <= MAX_429_RETRIES; attempt += 1) {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    let lastRateLimit: SearXNGRateLimitError | undefined;
+    for (const engine of configuredImageEngines()) {
       try {
-        const res = await fetch(searchUrl, {
-          signal: controller.signal,
-          headers: {
-            Accept: "application/json",
-            "Accept-Language": "en-US,en;q=0.9",
-            "User-Agent": "Mozilla/5.0 (compatible; BharatShop/1.0; +https://bharatshop-9w4a.onrender.com)",
-          },
-          cache: "no-store",
-        });
-        if (res.status === 429) {
-          const delay = retryDelayMs(attempt, res.headers.get("retry-after"));
-          if (attempt < MAX_429_RETRIES) {
-            await new Promise(resolve => setTimeout(resolve, delay));
-            continue;
-          }
-          const error = new SearXNGRateLimitError(delay);
-          putCache(key, { results: [], error }, FAILURE_TTL_MS);
-          throw error;
+        const results = await searchEngine(base, query, limit, timeoutMs, engine);
+        if (results.length) {
+          putCache(key, { results }, CACHE_TTL_MS);
+          return results;
         }
-        if (!res.ok) throw new Error(`SearXNG returned ${res.status}`);
-        const contentType = res.headers.get("content-type") || "";
-        if (!contentType.includes("application/json")) throw new Error("SearXNG returned a non-JSON response");
-        const data = await res.json().catch(() => null) as { results?: Array<Record<string, unknown>> } | null;
-        const results: SearXNGImageResult[] = [];
-        const seen = new Set<string>();
-        for (const r of data?.results || []) {
-          const candidates = imageCandidates(r);
-          if (!candidates.length) continue;
-          const url = candidates[0];
-          if (seen.has(url)) continue;
-          seen.add(url);
-          results.push({
-            url,
-            thumbnailUrl: isCandidateHttpUrl(r.thumbnail_src)
-              ? String(r.thumbnail_src)
-              : (isCandidateHttpUrl(r.thumbnail) ? String(r.thumbnail) : undefined),
-            sourceUrl: isCandidateHttpUrl(r.url) ? String(r.url) : undefined,
-            title: typeof r.title === "string" ? r.title : undefined,
-            width: typeof r.img_width === "number" ? r.img_width : undefined,
-            height: typeof r.img_height === "number" ? r.img_height : undefined,
-          });
-          if (results.length >= limit) break;
+      } catch (error) {
+        if (error instanceof SearXNGRateLimitError) {
+          lastRateLimit = error;
+          continue;
         }
-        putCache(key, { results }, CACHE_TTL_MS);
-        return results;
-      } finally {
-        clearTimeout(timeout);
+        // A failed upstream engine should not prevent a configured fallback
+        // engine from being attempted.
+        continue;
       }
     }
-    return [];
+    if (lastRateLimit) {
+      putCache(key, { results: [], error: lastRateLimit }, FAILURE_TTL_MS);
+      throw lastRateLimit;
+    }
+    const empty: SearXNGImageResult[] = [];
+    putCache(key, { results: empty }, 30 * 1000);
+    return empty;
   } finally {
     releaseSlot();
   }
