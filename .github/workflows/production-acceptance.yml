@@ -12,17 +12,19 @@ concurrency:
 jobs:
   acceptance:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     env:
       BASE_URL: https://bharatshop-9w4a.onrender.com
       BHARATSHOP_URL: https://bharatshop-9w4a.onrender.com
       BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
+      # Intentionally NOT provided to this workflow. Human approval must never
+      # be converted into an automatic approval by CI.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: Wait for live Render deployment
+      - name: Wait for exact Render deployment
         run: |
           set -euo pipefail
           for i in $(seq 1 24); do
@@ -34,5 +36,5 @@ jobs:
           done
           echo "Render deployment did not become deeply healthy within the acceptance wait window"
           exit 1
-      - name: Run independent live production acceptance
-        run: node scripts/production-acceptance-v2.mjs
+      - name: Run strict live production acceptance
+        run: node scripts/production-acceptance-v3.mjs
