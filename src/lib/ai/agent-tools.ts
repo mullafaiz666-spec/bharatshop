@@ -1,5 +1,15 @@
 type Json = Record<string, unknown>;
 
+type SearchResult = {
+  title: string;
+  link: string;
+  source: string;
+  merchant: string;
+  price: string;
+  extracted_price: number;
+  snippet: string;
+};
+
 export function requireEnv(name: string) {
   const value = process.env[name];
   if (!value) throw new Error(`${name} is not configured`);
@@ -22,26 +32,29 @@ export async function serpSearch(query: string, engine: "google" | "google_shopp
   // Compatibility name retained for existing agent callers; SerpAPI is no longer used.
   const url = new URL(`${searxBase()}/search`);
   url.searchParams.set("q", query);
-  url.searchParams.set("categories", engine === "google_shopping" ? "general" : "general");
+  url.searchParams.set("categories", "general");
   url.searchParams.set("format", "json");
   url.searchParams.set("language", "en");
   url.searchParams.set("pageno", "1");
-  const configuredEngines = process.env.SEARXNG_WEB_ENGINES || "bing";
-  url.searchParams.set("engines", configuredEngines);
+  url.searchParams.set("engines", process.env.SEARXNG_WEB_ENGINES || "bing");
   const r = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(15000), headers: { Accept: "application/json" } });
   if (!r.ok) throw new Error(`SearXNG returned ${r.status}`);
   const data = await r.json() as { results?: Array<Record<string, unknown>> };
-  const results = Array.isArray(data.results) ? data.results : [];
+  const results: SearchResult[] = (Array.isArray(data.results) ? data.results : []).map((x) => ({
+    title: String(x.title || "").trim(),
+    link: String(x.url || "").trim(),
+    source: String(x.engine || x.pretty_url || "Web source").trim(),
+    merchant: String(x.engine || "Web source").trim(),
+    price: String(x.content || ""),
+    extracted_price: priceFromText(`${x.title || ""} ${x.content || ""}`),
+    snippet: String(x.content || "").trim(),
+  })).filter(x => x.title && /^https?:\/\//i.test(x.link));
   return {
-    shopping_results: results.map((x) => ({
-      title: String(x.title || "").trim(),
-      link: String(x.url || "").trim(),
-      source: String(x.engine || x.pretty_url || "Web source").trim(),
-      merchant: String(x.engine || "Web source").trim(),
-      price: String(x.content || ""),
-      extracted_price: priceFromText(`${x.title || ""} ${x.content || ""}`),
-      snippet: String(x.content || "").trim(),
-    })).filter(x => x.title && /^https?:\/\//i.test(x.link)),
+    // Keep both keys for compatibility with CEO/agent callers. Organic results
+    // are the same real SearXNG web results; shopping_results is retained for
+    // existing product-research consumers.
+    organic_results: results.map(x => ({ title: x.title, link: x.link, snippet: x.snippet, source: x.source })),
+    shopping_results: results,
   };
 }
 
