@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { sql } from "drizzle-orm";
+import { db } from "@/db";
 import { getAdminUser } from "@/lib/admin-auth";
 import { DEFAULT_RESEARCH_TOPICS, publicWebResearch } from "@/lib/ai/web-research";
 
@@ -8,6 +10,22 @@ function authorizedAutomation(request: Request) {
   const configured = process.env.BHARATSHOP_AUTOMATION_TOKEN?.trim();
   const supplied = request.headers.get("x-bharatshop-automation-token")?.trim();
   return Boolean(configured && supplied && supplied === configured);
+}
+
+function confidenceFor(sources: Array<{ url: string; title: string; snippet: string }>) {
+  if (!sources.length) return 0;
+  const domains = new Set<string>();
+  for (const source of sources) {
+    try { domains.add(new URL(source.url).hostname.replace(/^www\./, "")); } catch {}
+  }
+  const sourceScore = Math.min(sources.length / 8, 1) * 60;
+  const diversityScore = Math.min(domains.size / 5, 1) * 25;
+  const evidenceScore = sources.filter((source) => source.snippet.length >= 80 && source.title.length >= 8).length / sources.length * 15;
+  return Math.round(Math.min(100, sourceScore + diversityScore + evidenceScore) * 100) / 100;
+}
+
+function learningSummary(topic: string, confidence: number, sourceCount: number) {
+  return `Research finding for ${topic}. Evidence confidence ${confidence}/100 from ${sourceCount} public/authorized sources. This is an input to learning and experimentation; it does not directly publish products, spend money, or message customers.`;
 }
 
 export async function GET() {
@@ -31,13 +49,30 @@ export async function POST(request: Request) {
       : DEFAULT_RESEARCH_TOPICS;
     const limit = Math.min(Math.max(Number(body?.limit || 8), 1), 20);
     const results = [];
-    for (const topic of topics) results.push(await publicWebResearch(topic, limit));
+
+    for (const topic of topics) {
+      const result = await publicWebResearch(topic, limit);
+      const confidence = confidenceFor(result.sources);
+      const verificationStatus = confidence >= 70 ? "VERIFIED" : confidence >= 45 ? "REVIEW" : "UNVERIFIED";
+      const summary = learningSummary(topic, confidence, result.sources.length);
+
+      await db.execute(sql`
+        INSERT INTO research_findings
+          (query, source, sources_json, confidence, verification_status, learning_summary, created_at, updated_at)
+        VALUES
+          (${topic}, ${result.sources[0]?.source ?? "unknown"}, ${JSON.stringify(result.sources)}::jsonb,
+           ${confidence}, ${verificationStatus}, ${summary}, NOW(), NOW())
+      `);
+
+      results.push({ ...result, confidence, verificationStatus, learningSummary: summary });
+    }
 
     return NextResponse.json({
       agent: "research-learning",
       status: "research_complete",
+      persisted: true,
       results,
-      next: "Persist verified findings into the learning store and let CEO/agents act only through approved tools.",
+      next: "Learning Agent can consume VERIFIED findings, compare them with BharatShop performance, propose experiments, and route consequential actions through CEO approval/guardrails.",
     });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Research failed" }, { status: 503 });
