@@ -16,6 +16,11 @@ async function audit(agent:string,event:string,status:string,summary:string,evid
  await pool.query(`CREATE TABLE IF NOT EXISTS agent_audit_records (id SERIAL PRIMARY KEY,agent_name TEXT NOT NULL,event_type TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'INFO',summary TEXT NOT NULL DEFAULT '',evidence JSONB NOT NULL DEFAULT '{}'::jsonb,approval_id INTEGER,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
  await pool.query(`INSERT INTO agent_audit_records(agent_name,event_type,status,summary,evidence,approval_id) VALUES($1,$2,$3,$4,$5,$6)`,[agent,event,status,summary,JSON.stringify(evidence||{}),approvalId]);
 }
+function operatorAuthorized(req: Request) {
+ const expected = process.env.BHARATSHOP_OPERATOR_APPROVAL_TOKEN;
+ const supplied = req.headers.get("x-operator-approval-token") || "";
+ return !!expected && supplied === expected;
+}
 export async function GET() {
  try { await ensureTable(); const result=await pool.query(`SELECT id,title,action_type,payload,reason,risk_level,status,requested_by,created_at,decided_at,decision_note FROM ceo_approvals ORDER BY created_at DESC LIMIT 50`); return NextResponse.json({approvals:result.rows}); }
  catch(error){return NextResponse.json({error:error instanceof Error?error.message:"Approval queue unavailable"},{status:500});}
@@ -24,6 +29,7 @@ export async function POST(req:Request){
  try{
   await ensureTable(); const body=await req.json(); const action=String(body.action||"");
   if(!["approve","reject"].includes(action))return NextResponse.json({error:"action must be approve or reject"},{status:400});
+  if(!operatorAuthorized(req))return NextResponse.json({error:"Human operator authorization required"}, {status:403, headers:{"Cache-Control":"no-store"}});
   const id=Number(body.id); if(!Number.isInteger(id))return NextResponse.json({error:"Valid approval id required"},{status:400});
   const note=String(body.note||(action==="approve"?"Approved by operator":"Rejected by operator"));
   const result=await pool.query(`UPDATE ceo_approvals SET status=$1,decided_at=NOW(),decision_note=$2 WHERE id=$3 AND status='PENDING' RETURNING *`,[action==="approve"?"APPROVED":"REJECTED",note,id]);
