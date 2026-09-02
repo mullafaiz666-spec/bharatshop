@@ -26,7 +26,31 @@ try {
     ON admin_sessions (token_hash)
   `);
 
-  console.log("admin_sessions migration applied (additive/idempotent; existing tables and rows untouched)");
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS research_findings (
+      id SERIAL PRIMARY KEY,
+      query TEXT NOT NULL,
+      source TEXT NOT NULL,
+      sources_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+      confidence NUMERIC(5,2) NOT NULL DEFAULT 0,
+      verification_status TEXT NOT NULL DEFAULT 'UNVERIFIED',
+      learning_summary TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await client.query(`
+    CREATE INDEX IF NOT EXISTS research_findings_query_idx
+    ON research_findings (query)
+  `);
+
+  await client.query(`
+    CREATE INDEX IF NOT EXISTS research_findings_created_at_idx
+    ON research_findings (created_at)
+  `);
+
+  console.log("admin_sessions + research_findings migration applied (additive/idempotent; existing tables and rows untouched)");
 } finally {
   await client.end();
 }
