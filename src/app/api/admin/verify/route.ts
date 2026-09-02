@@ -7,6 +7,7 @@ import {
 } from "@/db/schema";
 import { sql, eq } from "drizzle-orm";
 import { isSearxngConfigured } from "@/lib/searxng";
+import { requireAdminUser } from "@/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +15,8 @@ export const dynamic = "force-dynamic";
 // Returns a live row count for every table so deployment health can be
 // confirmed at a glance — no guessing whether seeding / migrations ran.
 export async function GET() {
+  const admin = await requireAdminUser();
+  if (!admin) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     const [
       [usersC], [storesC], [productsC], [imagesC], [cartC], [ordersC],
