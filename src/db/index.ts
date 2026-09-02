@@ -7,7 +7,7 @@ const globalForDb = globalThis as typeof globalThis & {
 
 const isTransientConnectionError = (error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
-  return /connection terminated|connection reset|ECONNRESET|EPIPE|socket hang up|Connection terminated unexpectedly/i.test(message);
+  return /connection terminated|connection reset|ECONNRESET|EPIPE|socket hang up|Connection terminated unexpectedly|Connection terminated/i.test(message);
 };
 
 const createPool = (): Pool => {
@@ -22,6 +22,9 @@ const createPool = (): Pool => {
   if (!isLocalDatabase) {
     try {
       const parsed = new URL(rawDatabaseUrl);
+      // Keep credentials and host intact, but make the client-side SSL policy
+      // explicit through the Pool `ssl` option below. This avoids conflicting
+      // pg connection-string SSL options while preserving Render's hostname.
       parsed.searchParams.delete("sslmode");
       parsed.searchParams.delete("sslcert");
       parsed.searchParams.delete("sslkey");
@@ -34,13 +37,14 @@ const createPool = (): Pool => {
 
   const pool = new Pool({
     connectionString: databaseUrl,
-    ssl: isLocalDatabase ? undefined : { rejectUnauthorized: false },
-    max: 1,
-    idleTimeoutMillis: 1_000,
+    ssl: isLocalDatabase ? undefined : { rejectUnauthorized: false, minVersion: "TLSv1.2" },
+    max: Number(process.env.DB_POOL_MAX ?? 5),
+    idleTimeoutMillis: Number(process.env.DB_IDLE_TIMEOUT_MS ?? 30_000),
     connectionTimeoutMillis: Number(process.env.DB_CONNECTION_TIMEOUT_MS ?? 15_000),
-    maxUses: 1,
-    keepAlive: false,
-    allowExitOnIdle: true,
+    maxUses: Number(process.env.DB_MAX_USES ?? 1000),
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 10_000,
+    allowExitOnIdle: false,
   });
 
   pool.on("error", (error) => {
@@ -71,10 +75,6 @@ export const pool = new Proxy({} as Pool, {
   },
 });
 
-// `db` must stay lazy too: drizzle(pool) touches pool properties immediately,
-// which would trigger a real connection attempt at module-import time (i.e.
-// during `next build`, before DATABASE_URL exists). Deferring behind a Proxy
-// keeps import-time side effects at zero.
 type DbInstance = ReturnType<typeof drizzle>;
 let dbInstance: DbInstance | undefined;
 
@@ -107,7 +107,7 @@ export async function queryWithRetry<T>(
       const stalePool = globalForDb.__bharatShopPostgresPool;
       globalForDb.__bharatShopPostgresPool = undefined;
       await stalePool?.end().catch(() => undefined);
-      await new Promise((resolve) => setTimeout(resolve, 150 * (attempt + 1)));
+      await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** attempt));
     }
   }
 
