@@ -5,10 +5,9 @@ services:
     ports:
       - "127.0.0.1:${LLAMA_PORT:-8080}:8080"
     volumes:
-      - ./models:/models
+      - llama-cache:/root/.cache/llama.cpp
     command: >-
-      -m /models/gemma-3-4b-it-Q4_K_M.gguf
-      --mmproj /models/mmproj-gemma-3-4b-it-F16.gguf
+      -hf ggml-org/gemma-3-4b-it-GGUF:Q4_K_M
       --alias gemma-3-4b-it
       --host 0.0.0.0
       --port 8080
@@ -37,3 +36,6 @@ services:
       - gateway
     command: tunnel --no-autoupdate --url http://gateway:8090
     profiles: [quick-tunnel]
+
+volumes:
+  llama-cache:
