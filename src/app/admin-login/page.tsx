@@ -1,0 +1,9 @@
+"use client";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+
+export default function AdminLoginPage() {
+  const router = useRouter(); const [email,setEmail]=useState(""); const [password,setPassword]=useState(""); const [error,setError]=useState(""); const [busy,setBusy]=useState(false);
+  async function submit(e:React.FormEvent){e.preventDefault();setBusy(true);setError("");try{const r=await fetch("/api/auth/admin-login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,password})});const d=await r.json();if(!r.ok)throw new Error(d.error||"Sign in failed");router.replace("/dashboard");router.refresh()}catch(e){setError(e instanceof Error?e.message:"Sign in failed")}finally{setBusy(false)}}
+  return <main className="min-h-screen bg-[#07040d] text-white grid place-items-center px-4"><form onSubmit={submit} className="w-full max-w-md rounded-3xl border border-white/10 bg-white/[.06] p-8 shadow-2xl"><p className="text-xs font-black uppercase tracking-[.25em] text-cyan-300">BharatShop System</p><h1 className="text-3xl font-black mt-3">Administrator sign in</h1><p className="text-white/50 mt-2 text-sm">Private operations console. Customers never see this screen.</p><div className="space-y-4 mt-8"><input required type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="Admin email" className="w-full h-12 rounded-xl bg-white text-slate-900 px-4"/><input required type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="Password" className="w-full h-12 rounded-xl bg-white text-slate-900 px-4"/>{error&&<p className="rounded-xl bg-red-500/10 border border-red-400/20 p-3 text-sm text-red-300">{error}</p>}<button disabled={busy} className="w-full h-12 rounded-xl bg-gradient-to-r from-fuchsia-600 to-violet-600 font-black disabled:opacity-50">{busy?"Signing in…":"Sign in securely"}</button></div></form></main>;
+}
