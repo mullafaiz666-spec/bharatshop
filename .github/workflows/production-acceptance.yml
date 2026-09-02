@@ -26,13 +26,13 @@ jobs:
         run: |
           set -euo pipefail
           for i in $(seq 1 24); do
-            code=$(curl -sS -o /tmp/health.json -w '%{http_code}' --max-time 20 "$BHARATSHOP_URL/api/health" || true)
-            echo "health HTTP=$code"
+            code=$(curl -sS -o /tmp/health.json -w '%{http_code}' --max-time 30 "$BHARATSHOP_URL/api/health?deep=1" || true)
+            echo "deep health HTTP=$code"
             cat /tmp/health.json || true
             if [ "$code" = "200" ]; then exit 0; fi
             sleep 10
           done
-          echo "Render deployment did not become healthy within the acceptance wait window"
+          echo "Render deployment did not become deeply healthy within the acceptance wait window"
           exit 1
       - name: Run independent live production acceptance
         run: node scripts/production-acceptance-v2.mjs
