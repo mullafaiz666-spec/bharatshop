@@ -1,4 +1,4 @@
-# Live catalog verification for product media and enrichment.
+# Live catalog verification for product discovery, media and enrichment.
 name: BharatShop Catalog Maintenance
 
 on:
@@ -13,7 +13,7 @@ concurrency:
 jobs:
   maintain-catalog:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -26,6 +26,19 @@ jobs:
           test -n "$BHARATSHOP_URL"
           test -n "$BHARATSHOP_AUTOMATION_TOKEN"
           node scripts/catalog-live-bootstrap.mjs | tee catalog-bootstrap.json
+
+      - name: Discover real product candidates when catalog is empty
+        env:
+          BHARATSHOP_URL: ${{ secrets.BHARATSHOP_URL }}
+          BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
+        run: |
+          set -euo pipefail
+          curl --silent --show-error --fail-with-body --retry 2 --retry-delay 5 \
+            -X POST "$BHARATSHOP_URL/api/automation/research-products" \
+            -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" \
+            -H "x-automation-token: $BHARATSHOP_AUTOMATION_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data '{"limit":6}' | tee research-products.json
 
       - name: Resolve complete product media
         env:
@@ -45,10 +58,10 @@ jobs:
           const fs = require('fs');
           const d = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
           const badResults = Array.isArray(d.results)
-            ? d.results.filter(x => ["ERROR"].includes(String(x.status)))
+            ? d.results.filter(x => ["ERROR", "SEARCH_ERROR", "VERIFICATION_FAILED"].includes(String(x.status)))
             : [];
           if (d.error || Number(d.errors || 0) > 0 || badResults.length > 0) {
-            console.error("Catalog media resolver reported an application failure:", JSON.stringify({error:d.error, errors:d.errors, badResults}, null, 2));
+            console.error("Catalog media resolver reported an application/provider failure:", JSON.stringify({error:d.error, errors:d.errors, badResults}, null, 2));
             process.exit(1);
           }
           NODE
@@ -63,32 +76,12 @@ jobs:
           let d;
           try { d = JSON.parse(lines.at(-1)); } catch (e) { throw new Error(`Bootstrap did not return JSON: ${e.message}`); }
           const results = Array.isArray(d.results) ? d.results : [];
-          const published = results.find(x =>
-            x && x.status === 'COMPLETE_MEDIA_RESOLVED' &&
-            x.publicationGate === 'PASS' &&
-            Number(x.imageCount) >= 4 &&
-            Array.isArray(x.images) &&
-            x.images.filter(i => /^https:\/\//i.test(String(i?.url || ''))).length >= 4
-          );
+          const published = results.find(x => x && x.status === 'COMPLETE_MEDIA_RESOLVED' && x.publicationGate === 'PASS' && Number(x.imageCount) >= 4 && Array.isArray(x.images) && x.images.filter(i => /^https:\/\//i.test(String(i?.url || ''))).length >= 4);
           if (!published) {
-            console.error(JSON.stringify({
-              status: d.status,
-              processed: d.processed,
-              resolved: d.resolved,
-              blocked: d.blocked,
-              results,
-              gateAfter: d.gateAfter,
-            }, null, 2));
+            console.error(JSON.stringify({status:d.status,processed:d.processed,resolved:d.resolved,blocked:d.blocked,results,gateAfter:d.gateAfter,research:fs.existsSync('research-products.json')?JSON.parse(fs.readFileSync('research-products.json','utf8')):null},null,2));
             throw new Error('CATALOG ACCEPTANCE GATE FAILED: no product has >=4 verified HTTPS images and publicationGate=PASS');
           }
-          console.log(JSON.stringify({
-            acceptedProductId: published.productId,
-            product: published.product,
-            verifiedImages: published.imageCount,
-            publicationGate: published.publicationGate,
-            provider: published.provider,
-            imageUrls: published.images.map(i => i.url),
-          }, null, 2));
+          console.log(JSON.stringify({acceptedProductId:published.productId,product:published.product,verifiedImages:published.imageCount,publicationGate:published.publicationGate,provider:published.provider,imageUrls:published.images.map(i=>i.url)},null,2));
           NODE
 
       - name: Verify storefront has real published images
@@ -96,19 +89,14 @@ jobs:
           BHARATSHOP_URL: ${{ secrets.BHARATSHOP_URL }}
         run: |
           set -euo pipefail
-          curl --silent --show-error --fail-with-body --retry 3 --retry-delay 5 \
-            "$BHARATSHOP_URL/api/storefront/products?limit=24" > storefront.json
+          curl --silent --show-error --fail-with-body --retry 3 --retry-delay 5 "$BHARATSHOP_URL/api/storefront/products?limit=24" > storefront.json
           cat storefront.json
           node - <<'NODE'
           const fs = require('fs');
           const d = JSON.parse(fs.readFileSync('storefront.json', 'utf8'));
-          const good = (d.products || []).find(p =>
-            Array.isArray(p.imageUrls) &&
-            p.imageUrls.filter(u => /^https:\/\//i.test(String(u || ''))).length >= 4 &&
-            /^https:\/\//i.test(String(p.imageUrl || ''))
-          );
+          const good = (d.products || []).find(p => Array.isArray(p.imageUrls) && p.imageUrls.filter(u => /^https:\/\//i.test(String(u || ''))).length >= 4 && /^https:\/\//i.test(String(p.imageUrl || '')));
           if (!good) throw new Error('STOREFRONT ACCEPTANCE GATE FAILED: no published product exposes >=4 real HTTPS images');
-          console.log(JSON.stringify({productId:good.id, sku:good.sku, title:good.title, imageUrl:good.imageUrl, imageUrls:good.imageUrls}, null, 2));
+          console.log(JSON.stringify({productId:good.id,sku:good.sku,title:good.title,imageUrl:good.imageUrl,imageUrls:good.imageUrls},null,2));
           NODE
 
       - name: Enrich clothing sizes and variants
@@ -128,11 +116,9 @@ jobs:
           node - "$tmp" <<'NODE'
           const fs = require('fs');
           const d = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-          const badResults = Array.isArray(d.results)
-            ? d.results.filter(x => ["ERROR", "SEARCH_ERROR"].includes(String(x.status)))
-            : [];
+          const badResults = Array.isArray(d.results) ? d.results.filter(x => ["ERROR", "SEARCH_ERROR"].includes(String(x.status))) : [];
           if (d.error || Number(d.errors || 0) > 0 || badResults.length > 0) {
-            console.error("Fashion enrichment reported an application failure:", JSON.stringify({error:d.error, errors:d.errors, badResults}, null, 2));
+            console.error("Fashion enrichment reported an application failure:", JSON.stringify({error:d.error,errors:d.errors,badResults},null,2));
             process.exit(1);
           }
           NODE
