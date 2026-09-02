@@ -27,6 +27,32 @@ jobs:
           test -n "$BHARATSHOP_AUTOMATION_TOKEN"
           node scripts/catalog-live-bootstrap.mjs | tee catalog-bootstrap.json
 
+      - name: Resolve complete product media
+        env:
+          BHARATSHOP_URL: ${{ secrets.BHARATSHOP_URL }}
+          BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
+        run: |
+          set -euo pipefail
+          tmp=$(mktemp)
+          trap 'rm -f "$tmp"' EXIT
+          curl --silent --show-error --fail-with-body --retry 3 --retry-delay 5 \
+            -X POST "$BHARATSHOP_URL/api/catalog/image-resolve" \
+            -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data '{"limit":2}' > "$tmp"
+          cat "$tmp"
+          node - "$tmp" <<'NODE'
+          const fs = require('fs');
+          const d = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          const badResults = Array.isArray(d.results)
+            ? d.results.filter(x => ["ERROR"].includes(String(x.status)))
+            : [];
+          if (d.error || Number(d.errors || 0) > 0 || badResults.length > 0) {
+            console.error("Catalog media resolver reported an application failure:", JSON.stringify({error:d.error, errors:d.errors, badResults}, null, 2));
+            process.exit(1);
+          }
+          NODE
+
       - name: Enforce real media publication gate
         run: |
           set -euo pipefail
@@ -63,32 +89,6 @@ jobs:
             provider: published.provider,
             imageUrls: published.images.map(i => i.url),
           }, null, 2));
-          NODE
-
-      - name: Resolve complete product media
-        env:
-          BHARATSHOP_URL: ${{ secrets.BHARATSHOP_URL }}
-          BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
-        run: |
-          set -euo pipefail
-          tmp=$(mktemp)
-          trap 'rm -f "$tmp"' EXIT
-          curl --silent --show-error --fail-with-body --retry 3 --retry-delay 5 \
-            -X POST "$BHARATSHOP_URL/api/catalog/image-resolve" \
-            -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" \
-            -H "Content-Type: application/json" \
-            --data '{"limit":2}' > "$tmp"
-          cat "$tmp"
-          node - "$tmp" <<'NODE'
-          const fs = require('fs');
-          const d = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-          const badResults = Array.isArray(d.results)
-            ? d.results.filter(x => ["ERROR"].includes(String(x.status)))
-            : [];
-          if (d.error || Number(d.errors || 0) > 0 || badResults.length > 0) {
-            console.error("Catalog media resolver reported an application failure:", JSON.stringify({error:d.error, errors:d.errors, badResults}, null, 2));
-            process.exit(1);
-          }
           NODE
 
       - name: Verify storefront has real published images
