@@ -1,6 +1,6 @@
 # BharatShop Local AI Gateway
 
-This stack provides a self-hosted, OpenAI-compatible AI endpoint for BharatShop using `llama.cpp` and Gemma 3 4B IT. `llama-server` supports `/v1/chat/completions` and multimodal image input, so the same endpoint can serve text and vision requests. citeturn0search5turn0search6
+This stack provides a self-hosted, OpenAI-compatible AI endpoint for BharatShop using `llama.cpp` and Gemma 3 4B IT. `llama-server` supports `/v1/chat/completions` and multimodal image input, so the same endpoint can serve text and vision requests.
 
 ## Architecture
 
@@ -21,11 +21,11 @@ curl http://127.0.0.1:8090/health
 curl http://127.0.0.1:8090/v1/models
 ```
 
-The first start downloads the GGUF model into the Docker volume. `llama.cpp` documents `llama-server` as an OpenAI-compatible HTTP server and supports running GGUF models directly from Hugging Face. citeturn0search0
+The first start downloads the GGUF model into the Docker volume. `llama.cpp` documents `llama-server` as an OpenAI-compatible HTTP server and supports running GGUF models directly from Hugging Face.
 
 ## Vision smoke test
 
-Use the OpenAI-compatible chat endpoint with an `image_url` content part. `llama-server` supports remote image URLs and base64 image input for multimodal models. citeturn0search5
+Use the OpenAI-compatible chat endpoint with an `image_url` content part. `llama-server` supports remote image URLs and base64 image input for multimodal models.
 
 ```bash
 curl http://127.0.0.1:8090/v1/chat/completions \
