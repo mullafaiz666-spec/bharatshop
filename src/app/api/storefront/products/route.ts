@@ -7,12 +7,15 @@ const BAD_IMAGE=/(?:unsplash\.com|source\.unsplash\.com|via\.placeholder\.com|pl
 const APPROVED=new Set(["AI_VISION_VERIFIED"]);
 const MIN_IMAGES=4;
 const MIN_CONFIDENCE=0.75;
-const ANTHROPIC_MODEL=process.env.ANTHROPIC_VISION_MODEL||"claude-sonnet-5";
+const VERIFICATION_PROVIDER="local-ai";
+export const dynamic = "force-dynamic";
+
 const cleanUrl=(value:unknown)=>{const url=String(value||"").trim();return /^https:\/\//i.test(url)&&!BAD_IMAGE.test(url)?url:""};
+
 export async function GET(req:Request){
  const {searchParams}=new URL(req.url);const category=searchParams.get("category")||"";const search=searchParams.get("search")||searchParams.get("query")||"";const sort=searchParams.get("sort")||"aiScore";const limit=Math.min(Math.max(parseInt(searchParams.get("limit")||"24",10)||24,1),96);const page=Math.max(parseInt(searchParams.get("page")||"1",10)||1,1);const featured=searchParams.get("featured")==="true";
  const all=await db.select().from(products).orderBy(desc(products.aiScore));const imageRows=await db.select().from(productImages);const detailRows=await db.select().from(productDetails);const detailMap=new Map(detailRows.map(x=>[x.productId,x]));const galleryMap=new Map<number,{url:string;label:string;order:number}[]>();
- for(const row of imageRows){const url=cleanUrl(row.imageUrl);if(!url||!APPROVED.has(String(row.verificationStatus))||Number(row.verificationConfidence)<MIN_CONFIDENCE||String(row.verificationProvider)!=="anthropic"||String(row.verificationModel)!==ANTHROPIC_MODEL||!row.verifiedAt)continue;const current=galleryMap.get(row.productId)||[];if(!current.some(x=>x.url===url))current.push({url,label:String(row.altText||"").trim(),order:Number(row.sortOrder)||0});galleryMap.set(row.productId,current.sort((a,b)=>a.order-b.order).slice(0,8));}
+ for(const row of imageRows){const url=cleanUrl(row.imageUrl);if(!url||!APPROVED.has(String(row.verificationStatus))||Number(row.verificationConfidence)<MIN_CONFIDENCE||String(row.verificationProvider)!==VERIFICATION_PROVIDER||!row.verifiedAt)continue;const current=galleryMap.get(row.productId)||[];if(!current.some(x=>x.url===url))current.push({url,label:String(row.altText||"").trim(),order:Number(row.sortOrder)||0});galleryMap.set(row.productId,current.sort((a,b)=>a.order-b.order).slice(0,8));}
  const publishable=all.filter(p=>{const gallery=galleryMap.get(p.id)||[];const validPricing=Number(p.sellingPriceInr)>0&&Number(p.mrpInr)>=Number(p.sellingPriceInr);const stockIsValid=Number(p.stockCount)>0;return p.status==="Published"&&Boolean(p.title&&p.sku)&&validPricing&&stockIsValid&&gallery.length>=MIN_IMAGES;});
  let filtered=publishable;if(featured)filtered=filtered.filter(p=>p.aiScore>=92);if(category&&category!=="ALL")filtered=filtered.filter(p=>p.category===category);if(search){const q=search.toLowerCase().trim();filtered=filtered.filter(p=>p.title.toLowerCase().includes(q)||p.brand.toLowerCase().includes(q)||p.category.toLowerCase().includes(q));}
  if(sort==="price_low")filtered.sort((a,b)=>Number(a.sellingPriceInr)-Number(b.sellingPriceInr));else if(sort==="price_high")filtered.sort((a,b)=>Number(b.sellingPriceInr)-Number(a.sellingPriceInr));else if(sort==="newest")filtered.sort((a,b)=>new Date(b.createdAt).getTime()-new Date(a.createdAt).getTime());else if(sort==="popular")filtered.sort((a,b)=>b.salesCount24h-a.salesCount24h);else filtered.sort((a,b)=>b.aiScore-a.aiScore);
@@ -21,4 +24,3 @@ export async function GET(req:Request){
  const catCounts:Record<string,number>={};publishable.forEach(p=>{catCounts[p.category]=(catCounts[p.category]||0)+1;});
  return NextResponse.json({products:customerProducts,total,page,totalPages:Math.ceil(total/limit),categoryCount:catCounts});
 }
-export const dynamic = "force-dynamic";
