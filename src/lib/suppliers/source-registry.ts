@@ -22,18 +22,32 @@ export type SourceDefinition = SourceCapabilities & {
   requiresAuthorizedAdapter: boolean;
 };
 
-const defs: SourceDefinition[] = [
-  ["cj","CJ Dropshipping"],["deodap","DeoDap"],["dropdash","Dropdash"],["indiamart","IndiaMART"],
-  ["meesho","Meesho"],["shopsy","Shopsy"],["udaan","Udaan"],["qikink","Qikink"],["ondc","ONDC"],
-  ["amazon","Amazon"],["flipkart","Flipkart"],["myntra","Myntra"],["ajio","AJIO"],["nykaa","Nykaa"],
-  ["jiomart","JioMart"],["tatacliq","Tata CLiQ"],["snapdeal","Snapdeal"],["aliexpress","AliExpress"],
-  ["temu","Temu"],["other","Other"]
-].map(([id,name]) => ({
-  id: id as ProviderId, name,
-  catalogue: true, livePrice: true, liveStock: true, serviceability: true,
-  cod: true, upi: true, automatedFulfilment: false, customerOrderTriggered: false,
-  requiresAuthorizedAdapter: true
-}));
+const defs: Array<[ProviderId, string]> = [
+  ["cj", "CJ Dropshipping"], ["deodap", "DeoDap"], ["dropdash", "Dropdash"], ["indiamart", "IndiaMART"],
+  ["meesho", "Meesho"], ["shopsy", "Shopsy"], ["udaan", "Udaan"], ["qikink", "Qikink"], ["ondc", "ONDC"],
+  ["amazon", "Amazon"], ["flipkart", "Flipkart"], ["myntra", "Myntra"], ["ajio", "AJIO"], ["nykaa", "Nykaa"],
+  ["jiomart", "JioMart"], ["tatacliq", "Tata CLiQ"], ["snapdeal", "Snapdeal"], ["aliexpress", "AliExpress"],
+  ["temu", "Temu"], ["other", "Other"],
+];
 
-export const SOURCE_REGISTRY = Object.fromEntries(defs.map(d => [d.id, d])) as Record<ProviderId, SourceDefinition>;
+// Capabilities are deliberately false until an authorized adapter/feed is configured.
+// A provider being listed here does NOT mean BharatShop is authorized to order from it.
+const configured = (id: ProviderId, capability: string) =>
+  process.env[`SOURCE_${id.toUpperCase()}_${capability.toUpperCase()}_ENABLED`] === "true";
+
+export const SOURCE_REGISTRY = Object.fromEntries(
+  defs.map(([id, name]) => [id, {
+    id, name,
+    catalogue: configured(id, "catalogue"),
+    livePrice: configured(id, "live_price"),
+    liveStock: configured(id, "live_stock"),
+    serviceability: configured(id, "serviceability"),
+    cod: configured(id, "cod"),
+    upi: configured(id, "upi"),
+    automatedFulfilment: configured(id, "automated_fulfilment"),
+    customerOrderTriggered: configured(id, "customer_order_triggered"),
+    requiresAuthorizedAdapter: true,
+  } satisfies SourceDefinition])
+) as Record<ProviderId, SourceDefinition>;
+
 export const getSourceDefinition = (id: ProviderId) => SOURCE_REGISTRY[id];
