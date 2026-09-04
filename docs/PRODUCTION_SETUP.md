@@ -26,6 +26,18 @@ Set these only in Render environment variables; never commit secrets:
 
 Never put any of these secret values in GitHub, `render.yaml`, client-side code, logs, or chat messages.
 
+## Admin authentication
+
+The private administrator console uses a PostgreSQL-backed admin account plus a signed, HTTP-only session cookie. The following **must** be configured in the Render production service:
+
+- `ADMIN_EMAIL` — the exact administrator email, for example `mullafaiz666@gmail.com`
+- `ADMIN_PASSWORD` — the administrator password; minimum 12 characters
+- `ADMIN_SESSION_SECRET` — a random secret of at least 32 characters used to sign the admin session cookie
+
+Do not commit these values. On the first successful login with the configured credentials, BharatShop creates or repairs the matching `users` row as role `Admin`, so a missing/stale database user no longer causes a false "Invalid administrator credentials" failure. The configured email is the only email accepted by this bootstrap path.
+
+After changing any of these variables, redeploy/restart the Render service. Existing admin sessions should be treated as invalid after the session-signing change.
+
 ## AI provider readiness
 
 `GET /api/health` now reports only non-secret readiness booleans for `openai` and `anthropic`, plus the selected model names. It never returns the secret values.
@@ -34,7 +46,7 @@ The production acceptance runner treats both providers being configured as a har
 
 ## Render configuration
 
-In the Render production service, open **Environment → Environment Variables** and add `OPENAI_API_KEY` and `ANTHROPIC_API_KEY`. Save with a deploy/redeploy so the running service receives the values. Do not use GitHub Actions secrets as a substitute for runtime environment variables.
+In the Render production service, open **Environment → Environment Variables** and add the required runtime credentials above. Save with a deploy/redeploy so the running service receives the values. Do not use GitHub Actions secrets as a substitute for runtime environment variables.
 
 ## Image verification
 
