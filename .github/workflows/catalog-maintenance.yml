@@ -38,7 +38,7 @@ jobs:
             -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" \
             -H "x-automation-token: $BHARATSHOP_AUTOMATION_TOKEN" \
             -H "Content-Type: application/json" \
-            --data '{"limit":6}' | tee research-products.json
+            --data '{"limit":20}' | tee research-products.json
 
       - name: Resolve complete product media
         env:
