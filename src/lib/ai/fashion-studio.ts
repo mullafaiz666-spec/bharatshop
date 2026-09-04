@@ -1,4 +1,5 @@
 import { pool } from "@/db";
+import { planAutomaticImageStyle } from "@/lib/ai/image-style-engine";
 
 export type FashionCommand = {
   command: string;
@@ -11,6 +12,7 @@ export type FashionCommand = {
 };
 
 export const FASHION_COMMANDS: FashionCommand[] = [
+  {command:"/autoimage",name:"Automatic Image",category:"AI Image Automation",description:"Automatically choose the best visual style for any product",requiresProduct:true,defaultCount:2,prompt:"AUTO_STYLE"},
   {command:"/productmodel",name:"Product & Model",category:"Product & Model Photography",description:"Put clothing on a realistic model",requiresProduct:true,defaultCount:2,prompt:"Create realistic ecommerce fashion model photography using the supplied garment. Preserve the garment's exact design, silhouette, fabric, colors, prints, trims and construction. Show a natural full-body model pose with clean commercial lighting."},
   {command:"/catalogmodel",name:"Catalog Model",category:"Product & Model Photography",description:"Create clean professional catalog visuals",requiresProduct:true,defaultCount:2,prompt:"Create premium clean ecommerce catalog photography using the supplied garment. Preserve the exact product identity and details. Neutral studio background, accurate proportions, front-facing commercial composition, crisp textile detail."},
   {command:"/outfitpreview",name:"Outfit Preview",category:"Product & Model Photography",description:"Preview clothing on different models",requiresProduct:true,defaultCount:3,prompt:"Create realistic outfit-preview photography for the supplied garment on diverse adult fashion models. Preserve the exact garment. Use distinct natural poses and body types while keeping the clothing consistent."},
@@ -74,7 +76,7 @@ async function openAIImage(prompt: string, source?: string) {
       }
     } catch {}
   }
-  const r = await fetch("https://api.openai.com/v1/images/edits", { method: "POST", headers: { Authorization: `Bearer ${key}` }, body: form });
+  const r = await fetch("https://api.openai.com/v1/images/edits", { method: "POST", headers: { Authorization: `Bearer ${key}` }, body: form, signal: AbortSignal.timeout(90000) });
   const text = await r.text();
   if (!r.ok) throw new Error(`Image provider ${r.status}: ${text.slice(0,500)}`);
   const data = JSON.parse(text);
@@ -86,18 +88,35 @@ async function openAIImage(prompt: string, source?: string) {
 
 async function logActivity(productId: number | null, command: FashionCommand, status: string, metadata: any) {
   try {
-    await pool.query(`INSERT INTO ai_activity_logs (user_id,agent_name,action_type,message,metadata_json,status) VALUES (1,'Image & Media',$1,$2,$3,$4)`, [
-      `FASHION_${command.command.slice(1).toUpperCase()}`,
-      `${command.command} ${status.toLowerCase()}${productId ? ` for product ${productId}` : ""}`,
-      JSON.stringify({ command: command.command, productId, ...metadata }), status
-    ]);
+    await pool.query(`INSERT INTO ai_activity_logs (user_id,agent_name,action_type,message,metadata_json,status) VALUES (1,'Image & Media',$1,$2,$3,$4)`, [`FASHION_${command.command.slice(1).toUpperCase()}`, `${command.command} ${status.toLowerCase()}${productId ? ` for product ${productId}` : ""}`, JSON.stringify({ command: command.command, productId, ...metadata }), status]);
   } catch {}
 }
 
 export async function runFashionCommand(input: { command: string; productId?: number; productName?: string; count?: number; extraPrompt?: string }) {
-  const command = getFashionCommand(input.command);
-  if (!command) return { success: false, error: `Unknown fashion command: ${input.command}`, commands: FASHION_COMMANDS.map(x => x.command) };
+  const requested = String(input.command || "/autoimage").trim().toLowerCase();
   const product = await getProduct(input.productId, input.productName);
+  if (requested === "/autoimage" || requested === "auto" || requested === "automatic") {
+    if (!product) return { success: false, error: "/autoimage requires a productId or productName" };
+    const plan = planAutomaticImageStyle({ title: product.title, brand: product.brand, category: product.category });
+    const count = Math.max(1, Math.min(4, Number(input.count || 2)));
+    const source = await sourceImage(product.id, product.image_url);
+    const generated: string[] = [];
+    const command: FashionCommand = { command: "/autoimage", name: "Automatic Image", category: "AI Image Automation", description: "Automatically choose the best visual style for any product", requiresProduct: true, defaultCount: 2, prompt: plan.prompt };
+    for (let i = 0; i < count; i++) {
+      const prompt = `${plan.prompt}\nVariation ${i + 1} of ${count}. ${input.extraPrompt || ""}\nProduct: ${product.title}; brand ${product.brand}; category ${product.category}`;
+      try { generated.push(await openAIImage(prompt, source)); }
+      catch (e) { await logActivity(product.id, command, "FAILED", { error: e instanceof Error ? e.message : "generation failed", generated: generated.length, plan }); break; }
+    }
+    if (!generated.length) return { success: false, command: "/autoimage", error: "No images generated", plan };
+    const start = Number((await pool.query(`SELECT COALESCE(MAX(sort_order),-1)+1 AS n FROM product_images WHERE product_id=$1`, [product.id])).rows[0]?.n || 0);
+    await pool.query(`INSERT INTO product_images (product_id,image_url,source_url,sort_order,alt_text,verification_status) SELECT $1,x,'AI_GENERATED',$2 + ord-1,$3 || ' variation ' || ord,'AI_GENERATED' FROM unnest($4::text[]) WITH ORDINALITY AS t(x,ord)`, [product.id, start, plan.productType, generated]);
+    await pool.query(`UPDATE products SET image_url=$1,updated_at=NOW() WHERE id=$2`, [generated[0], product.id]);
+    await logActivity(product.id, command, "SUCCESS", { generated: generated.length, count, persisted: true, plan });
+    return { success: true, command: "/autoimage", name: "Automatic Image", productId: product.id, generated: generated.length, images: generated, persisted: true, provider: "openai-images", plan };
+  }
+
+  const command = getFashionCommand(requested);
+  if (!command) return { success: false, error: `Unknown fashion command: ${input.command}`, commands: FASHION_COMMANDS.map(x => x.command) };
   if (command.requiresProduct && !product) return { success: false, error: `${command.command} requires a productId or productName` };
   const count = Math.max(1, Math.min(4, Number(input.count || command.defaultCount)));
   const source = product ? await sourceImage(product.id, product.image_url) : undefined;
