@@ -1,0 +1,1 @@
+Gemma runtime acceptance trigger: verify hosted Gemma text + vision through the Render gateway and BharatShop integration before gates are marked green.
