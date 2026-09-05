@@ -30,6 +30,16 @@ async function readBody(req) {
   return Buffer.concat(chunks);
 }
 
+function upstreamPathFor(target, path) {
+  if (path === '/health') return target === 'openrouter' ? '/models' : '/api/tags';
+  if (target !== 'openrouter') return path;
+  // OPENROUTER_BASE_URL already ends in /api/v1 by default. Normalize the
+  // OpenAI-compatible route so /v1/* never becomes /api/v1/v1/* upstream.
+  if (path === '/models' || path === '/v1/models') return '/models';
+  if (path === '/chat/completions' || path === '/v1/chat/completions') return '/chat/completions';
+  return path.startsWith('/v1/') ? path.slice(3) : path;
+}
+
 async function proxy(req, res) {
   const target = backend();
   if (target === 'unconfigured') {
@@ -38,10 +48,10 @@ async function proxy(req, res) {
     return;
   }
 
-  const path = req.url === '/chat/completions' ? '/v1/chat/completions' : req.url;
+  const path = req.url || '/';
   const body = await readBody(req);
   let payload = body;
-  if (path === '/v1/chat/completions' && target === 'openrouter' && body.length) {
+  if ((path === '/chat/completions' || path === '/v1/chat/completions') && target === 'openrouter' && body.length) {
     try {
       const json = JSON.parse(body.toString('utf8'));
       json.model = process.env.GEMMA_MODEL || json.model || model;
@@ -52,7 +62,7 @@ async function proxy(req, res) {
   }
 
   const base = target === 'openrouter' ? openRouterBase : localUpstream;
-  const upstreamPath = path === '/health' ? (target === 'openrouter' ? '/models' : '/api/tags') : path;
+  const upstreamPath = upstreamPathFor(target, path);
   try {
     const r = await fetch(`${base}${upstreamPath}`, {
       method: req.method,
@@ -69,7 +79,7 @@ async function proxy(req, res) {
 }
 
 const server = http.createServer((req, res) => {
-  if (req.url === '/health' || req.url === '/v1/models' || req.url === '/chat/completions' || req.url === '/v1/chat/completions') {
+  if (req.url === '/health' || req.url === '/models' || req.url === '/v1/models' || req.url === '/chat/completions' || req.url === '/v1/chat/completions') {
     return proxy(req, res);
   }
   res.writeHead(404, { 'content-type': 'application/json' });
