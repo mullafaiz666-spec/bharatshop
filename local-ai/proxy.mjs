@@ -61,18 +61,30 @@ async function callGemma(messages) {
   return answer.replace(/\s+/g, ' ').trim();
 }
 
-const VISION_SMOKE_IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAIAAABMXPacAAAEOElEQVR4nO2cr5bTQBTGs5xVFWCqMQjW';
+async function callGemmaWithRetry(messages, attempts = 3) {
+  let lastError;
+  for (let i = 0; i < attempts; i++) {
+    try { return await callGemma(messages); }
+    catch (e) {
+      lastError = e;
+      if (i < attempts - 1) await new Promise(resolve => setTimeout(resolve, 1500 * (i + 1)));
+    }
+  }
+  throw lastError;
+}
+
+const VISION_SMOKE_IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAIAAABMXPacAAAEOElEQVR4nO2cr5bTQBTGs5xVFWCqMQjWYDAYPE8Ab4BYBKYGExUBprYVvEF5A/QazArWrKnBsqaI1YjZM4Rkkvl3Z74k8/1UT047m/P97r2ZtIGzz9e/K4LjEfoESocCwFAAGAoAQwFgKAAMBYChADAUAOYcfQKT5tPj950jX/58lf0TZ/wqok8/9z5SJjiCurik7/42K+yAf4RlGtkK7IAHgis6shUoAAwFVFV0Fcd8nAJkLqfBi1AAGAoAU7oAqe188FKlC4BDAWAoAAwFgClOwMfnK/Qp/EdZAlT6bQeC3++HLVWWAM3psEefwgMFCWgXfl1vgGfSphQB/dGvj4hMoeBFihAwNHCkHMR8vAgBIwMHfjFYvoDxfWddb5SD4CrmT5JjuBR424FXmr7vN7JkAafDPmC345ip1A3EVJ6KOO6aZx9q2TW9bnqbZvvk3WXnYCkPZh13jXoh6CCg/I0OUoMfQTp9QcKGT4XYFIE7oJ++SBMEf+PWNNuqqnL2AbIDjLUf3xAxVZz/Kwr8CJIlePho9K40D7DH00cqPXhH5J6+GjWa/qdOh32eQYS5BrjMmQAHLgI60Rup6022iwFgBKXY9lRy6bfflmEW5e4Ar/Tdm8CavmP0RpL2QdYO8K19x/db6zQm/dTkuwgnmjyKofIXiT7pBTlTBwSnb/3gyPARLPx0F4McAiJrf+TjQ7k0zVZ87CRyMPsbsX75p5v4KRyICdgf3hiPi4x+4yL94ZOi8FMjI0Cl33cgeOHtLNUvxjzRizdBwl1Qum2PSkGXf+aql90UCXRAu/D16xTpt9dEpa8Q7IPYDjCO/nS1f9w16/VavcaOe6k+kN8FDV2NRVDp6y/LsIj0QZSAoay/r69ilh1iIrUvS7iApJU+F+KbIFCANX3xJtDlPzUiHczjTniy6StiHIQIcBw+ia4E0yTYgbcAr9Ev4mDi5R/J1EfQjNIPawI/AQE7n5gmmFH6igAHHgK473TB10GOERTWBLMrf42XA1cBkeXv62C+6SvcHTgJyDx85p6+F3YBUukXdVtQOTfB5LahSyp/FwcWAbLDx9oES0pfYXXg+mii8TeW+5tvxjevXrx1WbPP8gQoRn66cRpBSR9q0yw1/XHsAph+PCODyCKA6Usx5OD8x8/B/2xxffU02fmUyOmwv7247hzEb0NLKH/Nxe3LzpFBAXnKv6j0FR0HZgFMPxsGARz9qWk3QVdAtvQLL3/toPto4t3rX+6rrG7Mx10Wuas8/tCCwe+CCocCwFAAGAoAQwFgKAAMBYChADAUAIYCwFAAGAoAQwFgKABM1L+Uv798JXUexcIOAEMBYCgADAWAoQAwFACGAsBQABgKAEMBYCgADAWAoQAwFACGAsBQABgKAEMBYCgADAWAoQAwFACGAsBQABgKAEMBYCgADAWAoQAwFACGAsBQABgKAEMBYCgADAWAoQAwFACGAsD8BXq/kNxqrJC3AAAAAElFTkSuQmCC';
 
 async function verifyGemma() {
   const result = { backend: backend(), model, text: null, vision: null, ok: false };
   try {
-    const text = await callGemma([{ role: 'user', content: 'Reply with exactly: GEMMA_TEXT_OK' }]);
+    const text = await callGemmaWithRetry([{ role: 'user', content: 'Reply with exactly: GEMMA_TEXT_OK' }]);
     result.text = { pass: text.includes('GEMMA_TEXT_OK'), response: text.slice(0, 200) };
   } catch (e) {
     result.text = { pass: false, error: String(e).slice(0, 500) };
   }
   try {
-    const vision = await callGemma([{
+    const vision = await callGemmaWithRetry([{
       role: 'user',
       content: [
         { type: 'text', text: 'Look at this image and describe what you see in one short phrase.' },
