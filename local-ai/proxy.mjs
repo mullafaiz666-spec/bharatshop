@@ -61,6 +61,8 @@ async function callGemma(messages) {
   return answer.replace(/\s+/g, ' ').trim();
 }
 
+const VISION_SMOKE_IMAGE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAIAAABMXPacAAAEOElEQVR4nO2cr5bTQBTGs5xVFWCqMQjW';
+
 async function verifyGemma() {
   const result = { backend: backend(), model, text: null, vision: null, ok: false };
   try {
@@ -73,8 +75,8 @@ async function verifyGemma() {
     const vision = await callGemma([{
       role: 'user',
       content: [
-        { type: 'text', text: 'Identify the main subject in this image in one short phrase.' },
-        { type: 'image_url', image_url: { url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/3f/Fronalpstock_big.jpg/320px-Fronalpstock_big.jpg' } }
+        { type: 'text', text: 'Look at this image and describe what you see in one short phrase.' },
+        { type: 'image_url', image_url: { url: VISION_SMOKE_IMAGE } }
       ]
     }]);
     result.vision = { pass: Boolean(vision), response: vision.slice(0, 200) };
