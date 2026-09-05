@@ -24,10 +24,20 @@ async function isValidSessionCookie(value: string | undefined) {
   return signature.length === expected.length && signature === expected;
 }
 
+function isAutomationAuthorized(request: NextRequest) {
+  if (!request.nextUrl.pathname.startsWith("/api/")) return false;
+  const expected = process.env.BHARATSHOP_AUTOMATION_TOKEN;
+  if (!expected) return false;
+  const supplied = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") || "";
+  return supplied === expected;
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const protectedPath = ADMIN_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
   if (!protectedPath) return NextResponse.next();
+
+  if (isAutomationAuthorized(request)) return NextResponse.next();
 
   const validSession = await isValidSessionCookie(request.cookies.get("bharatshop_admin_session")?.value);
   if (!validSession) {
