@@ -1,6 +1,7 @@
 import { db } from "@/db";
 import { sql } from "drizzle-orm";
 import { aiModels, checkAI, runAI } from "@/lib/ai/provider";
+import { searxngImageSearch } from "@/lib/searxng";
 
 export const dynamic = "force-dynamic";
 
@@ -9,13 +10,12 @@ const VISION_PROBE_PNG_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAA
 async function checkSearXNG(deep: boolean) {
   const base = String(process.env.SEARXNG_URL || "").replace(/\/+$/, "");
   if (!base) return { configured: false, ready: false, reason: "missing" };
+  if (!deep) return { configured: true, ready: true, exercised: false };
   try {
-    const url = `${base}/search?${new URLSearchParams({ q: "test", categories: "images", engines: String(process.env.SEARXNG_IMAGE_ENGINES || "bing images").split(/[,;]/)[0].trim(), format: "json", safesearch: "0", language: "en" })}`;
-    const res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(deep ? 12000 : 6000), headers: { Accept: "application/json", "User-Agent": "BharatShop-Health/1.0" } });
-    const contentType = res.headers.get("content-type") || "";
-    return { configured: true, ready: res.ok && contentType.includes("application/json"), status: res.status, contentType };
+    const results = await searxngImageSearch("laptop product image", { limit: 1, timeoutMs: 12000 });
+    return { configured: true, ready: results.length > 0, exercised: true, resultCount: results.length };
   } catch (e) {
-    return { configured: true, ready: false, reason: "unreachable", error: e instanceof Error ? e.message : String(e) };
+    return { configured: true, ready: false, exercised: true, reason: "image_search_failed", error: e instanceof Error ? e.message : String(e) };
   }
 }
 
