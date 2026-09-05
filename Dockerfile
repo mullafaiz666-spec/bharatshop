@@ -6,7 +6,7 @@ WORKDIR /app
 # Install it while the image is being built (build runs as root), so the runtime
 # start script never needs sudo/root privileges.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends curl ca-certificates \
+  && apt-get install -y --no-install-recommends curl ca-certificates zstd \
   && rm -rf /var/lib/apt/lists/* \
   && curl -fsSL https://ollama.com/install.sh | sh
 
