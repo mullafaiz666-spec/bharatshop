@@ -13,14 +13,12 @@ function backend() {
 }
 
 function headersFor(target) {
-  if (target === 'openrouter') {
-    return {
-      'content-type': 'application/json',
-      authorization: `Bearer ${openRouterKey}`,
-      'HTTP-Referer': process.env.OPENROUTER_SITE_URL || 'https://bharatshop-9w4a.onrender.com',
-      'X-Title': process.env.OPENROUTER_APP_NAME || 'BharatShop'
-    };
-  }
+  if (target === 'openrouter') return {
+    'content-type': 'application/json',
+    authorization: `Bearer ${openRouterKey}`,
+    'HTTP-Referer': process.env.OPENROUTER_SITE_URL || 'https://bharatshop-9w4a.onrender.com',
+    'X-Title': process.env.OPENROUTER_APP_NAME || 'BharatShop'
+  };
   return { 'content-type': 'application/json' };
 }
 
@@ -63,16 +61,14 @@ async function callGemma(messages) {
   return answer.replace(/\s+/g, ' ').trim();
 }
 
-async function runSmokeTests() {
-  if (process.env.GEMMA_SMOKE_TEST !== '1') return;
-  console.log(`GEMMA_SMOKE_TEST start; backend=${backend()}; model=${model}`);
+async function verifyGemma() {
+  const result = { backend: backend(), model, text: null, vision: null, ok: false };
   try {
     const text = await callGemma([{ role: 'user', content: 'Reply with exactly: GEMMA_TEXT_OK' }]);
-    console.log(`GEMMA_TEXT_PROOF PASS; response=${JSON.stringify(text.slice(0, 200))}`);
+    result.text = { pass: text.includes('GEMMA_TEXT_OK'), response: text.slice(0, 200) };
   } catch (e) {
-    console.error(`GEMMA_TEXT_PROOF FAIL; error=${String(e).slice(0, 500)}`);
+    result.text = { pass: false, error: String(e).slice(0, 500) };
   }
-
   try {
     const vision = await callGemma([{
       role: 'user',
@@ -81,11 +77,23 @@ async function runSmokeTests() {
         { type: 'image_url', image_url: { url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/3f/Fronalpstock_big.jpg/320px-Fronalpstock_big.jpg' } }
       ]
     }]);
-    console.log(`GEMMA_VISION_PROOF PASS; response=${JSON.stringify(vision.slice(0, 200))}`);
+    result.vision = { pass: Boolean(vision), response: vision.slice(0, 200) };
   } catch (e) {
-    console.error(`GEMMA_VISION_PROOF FAIL; error=${String(e).slice(0, 500)}`);
+    result.vision = { pass: false, error: String(e).slice(0, 500) };
   }
-  console.log('GEMMA_SMOKE_TEST end');
+  result.ok = Boolean(result.text?.pass && result.vision?.pass);
+  return result;
+}
+
+async function runSmokeTests() {
+  if (process.env.GEMMA_SMOKE_TEST !== '1') return;
+  console.log(`GEMMA_SMOKE_TEST start; backend=${backend()}; model=${model}`);
+  const result = await verifyGemma();
+  if (result.text?.pass) console.log(`GEMMA_TEXT_PROOF PASS; response=${JSON.stringify(result.text.response)}`);
+  else console.error(`GEMMA_TEXT_PROOF FAIL; error=${result.text?.error || 'unexpected response'}`);
+  if (result.vision?.pass) console.log(`GEMMA_VISION_PROOF PASS; response=${JSON.stringify(result.vision.response)}`);
+  else console.error(`GEMMA_VISION_PROOF FAIL; error=${result.vision?.error || 'unexpected response'}`);
+  console.log(`GEMMA_SMOKE_TEST result=${JSON.stringify({ ok: result.ok, backend: result.backend, model: result.model })}`);
 }
 
 async function proxy(req, res) {
@@ -95,7 +103,6 @@ async function proxy(req, res) {
     res.end(JSON.stringify({ error: { message: 'Gemma gateway is not configured: set OPENROUTER_API_KEY or OLLAMA_UPSTREAM', type: 'configuration_error' } }));
     return;
   }
-
   const path = req.url || '/';
   const body = await readBody(req);
   let payload = body;
@@ -106,7 +113,6 @@ async function proxy(req, res) {
       payload = Buffer.from(JSON.stringify(json));
     } catch {}
   }
-
   const base = target === 'openrouter' ? openRouterBase : localUpstream;
   const upstreamPath = upstreamPathFor(target, path);
   try {
@@ -124,7 +130,18 @@ async function proxy(req, res) {
   }
 }
 
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
+  if (req.url === '/verify') {
+    try {
+      const result = await verifyGemma();
+      res.writeHead(result.ok ? 200 : 502, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      res.end(JSON.stringify(result));
+    } catch (e) {
+      res.writeHead(502, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      res.end(JSON.stringify({ ok: false, error: String(e) }));
+    }
+    return;
+  }
   if (req.url === '/health' || req.url === '/models' || req.url === '/v1/models' || req.url === '/chat/completions' || req.url === '/v1/chat/completions') {
     return proxy(req, res);
   }
