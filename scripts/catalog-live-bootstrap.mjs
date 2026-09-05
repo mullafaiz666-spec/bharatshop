@@ -1,13 +1,41 @@
 import process from 'node:process';
-const base = (process.env.BHARATSHOP_URL || process.env.BASE_URL || '').replace(/\/$/, '');
+
+const base = (process.env.BHARATSHOP_URL || process.env.BASE_URL || 'https://bharatshop-9w4a.onrender.com').replace(/\/$/, '');
 const token = process.env.BHARATSHOP_AUTOMATION_TOKEN;
-if (!base || !token) throw new Error('BHARATSHOP_URL/BASE_URL and BHARATSHOP_AUTOMATION_TOKEN are required');
-async function post(path, body) {
-  const r = await fetch(`${base}${path}`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}`, 'x-automation-token': token }, body: JSON.stringify(body) });
-  const text = await r.text();
-  if (!r.ok) throw new Error(`${path} ${r.status}: ${text.slice(0, 1000)}`);
-  return text;
+if (!token) throw new Error('BHARATSHOP_AUTOMATION_TOKEN is required');
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function post(path, body, attempts = 3) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 90_000);
+    try {
+      const r = await fetch(`${base}${path}`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${token}`,
+          'x-automation-token': token,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      const text = await r.text();
+      if (!r.ok) throw new Error(`${path} ${r.status}: ${text.slice(0, 1000)}`);
+      return text;
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) await sleep(attempt * 5000);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw new Error(`${path} failed after ${attempts} attempts: ${lastError?.message || lastError}`);
 }
+
+console.log(`Catalog bootstrap target: ${base}`);
 const result = await post('/api/automation/catalog-maintenance', { mode: 'maintenance', limit: 10, batchSize: 10 });
 console.log(result);
 const d = JSON.parse(result);
