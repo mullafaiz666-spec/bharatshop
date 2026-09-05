@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { products, productImages } from "@/db/schema";
 import { asc, eq, or } from "drizzle-orm";
 import { resolveVerifiedProductMedia } from "@/lib/ai/media-resolver";
-import { aiModels } from "@/lib/ai/provider";
+import { aiConfigured, aiModels } from "@/lib/ai/provider";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -37,10 +37,11 @@ async function enforcePublicationGate() {
 }
 
 export async function GET() {
+  const ready = !!process.env.SEARXNG_URL && aiConfigured();
   return NextResponse.json({
     agent: "Product-Research-and-Catalogue-Agent",
     automation: "catalog-maintenance",
-    status: process.env.SEARXNG_URL && process.env.ANTHROPIC_API_KEY ? "ready" : "blocked_missing_keys",
+    status: ready ? "ready" : "blocked_missing_runtime_config",
     provider: "postgres-staging->searxng->local-ai-vision",
     verificationModel: aiModels().vision,
     publicationPolicy: "STAGED until central Media Resolver proves >=4 AI_VISION_VERIFIED images with persisted local-AI evidence",
