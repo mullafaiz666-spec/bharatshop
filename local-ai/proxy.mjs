@@ -4,7 +4,7 @@ const port = Number(process.env.PORT || 10000);
 const localUpstream = process.env.OLLAMA_UPSTREAM || 'http://127.0.0.1:11434';
 const openRouterBase = (process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1').replace(/\/$/, '');
 const openRouterKey = process.env.OPENROUTER_API_KEY || '';
-const model = process.env.GEMMA_MODEL || 'google/gemma-3-4b-it:free';
+const model = process.env.GEMMA_MODEL || 'google/gemma-4-31b-it:free';
 
 function backend() {
   if (openRouterKey) return 'openrouter';
