@@ -18,13 +18,14 @@ env:
 jobs:
   maintain-catalog:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
 
       - name: Run live catalog bootstrap
         env:
           BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
+          CATALOG_AUTOMATION_TIMEOUT_MS: 300000
         run: |
           set -euo pipefail
           test -n "$BHARATSHOP_AUTOMATION_TOKEN"
@@ -35,7 +36,7 @@ jobs:
           BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
         run: |
           set -euo pipefail
-          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 120 --retry 2 --retry-delay 5 \
+          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 180 --retry 2 --retry-delay 5 \
             -X POST "$BHARATSHOP_URL/api/automation/research-products" \
             -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" \
             -H "x-automation-token: $BHARATSHOP_AUTOMATION_TOKEN" \
@@ -47,7 +48,7 @@ jobs:
           BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
         run: |
           set -euo pipefail
-          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 180 --retry 3 --retry-delay 5 \
+          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 --retry 3 --retry-delay 5 \
             -X POST "$BHARATSHOP_URL/api/catalog/image-resolve" \
             -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" \
             -H "Content-Type: application/json" \
@@ -64,14 +65,14 @@ jobs:
           node - <<'NODE'
           const fs=require('fs'); const d=JSON.parse(fs.readFileSync('media-resolve.json','utf8'));
           const published=(d.results||[]).find(x=>x&&x.status==='COMPLETE_MEDIA_RESOLVED'&&x.publicationGate==='PASS'&&Number(x.imageCount)>=4&&Array.isArray(x.images)&&x.images.filter(i=>/^https:\/\//i.test(String(i?.url||''))&&Number(i?.confidence)>=0.75).length>=4);
-          if(!published){console.error(JSON.stringify({resolver:d,research:fs.existsSync('research-products.json')?JSON.parse(fs.readFileSync('research-products.json','utf8')):null},null,2));throw new Error('CATALOG ACCEPTANCE GATE FAILED: no product has >=4 Claude-verified HTTPS images and publicationGate=PASS');}
+          if(!published){console.error(JSON.stringify({resolver:d,research:fs.existsSync('research-products.json')?JSON.parse(fs.readFileSync('research-products.json','utf8')):null},null,2));throw new Error('CATALOG ACCEPTANCE GATE FAILED: no product has >=4 verified HTTPS images and publicationGate=PASS');}
           console.log(JSON.stringify({acceptedProductId:published.productId,product:published.product,verifiedImages:published.imageCount,publicationGate:published.publicationGate,provider:published.provider,imageUrls:published.images.map(i=>i.url)},null,2));
           NODE
 
       - name: Verify storefront has real published images
         run: |
           set -euo pipefail
-          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 120 --retry 3 --retry-delay 5 "$BHARATSHOP_URL/api/storefront/products?limit=96" > storefront.json
+          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 180 --retry 3 --retry-delay 5 "$BHARATSHOP_URL/api/storefront/products?limit=96" > storefront.json
           cat storefront.json
           node - <<'NODE'
           const fs=require('fs'); const d=JSON.parse(fs.readFileSync('storefront.json','utf8'));
@@ -85,7 +86,7 @@ jobs:
           BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
         run: |
           set -euo pipefail
-          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 180 --retry 3 --retry-delay 5 \
+          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 --retry 3 --retry-delay 5 \
             -X POST "$BHARATSHOP_URL/api/catalog/fashion-enrich" \
             -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" \
             -H "Content-Type: application/json" \
