@@ -32,10 +32,12 @@ These are production statuses, not unit test statuses. Source existence and regr
 | Action / independent verification | PARTIAL | Dispatch explicitly distinguishes unverified result; reconciliation still required |
 | Orders / supplier purchase / payments / tracking | NOT TESTED | Real provider credentials and runtime evidence required |
 | Marketing / advertising / learning | PARTIAL | Local adapters; external execution and evidence not verified |
-| CI and build | NOT TESTED | Await branch CI; local dependency installation unavailable |
+| CI and build | VERIFIED | GitHub Actions run 34251986711: install, six regression tests, typecheck, production build and lint passed for ae4d0b9c017e184fd3c75566ddca0be0e8ea1d6a |
 | Production acceptance | NOT TESTED | No full acceptance chain has run |
 
 ## Local validation
+
+GitHub Actions [run 34251986711](https://github.com/mullafaiz666-spec/bharatshop/actions/runs/34251986711) passed tests, TypeScript checking, Next.js production build and lint. The following acceptance-table update changes documentation only.
 
 Six Node regression tests exercise gateway authentication, model/image/tool payload preservation, malformed provider output, unauthorized tool plans, readiness, media confidence and tool argument validation. They use controlled test upstreams, not real inference. No test writes to production.
 
