@@ -6,7 +6,10 @@ const baseUrl = () => (process.env.AI_BASE_URL || process.env.LOCAL_AI_BASE_URL 
 const apiKey = () => process.env.AI_API_KEY || process.env.LOCAL_AI_API_KEY || "";
 export const aiProviderName = () => process.env.AI_PROVIDER || "local-openai-compatible";
 export const aiConfigured = () => !!baseUrl();
-export const aiModels = () => ({ text: process.env.AI_TEXT_MODEL || process.env.LOCAL_AI_TEXT_MODEL || "gemma3:4b", vision: process.env.AI_VISION_MODEL || process.env.LOCAL_AI_VISION_MODEL || "gemma3:4b" });
+export const aiModels = () => ({
+  text: process.env.AI_TEXT_MODEL || process.env.LOCAL_AI_TEXT_MODEL || "gemma3:270m-it-qat",
+  vision: process.env.AI_VISION_MODEL || process.env.LOCAL_AI_VISION_MODEL || "local-evidence-v1",
+});
 
 function headers() { const key = apiKey(); return { "Content-Type": "application/json", ...(key ? { Authorization: `Bearer ${key}` } : {}) }; }
 
@@ -26,7 +29,7 @@ export async function runAI(messages: AIMessage[], options: ProviderOptions = {}
     model: options.model || models.text,
     messages,
     temperature: options.temperature ?? 0.2,
-    max_tokens: options.maxTokens ?? 2048,
+    max_tokens: options.maxTokens ?? 1024,
     stream: false,
     ...(options.tools ? { tools: options.tools, tool_choice: options.toolChoice ?? "auto" } : {}),
   });
@@ -40,20 +43,14 @@ export async function runText(messages: AIMessage[], options: ProviderOptions = 
 }
 
 export async function runStructured<T>(system: string, user: string): Promise<T> {
-  const result = await runText([{ role: "system", content: `${system}\nReturn ONLY valid JSON. No markdown fences.` }, { role: "user", content: user }], { temperature: 0, maxTokens: 4096 });
+  const result = await runText([{ role: "system", content: `${system}\nReturn ONLY valid JSON. No markdown fences.` }, { role: "user", content: user }], { temperature: 0, maxTokens: 2048 });
   const match = result.content.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
   if (!match) throw new Error("AI provider returned non-JSON output");
   return JSON.parse(match[0]) as T;
 }
 
-export async function verifyImagesWithAI(images: Array<{ url: string; data: string; mediaType: string }>, product: { title: string; brand: string; category: string }) {
-  const content: any[] = [{ type: "text", text: `Product: ${product.title}\nBrand: ${product.brand}\nCategory: ${product.category}\nEvaluate each image for exact-product identity. Reject unrelated, generic stock, placeholder, collage and wrong-variant images. Return ONLY JSON array [{"index":1,"matches":true,"confidence":0.9,"reason":"..."}].` }];
-  images.forEach((image, i) => { content.push({ type: "text", text: `Image ${i + 1}` }); content.push({ type: "image_url", image_url: { url: `data:${image.mediaType};base64,${image.data}` } }); });
-  const data = await runAI([{ role: "user", content }], { model: aiModels().vision, temperature: 0, maxTokens: 3000 });
-  const text = String(data?.choices?.[0]?.message?.content || "");
-  const match = text.match(/\[[\s\S]*\]/);
-  if (!match) throw new Error("AI vision provider returned non-JSON output");
-  return JSON.parse(match[0]) as Array<{ index: number; matches: boolean; confidence: number; reason: string }>;
+export async function verifyImagesWithAI() {
+  throw new Error("Multimodal Gemma is disabled on the 512 MB free tier; use the local evidence verifier");
 }
 
 export async function checkAI(deep = false) {
