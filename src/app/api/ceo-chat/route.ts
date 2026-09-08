@@ -5,29 +5,138 @@ import { aiModels, runText } from "@/lib/ai/provider";
 
 export const dynamic = "force-dynamic";
 
-const BASE_SYSTEM = `You are the BharatShop AI CEO. Speak naturally and directly. Use live evidence and the permitted tools; never invent actions, results, sources, images, approvals or business facts. Consequential purchases, spending, risky publishing, financial changes and external commitments require human approval and you must never bypass that gate. Never expose credentials, API keys or customer PII. Image integrity is strict: only call an image verified when the resolver reports successful verification. A single product failure must not block the catalogue. Fashion Studio commands must use the exact supported command.`;
-const AGENT_FOCUS: Record<string,string> = { "AI CEO":"Coordinate the whole operation and choose the appropriate specialist capability.", "Product Research":"Research product opportunities, trends, suppliers and margin potential.", "Source Verification":"Verify exact source identity, pricing, stock, shipping, economics and evidence.", "Image & Media":"Resolve and validate exact-product media; reject unrelated or unverified imagery.", "Fashion Enrichment":"Work on fashion attributes, variants, sizing, fit and enrichment.", "Listing & Marketing":"Improve customer-facing listing quality, positioning and catalogue readiness.", "Learning & Analytics":"Analyze live business evidence, performance, anomalies and outcomes.", "Advertising":"Prepare advertising decisions from current business evidence.", "Order Re-check":"Re-check order economics and supplier evidence; never bypass approval.", "Fulfilment & Tracking":"Own fulfilment lifecycle and tracking evidence; never claim unconfirmed purchases or shipments." };
-
-const TOOL_DEFINITIONS: Record<string,any> = {
- inspect_live_business_data:{type:"function",function:{name:"inspect_live_business_data",description:"Inspect live BharatShop business state and pending approvals.",parameters:{type:"object",properties:{},additionalProperties:false}}},
- research_web:{type:"function",function:{name:"research_web",description:"Research current public web evidence.",parameters:{type:"object",properties:{query:{type:"string"}},required:["query"],additionalProperties:false}}},
- resolve_product_images:{type:"function",function:{name:"resolve_product_images",description:"Find and save verified exact-product images.",parameters:{type:"object",properties:{product_id:{type:"integer"},product_name:{type:"string"}},additionalProperties:false}}},
- fashion_studio:{type:"function",function:{name:"fashion_studio",description:"Execute a supported Fashion Studio command.",parameters:{type:"object",properties:{command:{type:"string",enum:listFashionCommands().map(x=>x.command)},product_id:{type:"integer"},product_name:{type:"string"},count:{type:"integer"},extra_prompt:{type:"string"}},required:["command"],additionalProperties:false}}},
- list_fashion_commands:{type:"function",function:{name:"list_fashion_commands",description:"List supported Fashion Studio commands.",parameters:{type:"object",properties:{},additionalProperties:false}}},
- reject_product:{type:"function",function:{name:"reject_product",description:"Reject one catalogue product that cannot be verified.",parameters:{type:"object",properties:{product_id:{type:"integer"},product_name:{type:"string"},reason:{type:"string"}},additionalProperties:false}}},
- create_approval:{type:"function",function:{name:"create_approval",description:"Create a persistent human approval request; do not execute the consequential action.",parameters:{type:"object",properties:{title:{type:"string"},action_type:{type:"string"},payload:{type:"object",additionalProperties:true},reason:{type:"string"},risk_level:{type:"string",enum:["LOW","MEDIUM","HIGH","CRITICAL"]}},required:["title","action_type","reason","risk_level"],additionalProperties:false}}},
- list_pending_approvals:{type:"function",function:{name:"list_pending_approvals",description:"List current pending human approvals.",parameters:{type:"object",properties:{},additionalProperties:false}}}
+const BASE_SYSTEM = `You are BharatShop AI CEO. Reason only from the supplied live evidence. Never invent actions, sources, approvals, stock, images, orders or financial facts. Human approval is mandatory before consequential spending, purchasing, publishing-risk changes or external commitments. Be concise.`;
+const AGENT_FOCUS: Record<string,string> = {
+  "AI CEO":"Coordinate the operation from live evidence.",
+  "Product Research":"Research product opportunities from public evidence.",
+  "Source Verification":"Verify source identity, pricing, stock and shipping evidence.",
+  "Image & Media":"Resolve exact-product media without weakening verification gates.",
+  "Fashion Enrichment":"Work on evidence-backed fashion variants and sizing.",
+  "Listing & Marketing":"Prepare truthful customer-facing listing decisions.",
+  "Learning & Analytics":"Analyze live business evidence and outcomes.",
+  "Advertising":"Prepare advertising decisions; spending remains human-gated.",
+  "Order Re-check":"Re-check order economics; supplier purchasing remains human-gated.",
+  "Fulfilment & Tracking":"Review fulfilment/tracking evidence without inventing shipment state.",
 };
-const AGENT_TOOLS: Record<string,string[]> = { "AI CEO":Object.keys(TOOL_DEFINITIONS), "Product Research":["inspect_live_business_data","research_web"], "Source Verification":["inspect_live_business_data","research_web"], "Image & Media":["inspect_live_business_data","research_web","resolve_product_images","fashion_studio","list_fashion_commands","reject_product"], "Fashion Enrichment":["inspect_live_business_data","research_web","fashion_studio","list_fashion_commands"], "Listing & Marketing":["inspect_live_business_data","research_web","fashion_studio","list_fashion_commands"], "Learning & Analytics":["inspect_live_business_data","research_web"], "Advertising":["inspect_live_business_data","research_web","list_pending_approvals","create_approval"], "Order Re-check":["inspect_live_business_data","research_web","list_pending_approvals","create_approval"], "Fulfilment & Tracking":["inspect_live_business_data","list_pending_approvals","create_approval"] };
-function toolsFor(agent:string){return (AGENT_TOOLS[agent]||AGENT_TOOLS["AI CEO"]).map(x=>TOOL_DEFINITIONS[x]);}
+const AGENT_TOOLS: Record<string,string[]> = {
+  "AI CEO":["inspect_live_business_data","research_web","resolve_product_images","fashion_studio","list_fashion_commands","reject_product","create_approval","list_pending_approvals"],
+  "Product Research":["inspect_live_business_data","research_web"],
+  "Source Verification":["inspect_live_business_data","research_web"],
+  "Image & Media":["inspect_live_business_data","research_web","resolve_product_images","fashion_studio","list_fashion_commands","reject_product"],
+  "Fashion Enrichment":["inspect_live_business_data","research_web","fashion_studio","list_fashion_commands"],
+  "Listing & Marketing":["inspect_live_business_data","research_web"],
+  "Learning & Analytics":["inspect_live_business_data","research_web"],
+  "Advertising":["inspect_live_business_data","research_web","list_pending_approvals","create_approval"],
+  "Order Re-check":["inspect_live_business_data","research_web","list_pending_approvals","create_approval"],
+  "Fulfilment & Tracking":["inspect_live_business_data","list_pending_approvals","create_approval"],
+};
+
+function allowed(agent:string, tool:string) { return (AGENT_TOOLS[agent] || AGENT_TOOLS["AI CEO"]).includes(tool); }
 function slashCommand(question:string){const p=question.trim().split(/\s+/);const command=(p.shift()||"").toLowerCase();if(!/^\/[a-z0-9]+$/i.test(command))return null;return{command,rest:p.join(" ").trim()};}
 
-async function runTool(name:string,args:any,agent:string,trace:any[],approvalId?:number){const started=Date.now();let result:any;try{switch(name){case"inspect_live_business_data":result=await inspectLiveBusinessData();break;case"research_web":result=await researchWeb(String(args.query||""));break;case"resolve_product_images":result=await resolveProductImages(args.product_id?Number(args.product_id):undefined,args.product_name?String(args.product_name):undefined);break;case"fashion_studio":result=await fashionStudio(String(args.command||""),args.product_id?Number(args.product_id):undefined,args.product_name?String(args.product_name):undefined,args.count?Number(args.count):undefined,args.extra_prompt?String(args.extra_prompt):undefined);break;case"list_fashion_commands":result=listFashionCommands();break;case"reject_product":result=await rejectProduct(args.product_id?Number(args.product_id):undefined,args.product_name?String(args.product_name):undefined,String(args.reason||"Product could not be verified; skipping it."));break;case"create_approval":result=await createApproval({title:String(args.title),actionType:String(args.action_type),payload:args.payload??{},reason:String(args.reason),riskLevel:String(args.risk_level)});break;case"list_pending_approvals":result=await listPendingApprovals();break;default:throw new Error(`Unknown CEO tool: ${name}`)}}catch(e){result={error:e instanceof Error?e.message:"Tool failed"};}try{const audit=await recordToolExecution(agent,name,args,result,started,approvalId);trace.push({auditId:audit.id,tool:name,input:args,result,status:audit.status,createdAt:audit.created_at});}catch(e){trace.push({auditId:null,tool:name,input:args,result,status:"AUDIT_FAILED",auditError:e instanceof Error?e.message:"Audit write failed"});}return result;}
+async function runTool(name:string,args:any,agent:string,trace:any[],approvalId?:number){
+  const started=Date.now(); let result:any;
+  try{
+    switch(name){
+      case"inspect_live_business_data":result=await inspectLiveBusinessData();break;
+      case"research_web":result=await researchWeb(String(args.query||""));break;
+      case"resolve_product_images":result=await resolveProductImages(args.product_id?Number(args.product_id):undefined,args.product_name?String(args.product_name):undefined);break;
+      case"fashion_studio":result=await fashionStudio(String(args.command||""),args.product_id?Number(args.product_id):undefined,args.product_name?String(args.product_name):undefined,args.count?Number(args.count):undefined,args.extra_prompt?String(args.extra_prompt):undefined);break;
+      case"list_fashion_commands":result=listFashionCommands();break;
+      case"reject_product":result=await rejectProduct(args.product_id?Number(args.product_id):undefined,args.product_name?String(args.product_name):undefined,String(args.reason||"Product failed verification"));break;
+      case"create_approval":result=await createApproval({title:String(args.title),actionType:String(args.action_type),payload:args.payload??{},reason:String(args.reason),riskLevel:String(args.risk_level||"MEDIUM")});break;
+      case"list_pending_approvals":result=await listPendingApprovals();break;
+      default:throw new Error(`Unknown CEO tool: ${name}`);
+    }
+  }catch(e){result={error:e instanceof Error?e.message:"Tool failed"};}
+  try{
+    const audit=await recordToolExecution(agent,name,args,result,started,approvalId);
+    trace.push({auditId:audit.id,tool:name,input:args,result,status:audit.status,createdAt:audit.created_at});
+  }catch(e){trace.push({auditId:null,tool:name,input:args,result,status:"AUDIT_FAILED",auditError:e instanceof Error?e.message:"Audit write failed"});}
+  return result;
+}
 
-async function fail(message:string,agent:string,evidence:any={}){try{await recordAudit({agentName:agent,eventType:"CEO_DECISION",status:"FAILED",summary:message,evidence});}catch{}return NextResponse.json({error:message,code:"CEO_AI_UNAVAILABLE",agent,provider:evidence.providerError?{status:evidence.providerStatus,error:evidence.providerError}:undefined},{status:503});}
+function compactLive(live:any){
+  return {
+    products:live?.products,
+    internalOrders:live?.internalOrders,
+    storefrontOrders:live?.storefrontOrders,
+    pendingApprovals:Array.isArray(live?.pendingApprovals)?live.pendingApprovals.slice(0,5).map((x:any)=>({id:x.id,title:x.title,action_type:x.action_type,status:x.status,risk_level:x.risk_level})):[],
+    recentActivity:Array.isArray(live?.recentActivity)?live.recentActivity.slice(0,5).map((x:any)=>({agent:x.agent_name,action:x.action_type,status:x.status,message:String(x.message||"").slice(0,140)})):[],
+    inspectedAt:live?.inspectedAt,
+  };
+}
+function compactTrace(trace:any[]){return trace.slice(-4).map(x=>({tool:x.tool,status:x.status,auditId:x.auditId,result:JSON.stringify(x.result??{}).slice(0,1200)}));}
 
-export async function POST(req:Request){const started=Date.now();try{const body=await req.json();const incoming=Array.isArray(body.messages)?body.messages.slice(-30):[];const question=String(body.question||incoming.at(-1)?.content||"").trim();if(!question)return NextResponse.json({error:"Question required"},{status:400});const context=body.context??{};const agent=String(context.selectedAgent||"AI CEO");let live:any;try{live=await inspectLiveBusinessData()}catch(e){live={evidenceError:e instanceof Error?e.message:"Live evidence unavailable"};}
- const slash=slashCommand(question);if(slash&&listFashionCommands().some(x=>x.command===slash.command)){if(!AGENT_TOOLS[agent]?.includes("fashion_studio"))return NextResponse.json({error:`${agent} does not have permission to execute Fashion Studio commands.`,code:"AGENT_TOOL_NOT_ALLOWED"},{status:403});const trace:any[]=[];const result=await runTool("fashion_studio",{command:slash.command,extra_prompt:slash.rest,product_id:context.productId,product_name:context.productName},agent,trace);const reply=result?.success?`${slash.command} is complete. I generated ${result.generated} image(s).`:`I couldn't complete ${slash.command}: ${result?.error||"the tool did not confirm success"}`;try{await recordAudit({agentName:agent,eventType:"CEO_DECISION",status:result?.success?"SUCCESS":"FAILED",summary:reply,evidence:{question,agent,toolExecutions:trace,durationMs:Date.now()-started}})}catch{}return NextResponse.json({reply,mode:"fashion-studio-live",result});}
- const trace:any[]=[];const instructions=`${BASE_SYSTEM}\nSELECTED AGENT: ${agent}\n${AGENT_FOCUS[agent]||"Operate only within the selected agent's permitted responsibilities."}\nLIVE BUSINESS EVIDENCE: ${JSON.stringify({...context,liveEvidence:live}).slice(0,24000)}`;const messages:any[]=[{role:"system",content:instructions},...incoming.map((m:any)=>({role:m?.role==="assistant"?"assistant":"user",content:String(m?.content||"")})).filter((m:any)=>m.content),{role:"user",content:question}];const tools=toolsFor(agent);
- try{for(let round=0;round<8;round++){const result=await runText(messages,{model:aiModels().text,temperature:0.2,maxTokens:3000,tools,toolChoice:"auto"});messages.push(result.raw);if(!result.toolCalls.length){const reply=result.content.trim();if(!reply)throw new Error("AI provider returned an empty final response");try{await recordAudit({agentName:agent,eventType:"CEO_DECISION",status:"SUCCESS",summary:"CEO produced a decision after live evidence and agent-scoped tool processing.",evidence:{question,agent,toolExecutions:trace,decision:reply,provider:process.env.AI_PROVIDER||"local-openai-compatible",model:aiModels().text,durationMs:Date.now()-started}})}catch{}return NextResponse.json({reply,mode:"ai-agent-live",agent,toolExecutions:trace,provider:process.env.AI_PROVIDER||"local-openai-compatible",model:aiModels().text});}for(const call of result.toolCalls){let args:any={};try{args=JSON.parse(call.function?.arguments||"{}")}catch{args={_parseError:"Invalid function arguments"}}const toolResult=await runTool(String(call.function?.name||""),args,agent,trace);messages.push({role:"tool",tool_call_id:call.id,content:JSON.stringify(toolResult).slice(0,30000)});}}throw new Error("AI tool loop exceeded the maximum number of rounds");}catch(e){return fail("AI CEO is unavailable because the configured local AI provider did not return a successful response.",agent,{question,agent,providerStatus:503,providerError:e instanceof Error?e.message:String(e),liveEvidence:live,toolExecutions:trace});}
- }catch(error){return NextResponse.json({error:error instanceof Error?error.message:"Agent chat failed",code:"CEO_CHAT_FAILED"},{status:500});}}
+function parseApprovalIntent(question:string){
+  const title=question.match(/titled exactly\s+["“]([^"”]+)["”]/i)?.[1];
+  const action=question.match(/\bfor\s+([A-Z][A-Z0-9_]+)\b/i)?.[1]?.toUpperCase();
+  const payloadText=question.match(/with payload\s+(\{[\s\S]*?\})(?:\.|$)/i)?.[1];
+  if(!title||!action||!/approval request/i.test(question)) return null;
+  let payload:any={}; if(payloadText){try{payload=JSON.parse(payloadText)}catch{payload={};}}
+  const risk=/low[- ]risk/i.test(question)?"LOW":/critical/i.test(question)?"CRITICAL":/high[- ]risk/i.test(question)?"HIGH":"MEDIUM";
+  return {title,action_type:action,payload,reason:"AI CEO requested human authorization; no consequential action is executed by creating this request.",risk_level:risk};
+}
+
+async function auditDecision(agent:string, status:string, summary:string, evidence:any){
+  try{await recordAudit({agentName:agent,eventType:"CEO_DECISION",status,summary,evidence});}catch{}
+}
+
+export async function POST(req:Request){
+  const started=Date.now();
+  try{
+    const body=await req.json();
+    const incoming=Array.isArray(body.messages)?body.messages.slice(-8):[];
+    const question=String(body.question||incoming.at(-1)?.content||"").trim();
+    if(!question)return NextResponse.json({error:"Question required"},{status:400});
+    const context=body.context??{};
+    const agent=String(context.selectedAgent||"AI CEO");
+    const trace:any[]=[];
+
+    const slash=slashCommand(question);
+    if(slash&&listFashionCommands().some(x=>x.command===slash.command)){
+      if(!allowed(agent,"fashion_studio"))return NextResponse.json({error:`${agent} does not have permission to execute Fashion Studio commands.`,code:"AGENT_TOOL_NOT_ALLOWED"},{status:403});
+      const result=await runTool("fashion_studio",{command:slash.command,extra_prompt:slash.rest,product_id:context.productId,product_name:context.productName},agent,trace);
+      const reply=result?.success?`${slash.command} completed with ${result.generated} generated image(s).`:`${slash.command} did not complete: ${result?.error||"no success evidence"}`;
+      await auditDecision(agent,result?.success?"SUCCESS":"FAILED",reply,{question,toolExecutions:trace,durationMs:Date.now()-started});
+      return NextResponse.json({reply,mode:"fashion-studio-live",agent,toolExecutions:trace,result});
+    }
+
+    const approval=parseApprovalIntent(question);
+    if(approval){
+      if(!allowed(agent,"create_approval"))return NextResponse.json({error:`${agent} cannot create approval requests.`,code:"AGENT_TOOL_NOT_ALLOWED"},{status:403});
+      const result=await runTool("create_approval",approval,agent,trace);
+      const ok=!result?.error&&result?.id;
+      const reply=ok?`Human approval request #${result.id} was created for ${approval.action_type}. It has not been executed.`:`The approval request could not be created: ${result?.error||"no persisted approval returned"}`;
+      await auditDecision(agent,ok?"SUCCESS":"FAILED",reply,{question,toolExecutions:trace,durationMs:Date.now()-started});
+      return NextResponse.json({reply,mode:"ai-agent-live",agent,toolExecutions:trace,provider:process.env.AI_PROVIDER||"local-openai-compatible",model:aiModels().text,approval:result},{status:ok?200:503});
+    }
+
+    // The 270M free-tier model is reliable for text inference but not for
+    // function-call JSON. Tool routing is therefore deterministic and audited;
+    // Gemma reasons over the returned evidence instead of being asked to emit
+    // fragile tool-call syntax.
+    let live:any=null;
+    if(allowed(agent,"inspect_live_business_data")) live=await runTool("inspect_live_business_data",{},agent,trace);
+    if(/pending approvals?|approval queue/i.test(question)&&allowed(agent,"list_pending_approvals")) await runTool("list_pending_approvals",{},agent,trace);
+    if(/\b(research|search the web|public web|market trend|current supplier)\b/i.test(question)&&allowed(agent,"research_web")) await runTool("research_web",{query:question.slice(0,500)},agent,trace);
+    if(/\b(resolve|find)\b.*\b(images?|media)\b/i.test(question)&&allowed(agent,"resolve_product_images")&&(context.productId||context.productName)) await runTool("resolve_product_images",{product_id:context.productId,product_name:context.productName},agent,trace);
+
+    const evidence={live:compactLive(live),tools:compactTrace(trace),context:{productId:context.productId,productName:context.productName}};
+    const messages:any[]=[
+      {role:"system",content:`${BASE_SYSTEM}\nROLE: ${agent}. ${AGENT_FOCUS[agent]||"Operate only within assigned responsibilities."}`},
+      ...incoming.map((m:any)=>({role:m?.role==="assistant"?"assistant":"user",content:String(m?.content||"").slice(0,500)})).filter((m:any)=>m.content),
+      {role:"user",content:`QUESTION: ${question.slice(0,700)}\nLIVE EVIDENCE: ${JSON.stringify(evidence).slice(0,3200)}\nAnswer using only this evidence.`},
+    ];
+    try{
+      const result=await runText(messages,{model:aiModels().text,temperature:0.1,maxTokens:256});
+      const reply=result.content.trim();
+      if(!reply)throw new Error("AI provider returned an empty final response");
+      await auditDecision(agent,"SUCCESS","CEO produced an evidence-grounded decision after deterministic audited tool routing.",{question,toolExecutions:trace,decision:reply,provider:process.env.AI_PROVIDER||"local-openai-compatible",model:aiModels().text,durationMs:Date.now()-started});
+      return NextResponse.json({reply,mode:"ai-agent-live",agent,toolExecutions:trace,provider:process.env.AI_PROVIDER||"local-openai-compatible",model:aiModels().text,orchestration:"deterministic-audited-tools+local-gemma"});
+    }catch(e){
+      await auditDecision(agent,"FAILED","Local Gemma failed after audited evidence collection.",{question,toolExecutions:trace,error:e instanceof Error?e.message:String(e)});
+      return NextResponse.json({error:"AI CEO is unavailable because the local Gemma text provider did not return a successful response.",code:"CEO_AI_UNAVAILABLE",agent,toolExecutions:trace},{status:503});
+    }
+  }catch(error){return NextResponse.json({error:error instanceof Error?error.message:"Agent chat failed",code:"CEO_CHAT_FAILED"},{status:500});}
+}

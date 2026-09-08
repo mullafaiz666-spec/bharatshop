@@ -8,12 +8,47 @@ export const dynamic = "force-dynamic";
 async function checkSearXNG(deep: boolean) {
   const base = String(process.env.SEARXNG_URL || "").replace(/\/+$/, "");
   if (!base) return { configured: false, ready: false, reason: "missing" };
-  if (!deep) return { configured: true, ready: true, exercised: false };
+
+  // SearXNG readiness means the self-hosted service is reachable. Upstream
+  // engines can independently rate-limit a query; that is an exercised search
+  // failure, not evidence that our SearXNG process is down.
   try {
-    const results = await searxngImageSearch("laptop product image", { limit: 1, timeoutMs: 10000 });
-    return { configured: true, ready: results.length > 0, exercised: true, resultCount: results.length };
-  } catch (e) {
-    return { configured: true, ready: false, exercised: true, reason: "image_search_failed", error: e instanceof Error ? e.message : String(e) };
+    const service = await fetch(`${base}/`, {
+      cache: "no-store",
+      redirect: "manual",
+      signal: AbortSignal.timeout(10_000),
+      headers: { "User-Agent": "BharatShop-Health/1.0" },
+    });
+    const serviceReady = service.ok || (service.status >= 300 && service.status < 400);
+    if (!serviceReady) {
+      return { configured: true, ready: false, exercised: false, serviceStatus: service.status, reason: "service_rejected" };
+    }
+    if (!deep) return { configured: true, ready: true, exercised: false, serviceStatus: service.status };
+
+    try {
+      const results = await searxngImageSearch("laptop product image", { limit: 1, timeoutMs: 10_000 });
+      return {
+        configured: true,
+        ready: true,
+        exercised: true,
+        serviceStatus: service.status,
+        upstreamSearch: { ready: results.length > 0, resultCount: results.length },
+      };
+    } catch (error) {
+      return {
+        configured: true,
+        ready: true,
+        exercised: true,
+        serviceStatus: service.status,
+        upstreamSearch: {
+          ready: false,
+          reason: "upstream_search_unavailable",
+          error: error instanceof Error ? error.message : String(error),
+        },
+      };
+    }
+  } catch (error) {
+    return { configured: true, ready: false, exercised: deep, reason: "service_unreachable", error: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -52,9 +87,6 @@ async function checkPostgres() {
 
 export async function GET(req: Request) {
   const deep = new URL(req.url).searchParams.get("deep") === "1";
-
-  // All readiness probes are independent. Run them concurrently so the slowest
-  // real provider determines latency instead of adding every timeout together.
   const [postgres, ai, vision, searxng] = await Promise.all([
     checkPostgres(),
     checkAI(deep),
