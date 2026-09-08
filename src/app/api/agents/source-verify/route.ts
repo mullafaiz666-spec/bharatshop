@@ -1,3 +1,4 @@
+import { aiConfigured } from "@/lib/ai/provider";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { aiActivityLogs } from "@/db/schema";
@@ -11,4 +12,4 @@ if(!candidates.length)return NextResponse.json({error:"No source candidates foun
 const evaluated=candidates.map(c=>({...c,economics:calculate(c,min)}));const ai=await openAIJson("You are BharatShop Source Verification Agent. Verify source evidence and economics. Never invent stock, price or delivery facts. Select only candidates with credible source evidence and positive margin. Return JSON {selectedIndex:number|null,verificationStatus:string,reason:string,risks:string[]}.",{query,min,evaluated});const idx=Number(ai.selectedIndex);const selected=Number.isInteger(idx)?evaluated[idx]??null:null;const valid=selected&&selected.economics.selectionScore>0?selected:null;
 await db.insert(aiActivityLogs).values({userId:Number(body.userId??1),agentName:"Verify-Select-AI",actionType:"SOURCE_VERIFIED_AND_SELECTED",message:`Verified ${evaluated.length} source candidates.`,profitImpactInr:String(valid?.economics.netProfitInr??0),metadataJson:{evaluated,selected:valid,ai},status:valid?"SUCCESS":"WARNING"});return NextResponse.json({pipeline:"Live Source → AI Verify → Economics → Select",candidates:evaluated,selected:valid,status:valid?"READY_FOR_LISTING":"NO_QUALIFIED_PRODUCT",ai});
 }catch(error){return NextResponse.json({error:error instanceof Error?error.message:"Invalid request"},{status:503})}}
-export async function GET(){return NextResponse.json({agent:"Verify-Select-AI",status:process.env.SERPAPI_API_KEY&&process.env.OPENAI_API_KEY?"ready":"blocked_missing_keys",capabilities:["live_source_evidence","openai_verification","economics_gate"]})}
+export async function GET(){return NextResponse.json({agent:"Verify-Select-AI",status:process.env.SEARXNG_URL&&aiConfigured()?"configured_unverified":"blocked_missing_keys",capabilities:["live_source_evidence","local_ai_verification","economics_gate"]})}

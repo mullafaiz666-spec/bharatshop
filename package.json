@@ -4,12 +4,13 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "db:push": "drizzle-kit push --force",
+    "db:push": "node scripts/block-schema-push.mjs",
     "db:check": "drizzle-kit check",
     "start": "next start -H 0.0.0.0 -p ${PORT:-10000}",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test:production": "node scripts/production-acceptance-v3.mjs"
+    "test:production": "node scripts/production-acceptance-v3.mjs",
+    "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {
     "dotenv": "17.3.1",

@@ -4,8 +4,11 @@ const ADMIN_PATHS = [
   "/dashboard",
   "/api/overview",
   "/api/ceo-chat",
+  "/api/ceo-research",
   "/api/ceo-approvals",
   "/api/agent-audit",
+  "/api/agent-execute",
+  "/api/fashion-studio",
   "/api/agents",
   "/api/catalog",
 ];

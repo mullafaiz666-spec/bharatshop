@@ -1,3 +1,5 @@
+import { aiModels, verifyImagesWithAI } from "@/lib/ai/provider";
+import { isVerifiedMedia, minimumImageConfidence } from "@/lib/ai/media-policy";
 import { db } from "@/db";
 import { productImages, products } from "@/db/schema";
 import { asc, eq, ilike } from "drizzle-orm";
@@ -6,14 +8,14 @@ import { searxngImageSearch, SearXNGRateLimitError } from "@/lib/searxng";
 const STOP = new Set(["the","with","and","for","from","pack","piece","pieces","new","best","online","india","buy","sale","free","exact","product","official","image","images","front","back","side","angle","box","packaging","contents","colour","colors","color","variants"]);
 const BAD = /(unsplash|placeholder|placehold|picsum|loremflickr|placekitten|dummyimage|via\.placeholder)/i;
 const FASHION = /(fashion|women|woman|men|man|saree|sari|kurti|kurta|dress|shirt|tshirt|t-shirt|jeans|trouser|petticoat|shapewear|lehenga|salwar|apparel|clothing|footwear|shoe|sandal|jewellery|jewelry)/i;
-const MIN_CONFIDENCE = Number(process.env.IMAGE_VERIFY_MIN_CONFIDENCE || 0.75);
+const MIN_CONFIDENCE = minimumImageConfidence();
 const MIN_IMAGES = 4;
 const MAX_IMAGES = 8;
 const MAX_CANDIDATES = 12;
 const SEARCH_LIMIT = 10;
 const FAILURE_CACHE_MS = 10 * 60 * 1000;
-const VERIFIER_PROVIDER = "local-evidence";
-const VERIFIER_MODEL = "local-evidence-v1";
+const VERIFIER_PROVIDER = "local-ai";
+const VERIFIER_MODEL = aiModels().vision;
 const inFlight = new Map<number, Promise<any>>();
 const recentFailures = new Map<number, { expiresAt: number; result: any }>();
 
@@ -58,30 +60,6 @@ async function downloadImage(url: string) {
   }
 }
 
-function verifyWithLocalEvidence(
-  usable: Array<{ candidate: Candidate; image: { data: string; mediaType: string; byteSize: number } }>,
-  product: Product,
-) {
-  const brandTokens = product.brand && product.brand !== "Generic" ? tokens(product.brand) : [];
-  return usable.map((entry, index) => {
-    const hay = `${entry.candidate.title || ""} ${entry.candidate.sourceUrl || ""} ${entry.candidate.url}`.toLowerCase();
-    const score = Number(entry.candidate.textScore || 0);
-    const brandOk = brandTokens.length === 0 || brandTokens.some(t => hay.includes(t));
-    const exactTitleTokens = tokens(product.title);
-    const titleHits = exactTitleTokens.filter(t => hay.includes(t)).length;
-    const titleCoverage = exactTitleTokens.length ? titleHits / exactTitleTokens.length : 0;
-    const evidenceScore = Math.max(score, titleCoverage);
-    const confidence = Math.min(0.99, Number((0.50 + 0.50 * evidenceScore).toFixed(3)));
-    const matches = brandOk && evidenceScore >= 0.50 && entry.image.byteSize >= 4_000;
-    return {
-      index: index + 1,
-      matches,
-      confidence,
-      reason: `local evidence: tokenCoverage=${evidenceScore.toFixed(2)}, brandMatch=${brandOk}, https=true, contentType=${entry.image.mediaType}, bytes=${entry.image.byteSize}`,
-    };
-  });
-}
-
 async function resolveOne(productId?: number, productName?: string) {
   let product: Product | undefined;
   if (productId) product = (await db.select().from(products).where(eq(products.id, productId)).limit(1))[0] as Product | undefined;
@@ -94,13 +72,12 @@ async function resolveOne(productId?: number, productName?: string) {
 
   const existing = await db.select().from(productImages).where(eq(productImages.productId, product.id));
   const approved = existing
-    .filter(x => ["LOCAL_EVIDENCE_VERIFIED", "AI_VISION_VERIFIED"].includes(String(x.verificationStatus)))
-    .filter(x => !BAD.test(x.imageUrl) && /^https:\/\//i.test(x.imageUrl) && Number(x.verificationConfidence) >= MIN_CONFIDENCE && !!x.verifiedAt)
-    .filter(x => ["local-evidence", "local-ai"].includes(String(x.verificationProvider)))
+    .filter(isVerifiedMedia)
+    .filter((row, index, rows) => rows.findIndex(x => x.imageUrl === row.imageUrl) === index)
     .sort((a, b) => a.sortOrder - b.sortOrder);
 
   if (approved.length >= MIN_IMAGES) {
-    const publishable = publicationData(product);
+    const publishable = publicationData(product) && product.status === "Published";
     if (publishable && product.status !== "Published") {
       await db.update(products).set({ status: "Published", imageUrl: approved[0].imageUrl, updatedAt: new Date() }).where(eq(products.id, product.id));
     }
@@ -164,7 +141,7 @@ async function resolveOne(productId?: number, productName?: string) {
     return result;
   }
 
-  const verdicts = verifyWithLocalEvidence(usable, product);
+  const verdicts = await verifyImagesWithAI({ title: product.title, brand: product.brand }, usable.map(x => x.image));
   const accepted = verdicts
     .map(v => ({ ...v, item: usable[v.index - 1] }))
     .filter(v => v.item && v.matches && Number(v.confidence) >= MIN_CONFIDENCE && /^https:\/\//i.test(v.item.candidate.url) && !BAD.test(v.item.candidate.url))
@@ -182,23 +159,23 @@ async function resolveOne(productId?: number, productName?: string) {
       publicationGate: "BLOCK",
       provider: VERIFIER_PROVIDER,
       model: VERIFIER_MODEL,
-      message: `Only ${accepted.length} image(s) passed the local evidence verifier (need ${MIN_IMAGES}). Product remains staged.`,
+      message: `Only ${accepted.length} image(s) passed the local vision verifier (need ${MIN_IMAGES}). Product remains staged.`,
     };
     cacheFailure(product.id, result);
     return result;
   }
 
-  const publishable = publicationData(product);
+  const publishable = publicationData(product) && product.status === "Published";
   const verifiedAt = new Date();
   await db.transaction(async tx => {
-    await tx.delete(productImages).where(eq(productImages.productId, product.id));
+    // Preserve historical image evidence; consumers deduplicate verified URLs.
     await tx.insert(productImages).values(accepted.map((v, index) => ({
       productId: product.id,
       imageUrl: v.item.candidate.url,
       sourceUrl: v.item.candidate.sourceUrl || v.item.candidate.url,
       sortOrder: index,
       altText: v.item.candidate.title || `${product.title} view ${index + 1}`,
-      verificationStatus: "LOCAL_EVIDENCE_VERIFIED",
+      verificationStatus: "AI_VISION_VERIFIED",
       verificationConfidence: Number(v.confidence).toFixed(3),
       verificationModel: VERIFIER_MODEL,
       verificationProvider: VERIFIER_PROVIDER,
@@ -212,7 +189,7 @@ async function resolveOne(productId?: number, productName?: string) {
 
   return {
     status: "COMPLETE_MEDIA_RESOLVED",
-    provider: "searxng+local-evidence",
+    provider: "searxng+local-ai-vision",
     model: VERIFIER_MODEL,
     productId: product.id,
     product: product.title,
@@ -220,7 +197,7 @@ async function resolveOne(productId?: number, productName?: string) {
     images: accepted.map(v => ({ url: v.item.candidate.url, confidence: v.confidence, reason: v.reason })),
     cached: false,
     publicationGate: publishable ? "PASS" : "BLOCK",
-    message: publishable ? `${accepted.length} images passed the local evidence verifier and the product was published.` : `${accepted.length} images passed verification, but pricing/stock validation failed; product remains staged.`,
+    message: publishable ? `${accepted.length} images passed the local vision verifier and the product was published.` : `${accepted.length} images passed verification, but pricing/stock validation failed; product remains staged.`,
   };
 }
 

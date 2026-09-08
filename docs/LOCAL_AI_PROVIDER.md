@@ -1,42 +1,37 @@
-# BharatShop free/local AI provider
+# Local Gemma runtime
 
-BharatShop now uses one OpenAI-compatible provider abstraction for CEO text and product-image vision. Paid OpenAI and Anthropic endpoints are no longer part of the application request path.
+Use existing suitable hardware for Ollama. The web application stays on Render and uses its existing PostgreSQL database. Do not try to run the full multimodal model inside the constrained web process. No paid provider fallback is implemented.
 
-## Production environment
+Application configuration:
 
-Set these on the Render BharatShop service:
+```dotenv
+AI_PROVIDER=local-openai-compatible
+AI_BASE_URL=https://YOUR-OWN-GATEWAY
+AI_API_KEY=YOUR-GATEWAY-KEY
+AI_TEXT_MODEL=gemma3:4b
+AI_VISION_MODEL=gemma3:4b
+AI_TOOL_MODE=json
+IMAGE_VERIFIER_MODE=local-ai
+IMAGE_VERIFY_MIN_CONFIDENCE=0.75
+SEARXNG_URL=https://YOUR-SEARXNG
+```
 
-- `AI_PROVIDER=local-openai-compatible`
-- `AI_BASE_URL=https://<your-local-ai-gateway>/v1`
-- `AI_TEXT_MODEL=gemma-3-4b-it`
-- `AI_VISION_MODEL=gemma-3-4b-it`
-- `AI_API_KEY=` only when the gateway requires authentication
-- `IMAGE_VERIFY_MIN_CONFIDENCE=0.75`
+AI_BASE_URL accepts either the origin or an origin ending in `/v1`. Model names must match `/v1/models` exactly. Gemma uses validated JSON tool planning; a model with native tool calling can use `AI_TOOL_MODE=native`. Every tool is still checked against its agent's allowlist before dispatch.
 
-The gateway must expose an OpenAI-compatible `/models` endpoint and `/chat/completions`. Vision requests use `image_url` data URLs.
+Gateway configuration:
 
-## Gateway choices
+```dotenv
+OLLAMA_UPSTREAM=http://127.0.0.1:11434
+AI_GATEWAY_API_KEY=YOUR-GATEWAY-KEY-AT-LEAST-32-CHARACTERS
+PORT=10000
+```
 
-Use Ollama or llama.cpp on hardware that can actually run the selected model. The Render BharatShop web service remains the application/database service; it does not download a large model into its web container.
+Run `node local-ai/proxy.mjs` after starting Ollama and pulling the configured model. Place the gateway behind HTTPS; expose only the authenticated gateway, not Ollama. It forwards native `/v1` payloads without stripping images, models, tool results or token limits. Text-only model availability does not prove vision availability.
 
-A free model does not imply free compute. Keep the model gateway on available local/owned hardware or another compute service whose cost is acceptable. Do not lower the publication gate to compensate for a weak model or insufficient compute.
+Set Render's application health-check path to `/api/live`. This is explicitly process liveness. `/api/health` reports degraded until inference is exercised. Authenticated `/api/health?deep=1` exercises database, text, a controlled image-pixel probe and SearXNG image search. The probe fixture is never catalogue media. A passing probe still does not prove product image matching or orchestration; use real acceptance evidence for those gates.
 
-## Acceptance requirements
+Media is persisted as `AI_VISION_VERIFIED` only following validated local vision output. At least four distinct HTTPS images with confidence >= 0.75 are required. Old keyword-only records remain in PostgreSQL as history but cannot satisfy storefront publication. Resolution stores media; it does not itself grant publication approval. Listing checks the persisted approval state and media gate.
 
-CEO acceptance remains:
+Optional image generation needs `LOCAL_IMAGE_BASE_URL`, `LOCAL_IMAGE_MODEL`, and optionally `LOCAL_IMAGE_API_KEY`. The local service must implement `/v1/images/generations` with the documented request shape in `src/lib/ai/local-image-generator.ts`; reference editing requires its `reference_image` extension. Gemma does not generate image pixels. Generated media remains distinct from verified source media.
 
-`CEO -> local text model -> Agent -> Tool -> Evidence -> Audit -> Decision -> Human Approval -> Action -> Verified Result`
-
-Catalog acceptance remains:
-
-`SearXNG -> local vision model -> >=4 verified HTTPS images -> PostgreSQL -> PUBLISHED`
-
-A product is not published when fewer than four images pass the configured confidence threshold. Placeholder, unrelated, or non-HTTPS images remain blocked.
-
-## Health
-
-`/api/health` now reports PostgreSQL plus the configured AI provider. `/api/health?deep=1` exercises the text model. A missing `AI_BASE_URL` intentionally keeps health at 503 so production cannot silently operate without the free provider.
-
-## Database safety
-
-This change does not reset, seed, truncate, or replace PostgreSQL data. Existing verified images are reused only when their verification provider/model match the configured local provider and vision model.
+Database schema push and startup synchronization are deliberately blocked. Use explicit, reviewed additive migrations. No production schema or records were modified during this patch.

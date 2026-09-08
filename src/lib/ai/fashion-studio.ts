@@ -1,3 +1,4 @@
+import { generateLocalImage } from "@/lib/ai/local-image-generator";
 import { pool } from "@/db";
 import { planAutomaticImageStyle } from "@/lib/ai/image-style-engine";
 
@@ -57,34 +58,7 @@ async function sourceImage(productId: number, fallback: string) {
   return r.rows[0]?.image_url || fallback;
 }
 
-async function openAIImage(prompt: string, source?: string) {
-  const key = process.env.OPENAI_API_KEY;
-  if (!key) throw new Error("OPENAI_API_KEY is not configured");
-  const model = process.env.OPENAI_IMAGE_MODEL || "gpt-image-1";
-  const form = new FormData();
-  form.append("model", model);
-  form.append("prompt", prompt);
-  form.append("size", process.env.OPENAI_IMAGE_SIZE || "1024x1024");
-  form.append("quality", process.env.OPENAI_IMAGE_QUALITY || "medium");
-  if (source && /^https?:\/\//i.test(source)) {
-    try {
-      const r = await fetch(source, { cache: "no-store", signal: AbortSignal.timeout(12000) });
-      if (r.ok) {
-        const type = r.headers.get("content-type") || "image/jpeg";
-        const bytes = await r.arrayBuffer();
-        form.append("image", new Blob([bytes], { type }), "product-reference.jpg");
-      }
-    } catch {}
-  }
-  const r = await fetch("https://api.openai.com/v1/images/edits", { method: "POST", headers: { Authorization: `Bearer ${key}` }, body: form, signal: AbortSignal.timeout(90000) });
-  const text = await r.text();
-  if (!r.ok) throw new Error(`Image provider ${r.status}: ${text.slice(0,500)}`);
-  const data = JSON.parse(text);
-  const item = data?.data?.[0];
-  if (item?.b64_json) return `data:image/png;base64,${item.b64_json}`;
-  if (item?.url) return item.url;
-  throw new Error("Image provider returned no image");
-}
+async function openAIImage(prompt: string, source?: string) { return generateLocalImage(prompt, source); }
 
 async function logActivity(productId: number | null, command: FashionCommand, status: string, metadata: any) {
   try {
@@ -112,7 +86,7 @@ export async function runFashionCommand(input: { command: string; productId?: nu
     await pool.query(`INSERT INTO product_images (product_id,image_url,source_url,sort_order,alt_text,verification_status) SELECT $1,x,'AI_GENERATED',$2 + ord-1,$3 || ' variation ' || ord,'AI_GENERATED' FROM unnest($4::text[]) WITH ORDINALITY AS t(x,ord)`, [product.id, start, plan.productType, generated]);
     await pool.query(`UPDATE products SET image_url=$1,updated_at=NOW() WHERE id=$2`, [generated[0], product.id]);
     await logActivity(product.id, command, "SUCCESS", { generated: generated.length, count, persisted: true, plan });
-    return { success: true, command: "/autoimage", name: "Automatic Image", productId: product.id, generated: generated.length, images: generated, persisted: true, provider: "openai-images", plan };
+    return { success: true, command: "/autoimage", name: "Automatic Image", productId: product.id, generated: generated.length, images: generated, persisted: true, provider: "local-images", plan };
   }
 
   const command = getFashionCommand(requested);
@@ -133,5 +107,5 @@ export async function runFashionCommand(input: { command: string; productId?: nu
     await pool.query(`UPDATE products SET image_url=$1,updated_at=NOW() WHERE id=$2`, [generated[0], product.id]);
   }
   await logActivity(product?.id ?? null, command, "SUCCESS", { generated: generated.length, count, persisted: !!product });
-  return { success: true, command: command.command, name: command.name, productId: product?.id ?? null, generated: generated.length, images: generated, persisted: !!product, provider: "openai-images" };
+  return { success: true, command: command.command, name: command.name, productId: product?.id ?? null, generated: generated.length, images: generated, persisted: !!product, provider: "local-images" };
 }

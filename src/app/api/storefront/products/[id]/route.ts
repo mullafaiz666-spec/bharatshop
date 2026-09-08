@@ -1,13 +1,11 @@
-import { NextResponse } from "next/server";
-import { db } from "@/db";
-import { products } from "@/db/schema";
-import { eq } from "drizzle-orm";
-
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  const found = await db.select().from(products).where(eq(products.id, Number(id)));
-  if (!found[0]) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  return NextResponse.json({ product: found[0] });
-}
-
+import { GET as listProducts } from "../route";
 export const dynamic = "force-dynamic";
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  if (!/^[1-9]\d*$/.test(id)) return Response.json({ error: "Invalid product id" }, { status: 400 });
+  const url = new URL(req.url); url.search = ''; url.searchParams.set('id', id);
+  const response = await listProducts(new Request(url, { headers: req.headers }));
+  if (!response.ok) return response;
+  const data = await response.json();
+  return data.products[0] ? Response.json({ product: data.products[0] }) : Response.json({ error: 'Not found' }, { status: 404 });
+}

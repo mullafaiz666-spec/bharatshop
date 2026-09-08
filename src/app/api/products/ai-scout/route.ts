@@ -1,3 +1,4 @@
+import { aiConfigured } from "@/lib/ai/provider";
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
@@ -14,7 +15,7 @@ export async function POST() {
 export async function GET() {
   return NextResponse.json({
     agent: "AI-Product-Research-Agent",
-    status: process.env.SEARXNG_URL && process.env.ANTHROPIC_API_KEY ? "ready" : "blocked_missing_provider",
+    status: process.env.SEARXNG_URL && aiConfigured() ? "configured_unverified" : "blocked_missing_provider",
     provider: "SearXNG->Claude Vision->PostgreSQL",
     syntheticData: false,
   });

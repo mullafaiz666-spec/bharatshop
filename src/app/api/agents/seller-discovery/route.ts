@@ -1,3 +1,4 @@
+import { serpSearch } from "@/lib/ai/agent-tools";
 import { NextResponse } from "next/server";
 import { eq, desc } from "drizzle-orm";
 import { db } from "@/db";
@@ -14,13 +15,9 @@ function score(text:string, category:string){
 }
 
 async function discover(state:string, city:string, category:string){
- const key=process.env.SERPAPI_API_KEY;
- if(!key) return {configured:false,results:[],message:"SERPAPI_API_KEY is not configured; no live seller claims were made."};
+ if(!process.env.SEARXNG_URL) return {configured:false,results:[],message:"SEARXNG_URL is not configured"};
  const q=`${category} ${city} ${state} Indian brand seller independent store contact`;
- const url=`https://serpapi.com/search.json?engine=google&q=${encodeURIComponent(q)}&location=${encodeURIComponent(city+", "+state+", India")}&num=10&api_key=${encodeURIComponent(key)}`;
- const r=await fetch(url,{cache:"no-store"});
- if(!r.ok) throw new Error(`Seller research returned HTTP ${r.status}`);
- const j=await r.json();
+ const j=await serpSearch(q);
  const results=(j.organic_results||[]).slice(0,10).map((x:any)=>{const text=`${x.title||""} ${x.snippet||""}`;const s=score(text,category);return {sellerName:x.title||"Potential seller",brandName:x.title||"",city,state,category,sourceUrl:x.link||"",contactUrl:x.link||"",evidence:x.snippet||"",opportunityScore:s,trendFitScore:Math.min(100,s+(/trend|popular|viral|new|collection/i.test(text)?8:0)),uniquenessScore:Math.min(100,s+(/brand|studio|designer|artisan|independent|label/i.test(text)?8:0))};});
  return {configured:true,results};
 }
