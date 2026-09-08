@@ -1,6 +1,16 @@
 #!/bin/sh
 set -eu
 
+# The same repository is used by two Render services:
+# 1) bharatshop-local-ai: Docker service that owns the Ollama runtime.
+# 2) bharatshop-gemma-gateway-v2: lightweight Node gateway that proxies to
+#    the local-ai service. The gateway must not try to install/run Ollama.
+if [ "${GATEWAY_ONLY:-0}" = "1" ]; then
+  echo "GEMMA_GATEWAY_MODE: remote-upstream"
+  echo "GEMMA_GATEWAY_UPSTREAM: ${OLLAMA_UPSTREAM:-missing}"
+  exec node local-ai/proxy.mjs
+fi
+
 # Render Free is too small for Gemma 3 4B inference. Keep Ollama to one loaded
 # model/request and a bounded context so the runtime does not waste memory on
 # parallel generations.
