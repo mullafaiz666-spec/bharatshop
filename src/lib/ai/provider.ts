@@ -6,7 +6,7 @@ const baseUrl = () => (process.env.AI_BASE_URL || process.env.LOCAL_AI_BASE_URL 
 const apiKey = () => process.env.AI_API_KEY || process.env.LOCAL_AI_API_KEY || "";
 export const aiProviderName = () => process.env.AI_PROVIDER || "local-openai-compatible";
 export const aiConfigured = () => !!baseUrl();
-export const aiModels = () => ({ text: process.env.AI_TEXT_MODEL || process.env.LOCAL_AI_TEXT_MODEL || "gemma-3-4b-it", vision: process.env.AI_VISION_MODEL || process.env.LOCAL_AI_VISION_MODEL || "gemma-3-4b-it" });
+export const aiModels = () => ({ text: process.env.AI_TEXT_MODEL || process.env.LOCAL_AI_TEXT_MODEL || "gemma3:4b", vision: process.env.AI_VISION_MODEL || process.env.LOCAL_AI_VISION_MODEL || "gemma3:4b" });
 
 function headers() { const key = apiKey(); return { "Content-Type": "application/json", ...(key ? { Authorization: `Bearer ${key}` } : {}) }; }
 
