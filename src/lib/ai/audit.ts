@@ -32,7 +32,7 @@ async function ensureAuditTables() {
         approval_id INTEGER,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )`);
-      try { await pool.query(`ALTER TABLE agent_audit_records ADD COLUMN IF NOT EXISTS evidence_id INTEGER`); } catch {}
+      await pool.query(`ALTER TABLE agent_audit_records ADD COLUMN IF NOT EXISTS evidence_id INTEGER`);
     })().catch((error) => {
       tablesReady = null;
       throw error;
@@ -78,7 +78,8 @@ export async function recordToolExecution(
   startedAt: number,
   approvalId?: number,
 ) {
-  const failed = !!(result && typeof result === "object" && "error" in result);
+  const outcome = result as { error?: unknown; success?: boolean; publicationGate?: string; status?: string } | null;
+  const failed = !!outcome && (!!outcome.error || outcome.success === false || outcome.publicationGate === "BLOCK" || ["BLOCKED", "FAILED", "NEEDS_IMAGES", "NOT_FOUND", "SEARCH_ERROR"].includes(outcome.status || ""));
   return recordAudit({
     agentName,
     eventType: "TOOL_EXECUTION",

@@ -1,3 +1,5 @@
+import { aiConfigured } from "@/lib/ai/provider";
+import { isVerifiedMedia } from "@/lib/ai/media-policy";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { products, productImages, aiActivityLogs } from "@/db/schema";
@@ -20,11 +22,9 @@ export async function POST(req: Request) {
     }
 
     const images = await db.select().from(productImages).where(eq(productImages.productId, p.id));
-    const verifiedImage = images.find(i =>
-      ["VERIFIED", "WEB_SEARCH_MATCHED", "WEB_IMAGE_EXACT_MATCH", "AI_VISION_VERIFIED"].includes(String(i.verificationStatus)) &&
-      /^https?:\/\//i.test(i.imageUrl) && /^https?:\/\//i.test(i.sourceUrl),
-    );
-    if (!verifiedImage) return NextResponse.json({ status: "BLOCKED", error: "No verified source-backed image" }, { status: 422 });
+    const verifiedImages = images.filter(isVerifiedMedia).filter((row, i, rows) => rows.findIndex(x => x.imageUrl === row.imageUrl) === i);
+    if (verifiedImages.length < 4) return NextResponse.json({ status: "BLOCKED", error: "Four distinct vision-verified images required" }, { status: 422 });
+    const verifiedImage = verifiedImages[0];
 
     const selling = Number(p.sellingPriceInr);
     const cost = Number(p.supplierCostInr) + Number(p.shippingCostInr) + Number(p.supplierCostInr) * Number(p.gstPct) / 100;
@@ -41,7 +41,7 @@ export async function POST(req: Request) {
     const listing = { title, description, sellingPriceInr: selling, marginPct: +margin.toFixed(2), netProfitInr: +profit.toFixed(2), marketingCopy, targetAudience, sourceEvidence: { imageUrl: verifiedImage.imageUrl, sourceUrl, sourceName: verifiedImage.altText, verificationStatus: verifiedImage.verificationStatus }, adCreativeData: { hook: String(ai.hook || marketingCopy), audience: targetAudience, imageUrl: verifiedImage.imageUrl, cta: String(ai.cta || "Abhi Kharido") } };
 
     await db.update(products).set({ imageUrl: verifiedImage.imageUrl, netProfitInr: listing.netProfitInr.toFixed(2), customMarginPct: listing.marginPct.toFixed(2), aiMarketingCopy: marketingCopy, aiTargetAudience: targetAudience, status: "Published", updatedAt: new Date() }).where(eq(products.id, p.id));
-    await db.insert(aiActivityLogs).values({ userId: p.userId, agentName: "Listing-Creative-Agent", actionType: "LISTING_OPTIMIZED", message: `OpenAI optimized CEO-approved listing for ${p.title}.`, profitImpactInr: String(listing.netProfitInr), metadataJson: { listing, ai, ceoApproved: true }, status: "SUCCESS" });
+    await db.insert(aiActivityLogs).values({ userId: p.userId, agentName: "Listing-Creative-Agent", actionType: "LISTING_OPTIMIZED", message: `Local AI optimized CEO-approved listing for ${p.title}.`, profitImpactInr: String(listing.netProfitInr), metadataJson: { listing, ai, ceoApproved: true }, status: "SUCCESS" });
     await db.insert(aiActivityLogs).values({ userId: p.userId, agentName: "Listing-Creative-Agent", actionType: "STOREFRONT_PUBLISHED", message: `Published ${p.title} after CEO verification and catalogue gates.`, profitImpactInr: String(listing.netProfitInr), metadataJson: { productId: p.id, status: "Published", ceoApproved: true }, status: "SUCCESS" });
     return NextResponse.json({ listing, storefront: { published: true, productId: p.id, status: "Published" } });
   } catch (e) {
@@ -50,5 +50,5 @@ export async function POST(req: Request) {
 }
 
 export async function GET() {
-  return NextResponse.json({ agent: "Listing-Creative-Agent", status: process.env.OPENAI_API_KEY ? "ready" : "blocked_missing_keys", publicationGate: "CEO", capabilities: ["openai_copy", "positioning", "creative", "verified_image_gate", "publication_gate"] });
+  return NextResponse.json({ agent: "Listing-Creative-Agent", status: aiConfigured() ? "configured_unverified" : "blocked_missing_keys", publicationGate: "CEO", capabilities: ["local_ai_copy", "positioning", "creative", "verified_image_gate", "publication_gate"] });
 }

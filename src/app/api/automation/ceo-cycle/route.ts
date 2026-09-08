@@ -1,3 +1,4 @@
+import { isVerifiedMedia } from "@/lib/ai/media-policy";
 import { NextResponse } from "next/server";
 import { db, pool } from "@/db";
 import { aiActivityLogs, productDetails, productImages, products, storefrontOrders } from "@/db/schema";
@@ -8,18 +9,9 @@ export const maxDuration = 300;
 
 const MIN_MARGIN_PCT = Number(process.env.CEO_MIN_MARGIN_PCT ?? 25);
 const MAX_LISTINGS_PER_CYCLE = 5;
-const PLACEHOLDER_HOSTS = ["unsplash.com", "placeholder.com", "placehold.co", "picsum.photos", "dummyimage.com"];
-const VERIFIED_MEDIA = new Set(["AI_VISION_VERIFIED"]);
-
-function realUrl(value: unknown) {
-  if (typeof value !== "string" || !/^https?:\/\//i.test(value)) return false;
-  const lower = value.toLowerCase();
-  return !PLACEHOLDER_HOSTS.some((host) => lower.includes(host));
-}
-
 function cronAuthorized(req: Request) {
-  const expected = process.env.CRON_SECRET || process.env.AUTOMATION_TOKEN;
-  if (!expected) return true;
+  const expected = process.env.CRON_SECRET || process.env.BHARATSHOP_AUTOMATION_TOKEN || process.env.AUTOMATION_TOKEN;
+  if (!expected) return false;
   return req.headers.get("authorization") === `Bearer ${expected}`;
 }
 
@@ -48,7 +40,7 @@ async function audit(agent: string, event: string, status: string, summary: stri
 
 async function callAgent(origin: string, path: string, body: unknown) {
   const response = await fetch(`${origin}${path}`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
+    method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.BHARATSHOP_AUTOMATION_TOKEN || ""}` },
     body: JSON.stringify(body), cache: "no-store",
   });
   const raw = await response.text();
@@ -76,7 +68,7 @@ async function runCycle(req: Request) {
 
   for (const product of pending) {
     const images = await db.select().from(productImages).where(eq(productImages.productId, product.id));
-    const verifiedImages = images.filter((image) => VERIFIED_MEDIA.has(String(image.verificationStatus)) && realUrl(image.imageUrl) && realUrl(image.sourceUrl));
+    const verifiedImages = images.filter(isVerifiedMedia).filter((row, i, rows) => rows.findIndex(x => x.imageUrl === row.imageUrl) === i);
     const verifiedImage = verifiedImages[0];
     const [details] = await db.select().from(productDetails).where(eq(productDetails.productId, product.id)).limit(1);
     const specs = details?.specificationsJson;

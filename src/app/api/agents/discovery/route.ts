@@ -1,3 +1,4 @@
+import { aiConfigured } from "@/lib/ai/provider";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { aiActivityLogs } from "@/db/schema";
@@ -22,4 +23,4 @@ export async function POST(req:Request){
     return NextResponse.json({evaluated,selected,status:selected?"SOURCE_SELECTED":"NO_QUALIFIED_SOURCE",ai,provider:"SearXNG"});
   }catch(e){return NextResponse.json({error:e instanceof Error?e.message:"Invalid request"},{status:503})}
 }
-export async function GET(){return NextResponse.json({agent:"Source-Discovery-Agent",status:process.env.SEARXNG_URL&&process.env.OPENAI_API_KEY?"ready":"blocked_missing_provider",provider:"SearXNG",capabilities:["live_web_search","source_comparison","margin_guard"]});}
+export async function GET(){return NextResponse.json({agent:"Source-Discovery-Agent",status:process.env.SEARXNG_URL&&aiConfigured()?"configured_unverified":"blocked_missing_provider",provider:"SearXNG",capabilities:["live_web_search","source_comparison","margin_guard"]});}

@@ -19,10 +19,17 @@ export async function POST(req:Request){
   // approved action by supplying a different payload alongside the approval id.
   const payload=approval.payload&&typeof approval.payload==="object"?approval.payload:{};
   if(action==="IMAGE_RESOLVE"||action==="FASHION_STUDIO"){const token=process.env.BHARATSHOP_AUTOMATION_TOKEN;if(!token)return NextResponse.json({error:"Automation token is not configured"},{status:503});}
-  const origin=new URL(req.url).origin; const headers:any={"Content-Type":"application/json"}; if(action==="IMAGE_RESOLVE"||action==="FASHION_STUDIO")headers.authorization=`Bearer ${process.env.BHARATSHOP_AUTOMATION_TOKEN}`;
+  const token=process.env.BHARATSHOP_AUTOMATION_TOKEN;
+  if(!token)return NextResponse.json({error:"Automation token is not configured"},{status:503});
+  // Claim once before dispatch. A crash leaves EXECUTING for manual reconciliation, never automatic replay.
+  const claim=await pool.query(`UPDATE ceo_approvals SET status='EXECUTING' WHERE id=$1 AND status='APPROVED' RETURNING id`,[approvalId]);
+  if(!claim.rows.length)return NextResponse.json({error:"Approval already claimed",code:"APPROVAL_ALREADY_CLAIMED"},{status:409});
+  await audit(agent,"ACTION_REQUESTED","EXECUTING",`Dispatching approved ${action}.`,{action,payload},approvalId);
+  const origin=new URL(req.url).origin; const headers:any={"Content-Type":"application/json",authorization:`Bearer ${token}`};
   const response=await fetch(`${origin}${path}`,{method:"POST",headers,body:JSON.stringify(payload),cache:"no-store"}); const raw=await response.text(); let data:any; try{data=JSON.parse(raw)}catch{data={raw:raw.slice(0,4000)}}
-  const ok=response.ok&&!data?.error&&!['BLOCKED','NO_QUALIFIED_SOURCE','NO_QUALIFIED_PRODUCT'].includes(String(data?.status));
+  const ok=response.ok&&response.status!==202&&!data?.error&&data?.success!==false&&data?.publicationGate!=="BLOCK"&&!(Number(data?.blocked)>0)&&!['BLOCKED','NO_QUALIFIED_SOURCE','NO_QUALIFIED_PRODUCT','IN_PROGRESS','NEEDS_IMAGES','FAILED'].includes(String(data?.status));
+  await pool.query(`UPDATE ceo_approvals SET status=$1 WHERE id=$2 AND status='EXECUTING'`,[ok?"EXECUTED":"EXECUTION_FAILED",approvalId]);
   await audit(agent,"ACTION_EXECUTION",ok?"SUCCESS":"FAILED",ok?`Approved ${action} executed successfully.`:`Approved ${action} returned a failure or blocked result.`,{action,payload,result:data,httpStatus:response.status,approvalStatus:approval.status},approvalId);
-  return NextResponse.json({status:ok?"EXECUTED":"EXECUTION_FAILED",action,result:data},{status:ok?200:422});
+  return NextResponse.json({status:ok?"EXECUTED":"EXECUTION_FAILED",verification:{status:"NOT_TESTED",reason:"Independent result lookup still required"},action,result:data},{status:ok?200:422});
  }catch(e){return NextResponse.json({error:e instanceof Error?e.message:"Execution failed"},{status:500});}
 }
