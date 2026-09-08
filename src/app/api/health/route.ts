@@ -9,9 +9,6 @@ async function checkSearXNG(deep: boolean) {
   const base = String(process.env.SEARXNG_URL || "").replace(/\/+$/, "");
   if (!base) return { configured: false, ready: false, reason: "missing" };
 
-  // Shallow readiness must remain fast and must not cold-start the independent
-  // free SearXNG service on every application health probe. Deep health below
-  // performs the actual network exercise.
   if (!deep) return { configured: true, ready: true, exercised: false, reason: "configured" };
 
   try {
@@ -21,9 +18,6 @@ async function checkSearXNG(deep: boolean) {
       signal: AbortSignal.timeout(30_000),
       headers: { "User-Agent": "BharatShop-Health/1.0" },
     });
-    // A 429 proves our self-hosted SearXNG endpoint is reachable; it means its
-    // public upstream engines are throttling. Report that as degraded instead
-    // of incorrectly declaring the BharatShop application unavailable.
     const serviceReady = service.ok || (service.status >= 300 && service.status < 400) || service.status === 429;
     if (!serviceReady) {
       return { configured: true, ready: false, exercised: true, serviceStatus: service.status, reason: "service_rejected" };
@@ -40,9 +34,6 @@ async function checkSearXNG(deep: boolean) {
         upstreamSearch: { ready: results.length > 0, resultCount: results.length },
       };
     } catch (error) {
-      // The self-hosted service is healthy even when a third-party upstream
-      // engine rate-limits the individual search. Catalog publication still
-      // blocks on real search evidence in the resolver itself.
       return {
         configured: true,
         ready: true,
@@ -105,8 +96,10 @@ export async function GET(req: Request) {
   ]);
 
   const ok = postgres.ready && ai.ready && vision.ready && searxng.ready;
+  const revision = process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT_SHA || process.env.COMMIT_SHA || "unknown";
   return Response.json({
     ok,
+    revision,
     readiness: { postgres, ai, vision, searxng },
     providers: { ai: ai.ready, vision: vision.ready, searxng: searxng.ready },
     models: ai.models,
