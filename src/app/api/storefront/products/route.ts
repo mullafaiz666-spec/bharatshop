@@ -7,7 +7,7 @@ const BAD_IMAGE=/(?:unsplash\.com|source\.unsplash\.com|via\.placeholder\.com|pl
 const APPROVED=new Set(["AI_VISION_VERIFIED"]);
 const MIN_IMAGES=4;
 const MIN_CONFIDENCE=0.75;
-const VERIFICATION_PROVIDER="local-ai";
+const VERIFICATION_PROVIDER="anthropic";
 export const dynamic = "force-dynamic";
 
 const cleanUrl=(value:unknown)=>{const url=String(value||"").trim();return /^https:\/\//i.test(url)&&!BAD_IMAGE.test(url)?url:""};
@@ -22,5 +22,5 @@ export async function GET(req:Request){
  const total=filtered.length;const offset=(page-1)*limit;const paginated=filtered.slice(offset,offset+limit);
  const customerProducts=paginated.map(p=>{const gallery=galleryMap.get(p.id)||[];const imageUrls=gallery.map(x=>x.url).slice(0,8);const imageLabels=imageUrls.map(u=>gallery.find(x=>x.url===u)?.label||"");const d=detailMap.get(p.id);const spec=d?.specificationsJson&&typeof d.specificationsJson==="object"&&!Array.isArray(d.specificationsJson)?d.specificationsJson as Record<string,unknown>:{};const media=spec.media&&typeof spec.media==="object"&&!Array.isArray(spec.media)?spec.media as Record<string,unknown>:{};const productVideos=Array.isArray(media.videos)?media.videos:[];return{id:p.id,sku:p.sku,title:p.title,category:p.category,brand:p.brand,imageUrl:imageUrls[0]||"",imageUrls,imageLabels,productVideos,sellingPriceInr:p.sellingPriceInr,mrpInr:p.mrpInr,stockCount:Number(p.stockCount)||0,aiMarketingCopy:p.aiMarketingCopy,details:d?{description:d.description,specificationsJson:d.specificationsJson,variantsJson:d.variantsJson,includedItems:d.includedItems,dimensions:d.dimensions,weight:d.weight,material:d.material,colorOptions:d.colorOptions,warranty:d.warranty,countryOfOrigin:d.countryOfOrigin,careInstructions:d.careInstructions}:null};});
  const catCounts:Record<string,number>={};publishable.forEach(p=>{catCounts[p.category]=(catCounts[p.category]||0)+1;});
- return NextResponse.json({products:customerProducts,total,page,totalPages:Math.ceil(total/limit),categoryCount:catCounts});
+ return NextResponse.json({products:customerProducts,total,page,totalPages:Math.ceil(total/limit),categoryCount:catCounts,verificationPolicy:{provider:VERIFICATION_PROVIDER,minImages:MIN_IMAGES,minConfidence:MIN_CONFIDENCE}});
 }
