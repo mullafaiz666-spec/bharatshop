@@ -9,21 +9,22 @@ async function checkSearXNG(deep: boolean) {
   const base = String(process.env.SEARXNG_URL || "").replace(/\/+$/, "");
   if (!base) return { configured: false, ready: false, reason: "missing" };
 
-  // SearXNG readiness means the self-hosted service is reachable. Upstream
-  // engines can independently rate-limit a query; that is an exercised search
-  // failure, not evidence that our SearXNG process is down.
+  // Shallow readiness must remain fast and must not cold-start the independent
+  // free SearXNG service on every application health probe. Deep health below
+  // performs the actual network exercise.
+  if (!deep) return { configured: true, ready: true, exercised: false, reason: "configured" };
+
   try {
     const service = await fetch(`${base}/`, {
       cache: "no-store",
       redirect: "manual",
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(30_000),
       headers: { "User-Agent": "BharatShop-Health/1.0" },
     });
     const serviceReady = service.ok || (service.status >= 300 && service.status < 400);
     if (!serviceReady) {
-      return { configured: true, ready: false, exercised: false, serviceStatus: service.status, reason: "service_rejected" };
+      return { configured: true, ready: false, exercised: true, serviceStatus: service.status, reason: "service_rejected" };
     }
-    if (!deep) return { configured: true, ready: true, exercised: false, serviceStatus: service.status };
 
     try {
       const results = await searxngImageSearch("laptop product image", { limit: 1, timeoutMs: 10_000 });
@@ -35,6 +36,9 @@ async function checkSearXNG(deep: boolean) {
         upstreamSearch: { ready: results.length > 0, resultCount: results.length },
       };
     } catch (error) {
+      // The self-hosted service is healthy even when a third-party upstream
+      // engine rate-limits the individual search. Catalog publication still
+      // blocks on real search evidence in the resolver itself.
       return {
         configured: true,
         ready: true,
@@ -48,7 +52,7 @@ async function checkSearXNG(deep: boolean) {
       };
     }
   } catch (error) {
-    return { configured: true, ready: false, exercised: deep, reason: "service_unreachable", error: error instanceof Error ? error.message : String(error) };
+    return { configured: true, ready: false, exercised: true, reason: "service_unreachable", error: error instanceof Error ? error.message : String(error) };
   }
 }
 
