@@ -1,0 +1,1 @@
+Free-stack Gemma hardening CI trigger. Production DB untouched.
