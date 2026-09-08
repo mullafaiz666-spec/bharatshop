@@ -10,7 +10,7 @@ async function checkSearXNG(deep: boolean) {
   if (!base) return { configured: false, ready: false, reason: "missing" };
   if (!deep) return { configured: true, ready: true, exercised: false };
   try {
-    const results = await searxngImageSearch("laptop product image", { limit: 1, timeoutMs: 12000 });
+    const results = await searxngImageSearch("laptop product image", { limit: 1, timeoutMs: 10000 });
     return { configured: true, ready: results.length > 0, exercised: true, resultCount: results.length };
   } catch (e) {
     return { configured: true, ready: false, exercised: true, reason: "image_search_failed", error: e instanceof Error ? e.message : String(e) };
@@ -31,24 +31,10 @@ async function checkImageVerifier(deep: boolean) {
   return { ready: false, exercised: deep, provider: mode, model: aiModels().vision, reason: "unsupported_verifier_mode" };
 }
 
-export async function GET(req: Request) {
-  const deep = new URL(req.url).searchParams.get("deep") === "1";
-  const ai = await checkAI(deep);
-  const vision = await checkImageVerifier(deep);
-  const searxng = await checkSearXNG(deep);
+async function checkPostgres() {
   try {
     await db.execute(sql`select 1`);
-    const postgres = { ready: true };
-    const ok = postgres.ready && ai.ready && vision.ready && searxng.ready;
-    return Response.json({
-      ok,
-      readiness: { postgres, ai, vision, searxng },
-      providers: { ai: ai.ready, vision: vision.ready, searxng: searxng.ready },
-      models: ai.models,
-      provider: ai.provider,
-      imageVerifier: { provider: vision.provider, model: vision.model },
-      deep,
-    }, { status: ok ? 200 : 503 });
+    return { ready: true as const };
   } catch (error) {
     const cause = error instanceof Error && "cause" in error ? (error as Error & { cause?: unknown }).cause : undefined;
     let dbTarget = "unknown";
@@ -60,6 +46,30 @@ export async function GET(req: Request) {
       }
     } catch { dbTarget = "invalid-database-url"; }
     console.error("Production database health check failed", { message: error instanceof Error ? error.message : String(error), cause: cause instanceof Error ? cause.message : String(cause ?? ""), dbTarget });
-    return Response.json({ ok: false, readiness: { postgres: { ready: false }, ai, vision, searxng }, providers: { ai: ai.ready, vision: vision.ready, searxng: searxng.ready }, deep }, { status: 503 });
+    return { ready: false as const, error: error instanceof Error ? error.message : String(error) };
   }
+}
+
+export async function GET(req: Request) {
+  const deep = new URL(req.url).searchParams.get("deep") === "1";
+
+  // All readiness probes are independent. Run them concurrently so the slowest
+  // real provider determines latency instead of adding every timeout together.
+  const [postgres, ai, vision, searxng] = await Promise.all([
+    checkPostgres(),
+    checkAI(deep),
+    checkImageVerifier(deep),
+    checkSearXNG(deep),
+  ]);
+
+  const ok = postgres.ready && ai.ready && vision.ready && searxng.ready;
+  return Response.json({
+    ok,
+    readiness: { postgres, ai, vision, searxng },
+    providers: { ai: ai.ready, vision: vision.ready, searxng: searxng.ready },
+    models: ai.models,
+    provider: ai.provider,
+    imageVerifier: { provider: vision.provider, model: vision.model },
+    deep,
+  }, { status: ok ? 200 : 503 });
 }
