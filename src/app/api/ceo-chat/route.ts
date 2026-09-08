@@ -123,10 +123,9 @@ export async function POST(req:Request){
     }
 
     // The 270M free-tier model is reliable for small text inference but not for
-    // function-call JSON. Tool routing is deterministic and audited; Gemma then
-    // reasons over compact returned evidence. If the wording pass times out, the
-    // endpoint remains useful by returning a transparent deterministic summary
-    // of the already-verified tool result instead of incorrectly failing the CEO.
+    // function-call JSON. Tool routing is deterministic and audited. The wording
+    // pass has a short deadline so a slow cold model can never make the CEO API
+    // exceed the production request budget; verified tool evidence remains usable.
     let live:any=null;
     if(allowed(agent,"inspect_live_business_data")) live=await runTool("inspect_live_business_data",{},agent,trace);
     if(/pending approvals?|approval queue/i.test(question)&&allowed(agent,"list_pending_approvals")) await runTool("list_pending_approvals",{},agent,trace);
@@ -140,7 +139,10 @@ export async function POST(req:Request){
       {role:"user",content:`QUESTION: ${question.slice(0,500)}\nLIVE EVIDENCE: ${JSON.stringify(evidence).slice(0,2200)}\nAnswer using only this evidence.`},
     ];
     try{
-      const result=await runText(messages,{model:aiModels().text,temperature:0.1,maxTokens:160});
+      const result=await Promise.race([
+        runText(messages,{model:aiModels().text,temperature:0.1,maxTokens:160}),
+        new Promise<never>((_,reject)=>setTimeout(()=>reject(new Error("Local Gemma wording deadline exceeded")),12_000)),
+      ]);
       const reply=result.content.trim();
       if(!reply)throw new Error("AI provider returned an empty final response");
       await auditDecision(agent,"SUCCESS","CEO produced an evidence-grounded decision after deterministic audited tool routing.",{question,toolExecutions:trace,decision:reply,provider:process.env.AI_PROVIDER||"local-openai-compatible",model:aiModels().text,durationMs:Date.now()-started});
