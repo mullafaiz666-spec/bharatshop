@@ -31,11 +31,17 @@ function textScore(item: Candidate, product: Product) {
   return expected.length ? hits / expected.length : 0;
 }
 
-function publicationData(product: Product) {
+function candidateDataReady(product: Product) {
   const selling = Number(product.sellingPriceInr);
   const mrp = Number(product.mrpInr);
   const stock = Number(product.stockCount);
   return selling > 0 && mrp >= selling && stock > 0;
+}
+
+function nextMediaStatus(product: Product, dataReady: boolean) {
+  const current = String(product.status || "");
+  if (["Published", "CEO_APPROVED", "BLOCKED"].includes(current)) return current;
+  return dataReady ? "CEO_PENDING" : current || "STAGED";
 }
 
 function cacheFailure(id: number, result: any) {
@@ -100,19 +106,23 @@ async function resolveOne(productId?: number, productName?: string) {
     .sort((a, b) => a.sortOrder - b.sortOrder);
 
   if (approved.length >= MIN_IMAGES) {
-    const publishable = publicationData(product);
-    if (publishable && product.status !== "Published") {
-      await db.update(products).set({ status: "Published", imageUrl: approved[0].imageUrl, updatedAt: new Date() }).where(eq(products.id, product.id));
+    const dataReady = candidateDataReady(product);
+    const nextStatus = nextMediaStatus(product, dataReady);
+    if (dataReady && nextStatus !== product.status) {
+      await db.update(products).set({ status: nextStatus, imageUrl: approved[0].imageUrl, updatedAt: new Date() }).where(eq(products.id, product.id));
     }
     return {
       status: "COMPLETE_MEDIA_RESOLVED",
       provider: "postgres-cache",
+      model: approved[0]?.verificationModel || VERIFIER_MODEL,
       productId: product.id,
       product: product.title,
       imageCount: Math.min(approved.length, MAX_IMAGES),
       images: approved.slice(0, MAX_IMAGES).map(x => ({ url: x.imageUrl, confidence: Number(x.verificationConfidence), reason: String((x.verificationMetadata as any)?.reason || "Previously verified") })),
       cached: true,
-      publicationGate: publishable ? "PASS" : "BLOCK",
+      publicationGate: dataReady ? "PASS" : "BLOCK",
+      productStatus: nextStatus,
+      nextStage: dataReady && nextStatus === "CEO_PENDING" ? "CEO_REVIEW" : nextStatus,
     };
   }
 
@@ -188,7 +198,8 @@ async function resolveOne(productId?: number, productName?: string) {
     return result;
   }
 
-  const publishable = publicationData(product);
+  const dataReady = candidateDataReady(product);
+  const nextStatus = nextMediaStatus(product, dataReady);
   const verifiedAt = new Date();
   await db.transaction(async tx => {
     await tx.delete(productImages).where(eq(productImages.productId, product.id));
@@ -205,9 +216,7 @@ async function resolveOne(productId?: number, productName?: string) {
       verificationMetadata: { reason: v.reason, matches: v.matches, sourceTitle: v.item.candidate.title || "", verifiedAt: verifiedAt.toISOString() },
       verifiedAt,
     })));
-    if (publishable) {
-      await tx.update(products).set({ imageUrl: accepted[0].item.candidate.url, status: "Published", updatedAt: new Date() }).where(eq(products.id, product.id));
-    }
+    await tx.update(products).set({ imageUrl: accepted[0].item.candidate.url, status: nextStatus, updatedAt: new Date() }).where(eq(products.id, product.id));
   });
 
   return {
@@ -219,8 +228,10 @@ async function resolveOne(productId?: number, productName?: string) {
     imageCount: accepted.length,
     images: accepted.map(v => ({ url: v.item.candidate.url, confidence: v.confidence, reason: v.reason })),
     cached: false,
-    publicationGate: publishable ? "PASS" : "BLOCK",
-    message: publishable ? `${accepted.length} images passed the local evidence verifier and the product was published.` : `${accepted.length} images passed verification, but pricing/stock validation failed; product remains staged.`,
+    publicationGate: dataReady ? "PASS" : "BLOCK",
+    productStatus: nextStatus,
+    nextStage: dataReady && nextStatus === "CEO_PENDING" ? "CEO_REVIEW" : nextStatus,
+    message: dataReady ? `${accepted.length} images passed local evidence verification. Product is queued for CEO review and was not published by the media resolver.` : `${accepted.length} images passed verification, but basic pricing/stock data is incomplete; product remains non-published.`,
   };
 }
 

@@ -10,7 +10,9 @@ const MIN_MARGIN_PCT = Number(process.env.CEO_MIN_MARGIN_PCT ?? 25);
 const MAX_LISTINGS_PER_CYCLE = 5;
 const RESEARCH_INTERVAL_MS = Math.max(15 * 60 * 1000, Number(process.env.CEO_RESEARCH_INTERVAL_MS ?? 60 * 60 * 1000));
 const PLACEHOLDER_HOSTS = ["unsplash.com", "placeholder.com", "placehold.co", "picsum.photos", "dummyimage.com"];
-const VERIFIED_MEDIA = new Set(["AI_VISION_VERIFIED"]);
+const VERIFIED_MEDIA = new Set(["AI_VISION_VERIFIED","LOCAL_EVIDENCE_VERIFIED"]);
+const VERIFIED_MEDIA_PROVIDERS = new Set(["local-ai","local-evidence"]);
+const MIN_MEDIA_CONFIDENCE = 0.75;
 
 function realUrl(value: unknown) {
   if (typeof value !== "string" || !/^https?:\/\//i.test(value)) return false;
@@ -78,17 +80,23 @@ async function researchDue() {
 
 async function runCycle(req: Request) {
   await ensureCeoTables();
-  const origin = new URL(req.url).origin;
+  const url = new URL(req.url);
+  const origin = url.origin;
+  const skipResearch = url.searchParams.get("skipResearch") === "1";
   const startedAt = Date.now();
   const results: any = { research: null, ceo: null, listings: [], orders: null, errors: [] as string[] };
 
   try {
-    const cadence = await researchDue();
-    if (cadence.due) {
-      results.research = await callAgent(origin, "/api/automation/research-products", { userId: 1, limit: MAX_LISTINGS_PER_CYCLE });
-      await audit("AI-Product-Research-Agent", "CYCLE_EXECUTION", results.research.ok ? "SUCCESS" : "WARNING", "Scheduled research evidence cycle completed; candidates remain CEO-gated.", { ...results.research.data, researchIntervalMs: RESEARCH_INTERVAL_MS });
+    if (skipResearch) {
+      results.research = { skipped: true, reason: "explicit_skip" };
     } else {
-      results.research = { skipped: true, reason: "research_cooldown", researchIntervalMs: RESEARCH_INTERVAL_MS, lastResearchAt: cadence.lastResearchAt };
+      const cadence = await researchDue();
+      if (cadence.due) {
+        results.research = await callAgent(origin, "/api/automation/research-products", { userId: 1, limit: MAX_LISTINGS_PER_CYCLE });
+        await audit("AI-Product-Research-Agent", "CYCLE_EXECUTION", results.research.ok ? "SUCCESS" : "WARNING", "Scheduled research evidence cycle completed; candidates remain CEO-gated.", { ...results.research.data, researchIntervalMs: RESEARCH_INTERVAL_MS });
+      } else {
+        results.research = { skipped: true, reason: "research_cooldown", researchIntervalMs: RESEARCH_INTERVAL_MS, lastResearchAt: cadence.lastResearchAt };
+      }
     }
   } catch (error) {
     results.errors.push(`research: ${error instanceof Error ? error.message : "failed"}`);
@@ -100,11 +108,11 @@ async function runCycle(req: Request) {
 
   for (const product of pending) {
     const images = await db.select().from(productImages).where(eq(productImages.productId, product.id));
-    const verifiedImages = images.filter((image) => VERIFIED_MEDIA.has(String(image.verificationStatus)) && realUrl(image.imageUrl) && realUrl(image.sourceUrl));
-    const verifiedImage = verifiedImages[0];
+    const verifiedImages = images.filter((image) => VERIFIED_MEDIA.has(String(image.verificationStatus)) && VERIFIED_MEDIA_PROVIDERS.has(String(image.verificationProvider)) && Number(image.verificationConfidence) >= MIN_MEDIA_CONFIDENCE && !!image.verifiedAt && realUrl(image.imageUrl) && realUrl(image.sourceUrl));
     const [details] = await db.select().from(productDetails).where(eq(productDetails.productId, product.id)).limit(1);
     const specs = details?.specificationsJson;
     const hasSpecs = Boolean(specs && typeof specs === "object" && Object.keys(specs as Record<string, unknown>).length > 0);
+    const sourceVerified = Boolean(details && details.verificationStatus === "SOURCE_VERIFIED" && realUrl(details.sourceUrl));
     const price = Number(product.sellingPriceInr);
     const cost = Number(product.supplierCostInr);
     const shipping = Number(product.shippingCostInr);
@@ -113,7 +121,7 @@ async function runCycle(req: Request) {
     const profit = price - landed;
     const margin = price > 0 ? profit / price * 100 : 0;
     const valid = Boolean(
-      product.title.trim() && product.supplierName.trim() && verifiedImage &&
+      product.title.trim() && product.supplierName.trim() && sourceVerified &&
       verifiedImages.length >= 4 && verifiedImages.length <= 8 && hasSpecs &&
       Number(product.stockCount) > 0 && Number.isFinite(price) && price > 0 &&
       Number.isFinite(cost) && cost >= 0 && Number.isFinite(profit) && profit > 0 &&
@@ -122,8 +130,7 @@ async function runCycle(req: Request) {
 
     const evidence = {
       productId: product.id, title: product.title, sku: product.sku,
-      source: product.supplierName, sourceUrl: verifiedImage?.sourceUrl || "",
-      imageUrl: verifiedImage?.imageUrl || "", imageVerificationStatus: verifiedImage?.verificationStatus || "NONE",
+      source: product.supplierName, sourceUrl: details?.sourceUrl || "", sourceVerificationStatus: details?.verificationStatus || "NONE", sourceVerified,
       verifiedImageCount: verifiedImages.length, requiredImageRange: "4-8", hasSpecifications: hasSpecs,
       stockCount: product.stockCount, supplierCostInr: cost, shippingCostInr: shipping, gstPct: gst,
       sellingPriceInr: price, landedCostInr: Number(landed.toFixed(2)), netProfitInr: Number(profit.toFixed(2)),
@@ -132,8 +139,8 @@ async function runCycle(req: Request) {
 
     const [approval] = await db.insert(aiActivityLogs).values({
       userId: product.userId, agentName: "CEO-Agent",
-      actionType: valid ? "CEO_VERIFIED_PRODUCT" : "CEO_BLOCKED_PRODUCT",
-      message: valid ? `CEO verified ${product.title}; releasing it to the listing agent.` : `CEO blocked ${product.title}; media/specification/economics gate failed.`,
+      actionType: valid ? "CEO_VERIFIED_PRODUCT" : "CEO_HELD_PRODUCT",
+      message: valid ? `CEO verified ${product.title}; releasing it to the listing agent.` : `CEO held ${product.title}; source/media/specification/economics evidence is incomplete.`,
       profitImpactInr: valid ? profit.toFixed(2) : "0.00", metadataJson: evidence, status: valid ? "SUCCESS" : "WARNING",
     }).returning({ id: aiActivityLogs.id });
 
@@ -141,13 +148,15 @@ async function runCycle(req: Request) {
       await db.update(products).set({ status: "CEO_APPROVED", updatedAt: new Date() }).where(eq(products.id, product.id));
       approved.push({ productId: product.id, auditId: approval.id, marginPct: Number(margin.toFixed(2)), imageCount: verifiedImages.length });
     } else {
-      await db.update(products).set({ status: "BLOCKED", updatedAt: new Date() }).where(eq(products.id, product.id));
-      blocked.push({ productId: product.id, auditId: approval.id, imageCount: verifiedImages.length, hasSpecs });
+      // Return repairable candidates to staging so source/media/enrichment workers
+      // can add missing evidence instead of dead-ending them permanently.
+      await db.update(products).set({ status: "STAGED", updatedAt: new Date() }).where(eq(products.id, product.id));
+      blocked.push({ productId: product.id, auditId: approval.id, imageCount: verifiedImages.length, hasSpecs, sourceVerified });
     }
   }
 
   results.ceo = { inspected: pending.length, approved: approved.length, blocked: blocked.length, approvedProducts: approved, blockedProducts: blocked };
-  await audit("CEO-Agent", "CEO_VERIFICATION_CYCLE", "SUCCESS", `CEO inspected ${pending.length} candidates; ${approved.length} approved and ${blocked.length} blocked.`, results.ceo);
+  await audit("CEO-Agent", "CEO_VERIFICATION_CYCLE", "SUCCESS", `CEO inspected ${pending.length} candidates; ${approved.length} approved and ${blocked.length} returned to staging for more evidence.`, results.ceo);
 
   for (const item of approved) {
     try {
@@ -170,7 +179,7 @@ async function runCycle(req: Request) {
   results.durationMs = Date.now() - startedAt;
   await db.insert(aiActivityLogs).values({
     userId: 1, agentName: "CEO-Agent", actionType: "FIVE_MINUTE_CYCLE_COMPLETED",
-    message: `CEO cycle completed: ${pending.length} candidates inspected, ${approved.length} approved, ${blocked.length} blocked, ${realOrders.length} real orders present.`,
+    message: `CEO cycle completed: ${pending.length} candidates inspected, ${approved.length} approved, ${blocked.length} held, ${realOrders.length} real orders present.`,
     profitImpactInr: "0.00", metadataJson: results, status: results.errors.length ? "WARNING" : "SUCCESS",
   });
   return results;
@@ -179,7 +188,7 @@ async function runCycle(req: Request) {
 export async function GET(req: Request) {
   if (!cronAuthorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
-    return NextResponse.json({ status: "COMPLETED", schedule: "*/5 * * * *", agents24x7: true, ceoException: true, researchIntervalMs: RESEARCH_INTERVAL_MS, mediaPolicy: "4-8 AI_VISION_VERIFIED images + specifications required", ...(await runCycle(req)) });
+    return NextResponse.json({ status: "COMPLETED", schedule: "*/5 * * * *", agents24x7: true, ceoException: true, researchIntervalMs: RESEARCH_INTERVAL_MS, mediaPolicy: "4-8 verified local media items + SOURCE_VERIFIED supplier evidence + specifications required", ...(await runCycle(req)) });
   } catch (error) {
     return NextResponse.json({ status: "FAILED", error: error instanceof Error ? error.message : "CEO cycle failed" }, { status: 503 });
   }

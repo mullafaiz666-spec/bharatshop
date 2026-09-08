@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { products, productImages } from "@/db/schema";
 import { asc, eq, or } from "drizzle-orm";
 import { resolveVerifiedProductMedia } from "@/lib/ai/media-resolver";
-import { aiConfigured, aiModels } from "@/lib/ai/provider";
+import { aiModels } from "@/lib/ai/provider";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -12,12 +12,12 @@ const MIN_IMAGES = 4;
 const MIN_CONFIDENCE = 0.75;
 
 function qualifiesImage(x: typeof productImages.$inferSelect) {
-  return String(x.verificationStatus) === "AI_VISION_VERIFIED"
+  const status=String(x.verificationStatus);const provider=String(x.verificationProvider);const model=String(x.verificationModel);
+  const verifierOk=(status==="LOCAL_EVIDENCE_VERIFIED"&&provider==="local-evidence"&&model==="local-evidence-v1")||(status==="AI_VISION_VERIFIED"&&provider==="local-ai"&&model===aiModels().vision);
+  return verifierOk
     && !BAD.test(x.imageUrl)
     && /^https:\/\//i.test(x.imageUrl)
     && Number(x.verificationConfidence) >= MIN_CONFIDENCE
-    && String(x.verificationProvider) === "local-ai"
-    && String(x.verificationModel) === aiModels().vision
     && !!x.verifiedAt;
 }
 
@@ -31,20 +31,19 @@ async function enforcePublicationGate() {
   return {
     blocked: blocked.length,
     verifiedPublished: all.filter((p) => p.status === "Published" && (counts.get(p.id) || 0) >= MIN_IMAGES).length,
-    verificationProvider: "local-ai",
-    verificationModel: aiModels().vision,
+    acceptedVerifiers: ["local-evidence/local-evidence-v1", `local-ai/${aiModels().vision}`],
   };
 }
 
 export async function GET() {
-  const ready = !!process.env.SEARXNG_URL && aiConfigured();
+  const ready = !!process.env.SEARXNG_URL;
   return NextResponse.json({
     agent: "Product-Research-and-Catalogue-Agent",
     automation: "catalog-maintenance",
     status: ready ? "ready" : "blocked_missing_runtime_config",
-    provider: "postgres-staging->searxng->local-ai-vision",
-    verificationModel: aiModels().vision,
-    publicationPolicy: "STAGED until central Media Resolver proves >=4 AI_VISION_VERIFIED images with persisted local-AI evidence",
+    provider: "postgres-staging->searxng->local-evidence",
+    verificationModel: "local-evidence-v1",
+    publicationPolicy: "Media resolver can only move verified candidates to CEO_PENDING; publication requires CEO approval plus listing gate.",
   });
 }
 
@@ -55,13 +54,13 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => ({}));
     const limit = Math.max(1, Math.min(10, Number(body.limit || 2)));
     const gateBefore = await enforcePublicationGate();
-    const all = await db.select({ id: products.id, status: products.status }).from(products).where(or(eq(products.status, "STAGED"), eq(products.status, "Published"))).orderBy(asc(products.id));
+    const all = await db.select({ id: products.id, status: products.status }).from(products).where(or(eq(products.status, "STAGED"), eq(products.status, "CEO_PENDING"), eq(products.status, "Published"))).orderBy(asc(products.id));
     const results = [];
     for (const p of all.slice(0, limit)) results.push(await resolveVerifiedProductMedia(p.id));
     const gateAfter = await enforcePublicationGate();
     return NextResponse.json({
       status: "COMPLETED",
-      provider: "postgres-staging->searxng->local-ai-vision",
+      provider: "postgres-staging->searxng->local-evidence",
       mode: "maintenance",
       staged: 0,
       processed: results.length,
@@ -70,7 +69,7 @@ export async function POST(req: Request) {
       gateBefore,
       gateAfter,
       results,
-      policy: "This route cannot publish directly. A product becomes Published only inside the central Media Resolver after 4-8 reachable AI_VISION_VERIFIED images with persisted local-AI evidence.",
+      policy: "This route cannot publish directly. Verified media advances eligible staged products to CEO_PENDING; only the CEO-approved listing route can publish.",
     });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Catalog maintenance failed", publicationGate: "BLOCK" }, { status: 503 });

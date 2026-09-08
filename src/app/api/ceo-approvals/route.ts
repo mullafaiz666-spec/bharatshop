@@ -21,6 +21,7 @@ function operatorAuthorized(req: Request) {
  const supplied = req.headers.get("x-operator-approval-token") || "";
  return !!expected && supplied === expected;
 }
+function automationToken(){return process.env.BHARATSHOP_AUTOMATION_TOKEN||process.env.AUTOMATION_TOKEN||"";}
 export async function GET() {
  try { await ensureTable(); const result=await pool.query(`SELECT id,title,action_type,payload,reason,risk_level,status,requested_by,created_at,decided_at,decision_note FROM ceo_approvals ORDER BY created_at DESC LIMIT 50`); return NextResponse.json({approvals:result.rows}); }
  catch(error){return NextResponse.json({error:error instanceof Error?error.message:"Approval queue unavailable"},{status:500});}
@@ -38,12 +39,20 @@ export async function POST(req:Request){
    await audit(String(approval.requested_by||"AI CEO"),"APPROVAL_REJECTED","REJECTED",`Operator rejected ${approval.action_type}.`,{reason:approval.reason,decisionNote:note},id);
    return NextResponse.json({approval,execution:"BLOCKED"});
   }
+  const token=automationToken();
+  if(!token){
+   await pool.query(`UPDATE ceo_approvals SET status='EXECUTION_FAILED',decision_note=$2 WHERE id=$1`,[id,`${note}; automation token missing`]);
+   return NextResponse.json({error:"Automation token is not configured",approval:{...approval,status:"EXECUTION_FAILED"},execution:"EXECUTION_FAILED"},{status:503});
+  }
   const origin=new URL(req.url).origin;
-  const exec=await fetch(`${origin}/api/agent-execute`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({actionType:approval.action_type,payload:approval.payload,agentName:approval.requested_by,approvalId:id}),cache:"no-store"});
+  const exec=await fetch(`${origin}/api/agent-execute`,{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${token}`,"x-automation-token":token},body:JSON.stringify({actionType:approval.action_type,payload:approval.payload,agentName:approval.requested_by,approvalId:id}),cache:"no-store",signal:AbortSignal.timeout(250000)});
   const raw=await exec.text(); let execution:any; try{execution=JSON.parse(raw)}catch{execution={raw:raw.slice(0,4000)}}
   const succeeded=exec.ok&&execution?.status==="EXECUTED";
-  await pool.query(`UPDATE ceo_approvals SET status=$1,decided_at=NOW(),decision_note=$2 WHERE id=$3`,[succeeded?"EXECUTED":"EXECUTION_FAILED",succeeded?`${note}; executed successfully`:`${note}; execution failed`,id]);
+  // agent-execute owns the atomic APPROVED -> EXECUTING -> final transition.
+  // This update only appends the human decision note to the already-final row.
+  await pool.query(`UPDATE ceo_approvals SET decision_note=CASE WHEN decision_note='' THEN $2 ELSE decision_note||'; '||$2 END WHERE id=$1`,[id,succeeded?`${note}; execution confirmed`:`${note}; execution failed or blocked`]);
   await audit(String(approval.requested_by||"AI CEO"),"APPROVAL_EXECUTION_RESULT",succeeded?"SUCCESS":"FAILED",succeeded?`Approved ${approval.action_type} executed.`:`Approved ${approval.action_type} failed; no success is claimed.`,{approval,execution},id);
-  return NextResponse.json({approval:{...approval,status:succeeded?"EXECUTED":"EXECUTION_FAILED"},execution:succeeded?"EXECUTED":"EXECUTION_FAILED",result:execution},{status:succeeded?200:422});
+  const final=await pool.query(`SELECT * FROM ceo_approvals WHERE id=$1 LIMIT 1`,[id]);
+  return NextResponse.json({approval:final.rows[0]||{...approval,status:succeeded?"EXECUTED":"EXECUTION_FAILED"},execution:succeeded?"EXECUTED":"EXECUTION_FAILED",result:execution},{status:succeeded?200:422});
  }catch(error){return NextResponse.json({error:error instanceof Error?error.message:"Approval update failed"},{status:500});}
 }
