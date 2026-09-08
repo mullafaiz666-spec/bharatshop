@@ -6,6 +6,7 @@ if (!token) throw new Error('BHARATSHOP_AUTOMATION_TOKEN is required');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const timeoutMs = Number(process.env.CATALOG_AUTOMATION_TIMEOUT_MS || 300_000);
+const maintenanceLimit = Math.max(1, Math.min(10, Number(process.env.CATALOG_BOOTSTRAP_LIMIT || 2)));
 
 async function post(path, body, attempts = 3) {
   let lastError;
@@ -39,7 +40,8 @@ async function post(path, body, attempts = 3) {
 
 console.log(`Catalog bootstrap target: ${base}`);
 console.log(`Catalog automation timeout: ${timeoutMs}ms`);
-const result = await post('/api/automation/catalog-maintenance', { mode: 'maintenance', limit: 10, batchSize: 10 });
+console.log(`Catalog maintenance limit: ${maintenanceLimit}`);
+const result = await post('/api/automation/catalog-maintenance', { mode: 'maintenance', limit: maintenanceLimit, batchSize: maintenanceLimit });
 console.log(result);
 const d = JSON.parse(result);
 // A product legitimately blocked by the publication gate is not an application

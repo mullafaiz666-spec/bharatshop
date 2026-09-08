@@ -4,7 +4,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "db:push": "drizzle-kit push --force",
+    "db:push": "node scripts/safe-db-push.mjs",
     "db:check": "drizzle-kit check",
     "start": "next start -H 0.0.0.0 -p ${PORT:-10000}",
     "lint": "eslint .",

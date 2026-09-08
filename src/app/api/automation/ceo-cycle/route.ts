@@ -8,6 +8,7 @@ export const maxDuration = 300;
 
 const MIN_MARGIN_PCT = Number(process.env.CEO_MIN_MARGIN_PCT ?? 25);
 const MAX_LISTINGS_PER_CYCLE = 5;
+const RESEARCH_INTERVAL_MS = Math.max(15 * 60 * 1000, Number(process.env.CEO_RESEARCH_INTERVAL_MS ?? 60 * 60 * 1000));
 const PLACEHOLDER_HOSTS = ["unsplash.com", "placeholder.com", "placehold.co", "picsum.photos", "dummyimage.com"];
 const VERIFIED_MEDIA = new Set(["AI_VISION_VERIFIED"]);
 
@@ -17,10 +18,14 @@ function realUrl(value: unknown) {
   return !PLACEHOLDER_HOSTS.some((host) => lower.includes(host));
 }
 
+function automationToken() {
+  return process.env.BHARATSHOP_AUTOMATION_TOKEN || process.env.AUTOMATION_TOKEN || process.env.CRON_SECRET || "";
+}
+
 function cronAuthorized(req: Request) {
-  const expected = process.env.CRON_SECRET || process.env.AUTOMATION_TOKEN;
+  const expected = automationToken();
   if (!expected) return true;
-  return req.headers.get("authorization") === `Bearer ${expected}`;
+  return req.headers.get("authorization") === `Bearer ${expected}` || req.headers.get("x-automation-token") === expected;
 }
 
 async function ensureCeoTables() {
@@ -47,14 +52,28 @@ async function audit(agent: string, event: string, status: string, summary: stri
 }
 
 async function callAgent(origin: string, path: string, body: unknown) {
+  const token = automationToken();
   const response = await fetch(`${origin}${path}`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}`, "x-automation-token": token } : {}),
+    },
     body: JSON.stringify(body), cache: "no-store",
   });
   const raw = await response.text();
   let data: any;
   try { data = JSON.parse(raw); } catch { data = { raw: raw.slice(0, 2000) }; }
   return { ok: response.ok, status: response.status, data };
+}
+
+async function researchDue() {
+  const result = await pool.query<{ created_at: Date }>(
+    `SELECT created_at FROM agent_audit_records WHERE agent_name=$1 AND event_type=$2 ORDER BY created_at DESC LIMIT 1`,
+    ["AI-Product-Research-Agent", "CYCLE_EXECUTION"],
+  );
+  const last = result.rows[0]?.created_at ? new Date(result.rows[0].created_at).getTime() : 0;
+  return { due: !last || Date.now() - last >= RESEARCH_INTERVAL_MS, lastResearchAt: last ? new Date(last).toISOString() : null };
 }
 
 async function runCycle(req: Request) {
@@ -64,8 +83,13 @@ async function runCycle(req: Request) {
   const results: any = { research: null, ceo: null, listings: [], orders: null, errors: [] as string[] };
 
   try {
-    results.research = await callAgent(origin, "/api/automation/research-products", { userId: 1, limit: MAX_LISTINGS_PER_CYCLE });
-    await audit("AI-Product-Research-Agent", "CYCLE_EXECUTION", results.research.ok ? "SUCCESS" : "WARNING", "Five-minute research cycle completed; candidates remain CEO-gated.", results.research.data);
+    const cadence = await researchDue();
+    if (cadence.due) {
+      results.research = await callAgent(origin, "/api/automation/research-products", { userId: 1, limit: MAX_LISTINGS_PER_CYCLE });
+      await audit("AI-Product-Research-Agent", "CYCLE_EXECUTION", results.research.ok ? "SUCCESS" : "WARNING", "Scheduled research evidence cycle completed; candidates remain CEO-gated.", { ...results.research.data, researchIntervalMs: RESEARCH_INTERVAL_MS });
+    } else {
+      results.research = { skipped: true, reason: "research_cooldown", researchIntervalMs: RESEARCH_INTERVAL_MS, lastResearchAt: cadence.lastResearchAt };
+    }
   } catch (error) {
     results.errors.push(`research: ${error instanceof Error ? error.message : "failed"}`);
   }
@@ -155,7 +179,7 @@ async function runCycle(req: Request) {
 export async function GET(req: Request) {
   if (!cronAuthorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
-    return NextResponse.json({ status: "COMPLETED", schedule: "*/5 * * * *", agents24x7: true, ceoException: true, mediaPolicy: "4-8 AI_VISION_VERIFIED images + specifications required", ...(await runCycle(req)) });
+    return NextResponse.json({ status: "COMPLETED", schedule: "*/5 * * * *", agents24x7: true, ceoException: true, researchIntervalMs: RESEARCH_INTERVAL_MS, mediaPolicy: "4-8 AI_VISION_VERIFIED images + specifications required", ...(await runCycle(req)) });
   } catch (error) {
     return NextResponse.json({ status: "FAILED", error: error instanceof Error ? error.message : "CEO cycle failed" }, { status: 503 });
   }

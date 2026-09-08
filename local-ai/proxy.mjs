@@ -15,6 +15,11 @@ async function readBody(req) {
   return Buffer.concat(chunks);
 }
 
+function requestPath(req) {
+  try { return new URL(req.url || '/', 'http://localhost').pathname; }
+  catch { return req.url || '/'; }
+}
+
 function upstreamPath(path) {
   if (path === '/health' || path === '/models' || path === '/v1/models') return '/api/tags';
   if (path === '/chat/completions' || path === '/v1/chat/completions') return '/api/chat';
@@ -29,7 +34,7 @@ function toOllamaPayload(body) {
       .filter((part) => part?.type === 'text' && typeof part.text === 'string')
       .map((part) => part.text)
       .join('\n');
-    return { role: message.role, content: text };
+    return { ...message, content: text };
   }) : [];
   const requestedTokens = Number(json.max_tokens ?? json.max_completion_tokens ?? 256);
   const numPredict = Number.isFinite(requestedTokens) ? Math.max(1, Math.min(1024, Math.floor(requestedTokens))) : 256;
@@ -37,6 +42,7 @@ function toOllamaPayload(body) {
     model,
     messages,
     stream: false,
+    ...(Array.isArray(json.tools) && json.tools.length ? { tools: json.tools } : {}),
     options: {
       temperature: Number(json.temperature ?? 0.2),
       num_ctx: Number(process.env.OLLAMA_CONTEXT_LENGTH || 1024),
@@ -45,14 +51,30 @@ function toOllamaPayload(body) {
   }));
 }
 
+function normalizeToolCalls(calls) {
+  if (!Array.isArray(calls)) return [];
+  return calls.map((call, index) => {
+    const fn = call?.function || {};
+    const rawArgs = fn.arguments ?? {};
+    const args = typeof rawArgs === 'string' ? rawArgs : JSON.stringify(rawArgs);
+    return {
+      id: String(call?.id || `call_${Date.now()}_${index}`),
+      type: 'function',
+      function: { name: String(fn.name || ''), arguments: args },
+    };
+  }).filter((call) => call.function.name);
+}
+
 function fromOllamaChat(text) {
   const json = JSON.parse(text);
   const content = String(json?.message?.content || '').trim();
+  const toolCalls = normalizeToolCalls(json?.message?.tool_calls);
+  const message = { role: 'assistant', content, ...(toolCalls.length ? { tool_calls: toolCalls } : {}) };
   return JSON.stringify({
     id: `local-${Date.now()}`,
     object: 'chat.completion',
     model,
-    choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
+    choices: [{ index: 0, message, finish_reason: toolCalls.length ? 'tool_calls' : 'stop' }],
   });
 }
 
@@ -84,7 +106,7 @@ async function proxy(req, res) {
     res.end(JSON.stringify({ error: { message: 'Gemma gateway is not configured', type: 'configuration_error' } }));
     return;
   }
-  const path = req.url || '/';
+  const path = requestPath(req);
   const raw = await readBody(req);
   const targetPath = upstreamPath(path);
   let payload = raw;
@@ -112,13 +134,14 @@ async function proxy(req, res) {
 }
 
 const server = http.createServer(async (req, res) => {
-  if (req.url === '/verify') {
+  const path = requestPath(req);
+  if (path === '/verify') {
     const result = await verifyGemma();
     res.writeHead(result.ok ? 200 : 502, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(JSON.stringify(result));
     return;
   }
-  if (req.url === '/health' || req.url === '/models' || req.url === '/v1/models' || req.url === '/api/chat' || req.url === '/chat/completions' || req.url === '/v1/chat/completions') return proxy(req, res);
+  if (path === '/health' || path === '/models' || path === '/v1/models' || path === '/api/chat' || path === '/chat/completions' || path === '/v1/chat/completions') return proxy(req, res);
   res.writeHead(404, { 'content-type': 'application/json' });
   res.end(JSON.stringify({ error: 'not_found' }));
 });

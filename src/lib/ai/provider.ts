@@ -1,8 +1,8 @@
-export type AIMessage = { role: "system" | "user" | "assistant"; content: string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> };
+export type AIMessage = { role: "system" | "user" | "assistant" | "tool"; content: string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>; tool_call_id?: string };
 
 type ProviderOptions = { model?: string; temperature?: number; maxTokens?: number; tools?: any[]; toolChoice?: any };
 
-const baseUrl = () => (process.env.AI_BASE_URL || process.env.LOCAL_AI_BASE_URL || "").replace(/\/$/, "");
+const baseUrl = () => (process.env.AI_BASE_URL || process.env.LOCAL_AI_BASE_URL || "").replace(/\/+$/, "");
 const apiKey = () => process.env.AI_API_KEY || process.env.LOCAL_AI_API_KEY || "";
 export const aiProviderName = () => process.env.AI_PROVIDER || "local-openai-compatible";
 export const aiConfigured = () => !!baseUrl();
@@ -13,10 +13,16 @@ export const aiModels = () => ({
 
 function headers() { const key = apiKey(); return { "Content-Type": "application/json", ...(key ? { Authorization: `Bearer ${key}` } : {}) }; }
 
-async function request(path: string, body: unknown, timeoutMs = 120000) {
+function providerUrl(path: string) {
   const base = baseUrl();
   if (!base) throw new Error("AI_BASE_URL is not configured");
-  const res = await fetch(`${base}${path}`, { method: "POST", headers: headers(), body: JSON.stringify(body), cache: "no-store", signal: AbortSignal.timeout(timeoutMs) });
+  const normalized = path.startsWith("/") ? path : `/${path}`;
+  const relative = normalized.startsWith("/v1/") ? normalized.slice(3) : normalized;
+  return base.endsWith("/v1") ? `${base}${relative}` : `${base}/v1${relative}`;
+}
+
+async function request(path: string, body: unknown, timeoutMs = 120000) {
+  const res = await fetch(providerUrl(path), { method: "POST", headers: headers(), body: JSON.stringify(body), cache: "no-store", signal: AbortSignal.timeout(timeoutMs) });
   const text = await res.text();
   let data: any = null; try { data = JSON.parse(text); } catch {}
   if (!res.ok) throw new Error(`AI provider ${res.status}: ${String(data?.error?.message || data?.message || text).slice(0,1200)}`);
@@ -25,7 +31,7 @@ async function request(path: string, body: unknown, timeoutMs = 120000) {
 
 export async function runAI(messages: AIMessage[], options: ProviderOptions = {}) {
   const models = aiModels();
-  return request("/v1/chat/completions", {
+  return request("/chat/completions", {
     model: options.model || models.text,
     messages,
     temperature: options.temperature ?? 0.2,
@@ -57,7 +63,7 @@ export async function checkAI(deep = false) {
   const base = baseUrl();
   if (!base) return { configured: false, ready: false, reason: "missing", provider: aiProviderName(), models: aiModels() };
   try {
-    const res = await fetch(`${base}/v1/models`, { headers: headers(), cache: "no-store", signal: AbortSignal.timeout(15000) });
+    const res = await fetch(providerUrl("/models"), { headers: headers(), cache: "no-store", signal: AbortSignal.timeout(15000) });
     if (!res.ok) return { configured: true, ready: false, status: res.status, reason: "provider_rejected", provider: aiProviderName(), models: aiModels() };
     if (!deep) return { configured: true, ready: true, status: res.status, reason: "reachable", provider: aiProviderName(), models: aiModels() };
     const probe = await runText([{ role: "user", content: "Reply with exactly OK." }], { maxTokens: 16 });

@@ -1,6 +1,6 @@
 // IMAGE SEARCH CLIENT — SearXNG is the sole image-search provider.
 // The media resolver performs the authoritative reachability/content-type gate
-// and Claude Vision verification before an image can be published.
+// and local evidence verification before an image can be published.
 
 export interface SearXNGImageResult {
   url: string;
@@ -31,6 +31,7 @@ const MAX_CONCURRENT_SEARCHES = 1;
 
 const searchCache = new Map<string, { expiresAt: number; results: SearXNGImageResult[]; error?: SearXNGRateLimitError }>();
 let activeSearches = 0;
+let nextImageSearchAt = 0;
 const waiters: Array<() => void> = [];
 
 function getSearxngBaseUrl(): string | null {
@@ -39,10 +40,10 @@ function getSearxngBaseUrl(): string | null {
 }
 
 function configuredImageEngines(): string[] {
-  // Keep one upstream by default. A comma/semicolon-separated fallback list can
-  // be supplied in production, e.g. "bing images,startpage images". Engines are
-  // tried sequentially so a rate-limited upstream never causes parallel hammering.
-  return (process.env.SEARXNG_IMAGE_ENGINES || "bing images,startpage images")
+  // Prefer Brave's image engine before Bing/Startpage on shared free-hosting IPs.
+  // Engines are tried sequentially so a rate-limited upstream is never hammered
+  // in parallel. Operators can override this list without changing code.
+  return (process.env.SEARXNG_IMAGE_ENGINES || "brave.images,bing images,startpage images")
     .split(/[,;]/)
     .map(x => x.trim())
     .filter(Boolean);
@@ -74,8 +75,9 @@ function imageCandidates(result: Record<string, unknown>): string[] {
 }
 
 function retryDelayMs(attempt: number, retryAfter?: string | null): number {
-  const seconds = Number.parseFloat(String(retryAfter || ""));
-  const retryAfterDate = retryAfter && Number.isNaN(seconds) ? Date.parse(retryAfter) : NaN;
+  const raw = String(retryAfter || "").trim();
+  const seconds = raw ? Number.parseFloat(raw) : Number.NaN;
+  const retryAfterDate = raw && Number.isNaN(seconds) ? Date.parse(raw) : NaN;
   if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1000, 30000);
   if (Number.isFinite(retryAfterDate)) return Math.min(Math.max(0, retryAfterDate - Date.now()), 30000);
   const exponential = RETRY_BASE_MS * 2 ** attempt;
@@ -92,12 +94,14 @@ function putCache(key: string, value: { results: SearXNGImageResult[]; error?: S
 }
 
 async function acquireSlot(): Promise<void> {
-  if (activeSearches < MAX_CONCURRENT_SEARCHES) {
-    activeSearches += 1;
-    return;
+  if (activeSearches >= MAX_CONCURRENT_SEARCHES) {
+    await new Promise<void>(resolve => waiters.push(resolve));
   }
-  await new Promise<void>(resolve => waiters.push(resolve));
   activeSearches += 1;
+  const minGap = Math.max(1000, Number(process.env.SEARXNG_IMAGE_MIN_REQUEST_GAP_MS || 5000));
+  const wait = Math.max(0, nextImageSearchAt - Date.now());
+  if (wait) await new Promise(resolve => setTimeout(resolve, wait));
+  nextImageSearchAt = Date.now() + minGap;
 }
 
 function releaseSlot() {
@@ -137,6 +141,7 @@ async function searchEngine(
       });
       if (res.status === 429) {
         const delay = retryDelayMs(attempt, res.headers.get("retry-after"));
+        nextImageSearchAt = Math.max(nextImageSearchAt, Date.now() + delay);
         if (attempt < MAX_429_RETRIES) {
           await new Promise(resolve => setTimeout(resolve, delay));
           continue;

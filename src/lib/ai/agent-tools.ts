@@ -25,6 +25,13 @@ function searxBase() {
   return requireEnv("SEARXNG_URL").replace(/\/+$/, "");
 }
 
+function configuredWebEngines() {
+  return (process.env.SEARXNG_WEB_ENGINES || "brave,bing,duckduckgo")
+    .split(/[,;]/)
+    .map(x => x.trim())
+    .filter(Boolean);
+}
+
 function priceFromText(value: unknown) {
   const text = String(value ?? "");
   const match = text.match(/(?:₹|INR|Rs\.?\s*)\s*([0-9][0-9,]*(?:\.\d+)?)/i);
@@ -40,7 +47,7 @@ async function acquireSearchSlot() {
   let release!: () => void;
   searchQueue = new Promise<void>(resolve => { release = resolve; });
   await previous;
-  const minGap = Math.max(1000, Number(process.env.SEARXNG_MIN_REQUEST_GAP_MS || 4000));
+  const minGap = Math.max(1000, Number(process.env.SEARXNG_MIN_REQUEST_GAP_MS || 5000));
   const wait = Math.max(0, nextSearchAt - Date.now());
   if (wait) await sleep(wait);
   nextSearchAt = Date.now() + minGap;
@@ -48,53 +55,87 @@ async function acquireSearchSlot() {
 }
 
 function retryDelay(attempt: number, header: string | null) {
-  const parsed = Number(header);
-  if (Number.isFinite(parsed) && parsed >= 0) return Math.min(parsed * 1000, 60000);
+  const raw = String(header || "").trim();
+  const seconds = raw ? Number.parseFloat(raw) : Number.NaN;
+  const dateMs = raw && Number.isNaN(seconds) ? Date.parse(raw) : Number.NaN;
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1000, 60000);
+  if (Number.isFinite(dateMs)) return Math.min(Math.max(0, dateMs - Date.now()), 60000);
   return Math.min(5000 * 2 ** attempt, 60000);
+}
+
+function buildSearchUrl(query: string, engineName: string) {
+  const url = new URL(`${searxBase()}/search`);
+  url.searchParams.set("q", query);
+  url.searchParams.set("categories", "general");
+  url.searchParams.set("format", "json");
+  url.searchParams.set("language", "en");
+  url.searchParams.set("pageno", "1");
+  url.searchParams.set("engines", engineName);
+  return url;
+}
+
+function normalizeResults(data: { results?: Array<Record<string, unknown>> }) {
+  return (Array.isArray(data.results) ? data.results : []).map((x): SearchResult => ({
+    title: String(x.title || "").trim(),
+    link: String(x.url || "").trim(),
+    source: String(x.engine || x.pretty_url || "Web source").trim(),
+    merchant: String(x.engine || "Web source").trim(),
+    price: String(x.content || ""),
+    extracted_price: priceFromText(`${x.title || ""} ${x.content || ""}`),
+    snippet: String(x.content || "").trim(),
+  })).filter(x => x.title && /^https?:\/\//i.test(x.link));
 }
 
 export async function serpSearch(query: string, engine: "google" | "google_shopping" = "google") {
   const release = await acquireSearchSlot();
   try {
-    const url = new URL(`${searxBase()}/search`);
-    url.searchParams.set("q", query);
-    url.searchParams.set("categories", "general");
-    url.searchParams.set("format", "json");
-    url.searchParams.set("language", "en");
-    url.searchParams.set("pageno", "1");
-    url.searchParams.set("engines", process.env.SEARXNG_WEB_ENGINES || "bing");
+    let sawRateLimit = false;
+    let lastError: string | undefined;
 
-    let response: Response | null = null;
-    for (let attempt = 0; attempt < 4; attempt++) {
-      response = await fetch(url, {
-        cache: "no-store",
-        signal: AbortSignal.timeout(20000),
-        headers: { Accept: "application/json", "User-Agent": "BharatShop/1.0" },
-      });
-      if (response.status !== 429) break;
-      const delay = retryDelay(attempt, response.headers.get("retry-after"));
-      nextSearchAt = Math.max(nextSearchAt, Date.now() + delay);
-      if (attempt < 3) await sleep(delay);
+    for (const engineName of configuredWebEngines()) {
+      const url = buildSearchUrl(query, engineName);
+      let response: Response | null = null;
+
+      for (let attempt = 0; attempt < 4; attempt++) {
+        response = await fetch(url, {
+          cache: "no-store",
+          signal: AbortSignal.timeout(20000),
+          headers: { Accept: "application/json", "Accept-Language": "en-US,en;q=0.9", "User-Agent": "Mozilla/5.0 (compatible; BharatShop/1.0; +https://bharatshop-9w4a.onrender.com)" },
+        });
+        if (response.status !== 429) break;
+        sawRateLimit = true;
+        const delay = retryDelay(attempt, response.headers.get("retry-after"));
+        nextSearchAt = Math.max(nextSearchAt, Date.now() + delay);
+        if (attempt < 3) await sleep(delay);
+      }
+
+      if (!response) {
+        lastError = `SearXNG ${engineName} returned no response`;
+        continue;
+      }
+      if (response.status === 429) {
+        lastError = `SearXNG ${engineName} returned 429`;
+        continue;
+      }
+      if (!response.ok) {
+        lastError = `SearXNG ${engineName} returned ${response.status}`;
+        continue;
+      }
+
+      const data = await response.json() as { results?: Array<Record<string, unknown>> };
+      const results = normalizeResults(data);
+      if (!results.length) continue;
+      return {
+        organic_results: results.map(x => ({ title: x.title, link: x.link, snippet: x.snippet, source: x.source })),
+        shopping_results: results,
+        requestedEngine: engine,
+        providerEngine: engineName,
+      };
     }
 
-    if (!response) throw new Error("SearXNG returned no response");
-    if (!response.ok) throw new Error(`SearXNG returned ${response.status}`);
-    const data = await response.json() as { results?: Array<Record<string, unknown>> };
-    const results: SearchResult[] = (Array.isArray(data.results) ? data.results : []).map((x) => ({
-      title: String(x.title || "").trim(),
-      link: String(x.url || "").trim(),
-      source: String(x.engine || x.pretty_url || "Web source").trim(),
-      merchant: String(x.engine || "Web source").trim(),
-      price: String(x.content || ""),
-      extracted_price: priceFromText(`${x.title || ""} ${x.content || ""}`),
-      snippet: String(x.content || "").trim(),
-    })).filter(x => x.title && /^https?:\/\//i.test(x.link));
-
-    return {
-      organic_results: results.map(x => ({ title: x.title, link: x.link, snippet: x.snippet, source: x.source })),
-      shopping_results: results,
-      requestedEngine: engine,
-    };
+    if (sawRateLimit) throw new Error(lastError || "SearXNG returned 429");
+    if (lastError) throw new Error(lastError);
+    return { organic_results: [], shopping_results: [], requestedEngine: engine, providerEngine: null };
   } finally {
     release();
   }

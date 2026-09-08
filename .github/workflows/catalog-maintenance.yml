@@ -2,10 +2,8 @@
 name: BharatShop Catalog Maintenance
 
 on:
-  push:
-    branches: [main]
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "15 * * * *"
   workflow_dispatch:
 
 concurrency:
@@ -26,6 +24,7 @@ jobs:
         env:
           BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
           CATALOG_AUTOMATION_TIMEOUT_MS: 300000
+          CATALOG_BOOTSTRAP_LIMIT: 2
         run: |
           set -euo pipefail
           test -n "$BHARATSHOP_AUTOMATION_TOKEN"
@@ -36,23 +35,25 @@ jobs:
           BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
         run: |
           set -euo pipefail
-          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 180 --retry 2 --retry-delay 5 \
+          sleep 10
+          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 240 --retry 2 --retry-delay 10 \
             -X POST "$BHARATSHOP_URL/api/automation/research-products" \
             -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" \
             -H "x-automation-token: $BHARATSHOP_AUTOMATION_TOKEN" \
             -H "Content-Type: application/json" \
-            --data '{"limit":20}' | tee research-products.json
+            --data '{"limit":5}' | tee research-products.json
 
       - name: Resolve complete product media
         env:
           BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
         run: |
           set -euo pipefail
-          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 --retry 3 --retry-delay 5 \
+          sleep 10
+          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 --retry 3 --retry-delay 10 \
             -X POST "$BHARATSHOP_URL/api/catalog/image-resolve" \
             -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" \
             -H "Content-Type: application/json" \
-            --data '{"limit":10}' | tee media-resolve.json
+            --data '{"limit":2}' | tee media-resolve.json
           node - <<'NODE'
           const fs=require('fs'); const d=JSON.parse(fs.readFileSync('media-resolve.json','utf8'));
           const bad=(d.results||[]).filter(x=>["ERROR","SEARCH_ERROR","VERIFICATION_FAILED"].includes(String(x.status)));
@@ -72,7 +73,7 @@ jobs:
       - name: Verify storefront has real published images
         run: |
           set -euo pipefail
-          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 180 --retry 3 --retry-delay 5 "$BHARATSHOP_URL/api/storefront/products?limit=96" > storefront.json
+          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 180 --retry 3 --retry-delay 10 "$BHARATSHOP_URL/api/storefront/products?limit=96" > storefront.json
           cat storefront.json
           node - <<'NODE'
           const fs=require('fs'); const d=JSON.parse(fs.readFileSync('storefront.json','utf8'));
@@ -86,11 +87,11 @@ jobs:
           BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
         run: |
           set -euo pipefail
-          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 --retry 3 --retry-delay 5 \
+          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 --retry 3 --retry-delay 10 \
             -X POST "$BHARATSHOP_URL/api/catalog/fashion-enrich" \
             -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" \
             -H "Content-Type: application/json" \
-            --data '{"limit":200}' | tee fashion-enrich.json
+            --data '{"limit":50}' | tee fashion-enrich.json
           node - <<'NODE'
           const fs=require('fs'); const d=JSON.parse(fs.readFileSync('fashion-enrich.json','utf8')); const bad=(d.results||[]).filter(x=>["ERROR","SEARCH_ERROR"].includes(String(x.status))); if(d.error||Number(d.errors||0)>0||bad.length) throw new Error(`Fashion enrichment failure: ${JSON.stringify({error:d.error,errors:d.errors,bad})}`);
           NODE
