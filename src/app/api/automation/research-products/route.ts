@@ -3,7 +3,6 @@ import { db } from "@/db";
 import { products, aiActivityLogs } from "@/db/schema";
 import { ilike } from "drizzle-orm";
 import { serpSearch } from "@/lib/ai/agent-tools";
-import { resolveVerifiedProductMedia } from "@/lib/ai/media-resolver";
 import { UNIVERSAL_CATALOGUE_QUERIES } from "@/lib/suppliers/universal-catalogue";
 
 export const dynamic = "force-dynamic";
@@ -46,9 +45,10 @@ export async function POST(req: Request) {
         const [existing] = await db.select().from(products).where(ilike(products.title, title)).limit(1);
         if (existing) continue;
 
-        // Search results are discovery evidence, not proof of live stock, shipping, tax,
-        // serviceability, payment compatibility, or authorized fulfilment. Keep these
-        // candidates staged until a qualifying source adapter verifies the offer.
+        // Discovery evidence is not fulfilment or stock proof. Keep the candidate
+        // staged and let the dedicated source/media workers verify it later. This
+        // avoids hammering the free SearXNG instance with web + image searches in
+        // one tight loop and preserves the publication gate.
         const sellingPrice = Math.ceil((sourcePrice * 1.35) / 10) * 10;
         const mrp = Math.max(Math.ceil((sellingPrice * 1.15) / 10) * 10, sellingPrice);
         const profit = sellingPrice - sourcePrice;
@@ -70,20 +70,44 @@ export async function POST(req: Request) {
           userId, agentName: "AI-Product-Research-Agent", actionType: "PRODUCT_RESEARCH_DISCOVERED",
           message: `Discovered catalogue candidate "${title}" from ${sourceName}; staged pending source and media verification.`,
           profitImpactInr: profit.toFixed(2), status: "SUCCESS",
-          metadataJson: { productId: product.id, query, sourceName, sourceUrl, discoveryPrice: sourcePrice, estimatedSellingPrice: sellingPrice, marginPct: margin, stockVerified: false, fulfilmentAuthorized: false },
+          metadataJson: { productId: product.id, query, sourceName, sourceUrl, discoveryPrice: sourcePrice, estimatedSellingPrice: sellingPrice, marginPct: margin, stockVerified: false, fulfilmentAuthorized: false, mediaVerified: false },
         });
 
-        const media = await resolveVerifiedProductMedia(product.id);
-        created.push({ id: product.id, title, sourceName, sourceUrl, discoveryPrice: sourcePrice, sellingPrice, marginPct: Number(margin.toFixed(2)), mediaStatus: media.status, publicationGate: media.publicationGate });
+        created.push({
+          id: product.id,
+          title,
+          sourceName,
+          sourceUrl,
+          discoveryPrice: sourcePrice,
+          sellingPrice,
+          marginPct: Number(margin.toFixed(2)),
+          mediaStatus: "PENDING_MEDIA_VERIFICATION",
+          publicationGate: "BLOCK",
+        });
       }
     }
 
-    return NextResponse.json({ status: "COMPLETED", researched: created.length, products: created, queriesScanned: queries.length, provider: "SearXNG->PostgreSQL->Claude Vision", publicationPolicy: "Discovery never implies fulfilment. Publish only after live source qualification and 4-8 persisted AI_VISION_VERIFIED HTTPS images." });
+    return NextResponse.json({
+      status: "COMPLETED",
+      researched: created.length,
+      products: created,
+      queriesScanned: queries.length,
+      provider: "SearXNG->PostgreSQL",
+      nextStage: "dedicated Gemma media verification worker",
+      publicationPolicy: "Discovery never implies fulfilment. Publish only after live source qualification and 4-8 persisted AI_VISION_VERIFIED HTTPS images.",
+    });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Product research failed" }, { status: 503 });
   }
 }
 
 export async function GET() {
-  return NextResponse.json({ agent: "AI-Product-Research-and-Catalogue-Agent", status: process.env.SEARXNG_URL && process.env.OPENAI_API_KEY && process.env.ANTHROPIC_API_KEY ? "ready" : "blocked_missing_provider", queryCount: DEFAULT_QUERIES.length });
+  const localAI = Boolean(process.env.AI_BASE_URL || process.env.LOCAL_AI_BASE_URL);
+  const searxng = Boolean(process.env.SEARXNG_URL);
+  return NextResponse.json({
+    agent: "AI-Product-Research-and-Catalogue-Agent",
+    status: localAI && searxng ? "ready" : "blocked_missing_provider",
+    providers: { localGemma: localAI, searxng },
+    queryCount: DEFAULT_QUERIES.length,
+  });
 }

@@ -10,7 +10,7 @@ export const aiModels = () => ({ text: process.env.AI_TEXT_MODEL || process.env.
 
 function headers() { const key = apiKey(); return { "Content-Type": "application/json", ...(key ? { Authorization: `Bearer ${key}` } : {}) }; }
 
-async function request(path: string, body: unknown, timeoutMs = 30000) {
+async function request(path: string, body: unknown, timeoutMs = 120000) {
   const base = baseUrl();
   if (!base) throw new Error("AI_BASE_URL is not configured");
   const res = await fetch(`${base}${path}`, { method: "POST", headers: headers(), body: JSON.stringify(body), cache: "no-store", signal: AbortSignal.timeout(timeoutMs) });
@@ -22,8 +22,14 @@ async function request(path: string, body: unknown, timeoutMs = 30000) {
 
 export async function runAI(messages: AIMessage[], options: ProviderOptions = {}) {
   const models = aiModels();
-  const data = await request("/chat/completions", { model: options.model || models.text, messages, temperature: options.temperature ?? 0.2, max_tokens: options.maxTokens ?? 2048, ...(options.tools ? { tools: options.tools, tool_choice: options.toolChoice ?? "auto" } : {}) });
-  return data;
+  return request("/v1/chat/completions", {
+    model: options.model || models.text,
+    messages,
+    temperature: options.temperature ?? 0.2,
+    max_tokens: options.maxTokens ?? 2048,
+    stream: false,
+    ...(options.tools ? { tools: options.tools, tool_choice: options.toolChoice ?? "auto" } : {}),
+  });
 }
 
 export async function runText(messages: AIMessage[], options: ProviderOptions = {}) {
@@ -54,7 +60,7 @@ export async function checkAI(deep = false) {
   const base = baseUrl();
   if (!base) return { configured: false, ready: false, reason: "missing", provider: aiProviderName(), models: aiModels() };
   try {
-    const res = await fetch(`${base}/models`, { headers: headers(), cache: "no-store", signal: AbortSignal.timeout(8000) });
+    const res = await fetch(`${base}/v1/models`, { headers: headers(), cache: "no-store", signal: AbortSignal.timeout(15000) });
     if (!res.ok) return { configured: true, ready: false, status: res.status, reason: "provider_rejected", provider: aiProviderName(), models: aiModels() };
     if (!deep) return { configured: true, ready: true, status: res.status, reason: "reachable", provider: aiProviderName(), models: aiModels() };
     const probe = await runText([{ role: "user", content: "Reply with exactly OK." }], { maxTokens: 16 });
