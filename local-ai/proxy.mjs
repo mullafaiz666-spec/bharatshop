@@ -31,11 +31,17 @@ function toOllamaPayload(body) {
       .join('\n');
     return { role: message.role, content: text };
   }) : [];
+  const requestedTokens = Number(json.max_tokens ?? json.max_completion_tokens ?? 256);
+  const numPredict = Number.isFinite(requestedTokens) ? Math.max(1, Math.min(1024, Math.floor(requestedTokens))) : 256;
   return Buffer.from(JSON.stringify({
     model,
     messages,
     stream: false,
-    options: { temperature: Number(json.temperature ?? 0.2), num_ctx: Number(process.env.OLLAMA_CONTEXT_LENGTH || 1024) },
+    options: {
+      temperature: Number(json.temperature ?? 0.2),
+      num_ctx: Number(process.env.OLLAMA_CONTEXT_LENGTH || 1024),
+      num_predict: numPredict,
+    },
   }));
 }
 
@@ -57,7 +63,7 @@ async function verifyGemma() {
     const r = await fetch(`${localUpstream}/api/chat`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model, messages: [{ role: 'user', content: 'Reply with exactly GEMMA_TEXT_OK' }], stream: false, options: { temperature: 0, num_ctx: 512 } }),
+      body: JSON.stringify({ model, messages: [{ role: 'user', content: 'Reply with exactly GEMMA_TEXT_OK' }], stream: false, options: { temperature: 0, num_ctx: 512, num_predict: 8 } }),
       signal: AbortSignal.timeout(120000),
     });
     const text = await r.text();
