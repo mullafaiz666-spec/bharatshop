@@ -82,6 +82,16 @@ async function auditDecision(agent:string, status:string, summary:string, eviden
   try{await recordAudit({agentName:agent,eventType:"CEO_DECISION",status,summary,evidence});}catch{}
 }
 
+function evidenceFallbackReply(live:any, trace:any[]){
+  const c=compactLive(live);
+  const productCount=Number(c.products?.total ?? c.products?.count ?? 0);
+  const storefrontOrderCount=Number(c.storefrontOrders?.total ?? c.storefrontOrders?.count ?? 0);
+  const internalOrderCount=Number(c.internalOrders?.total ?? c.internalOrders?.count ?? 0);
+  const approvalCount=Array.isArray(c.pendingApprovals)?c.pendingApprovals.length:0;
+  const completedTools=trace.filter(x=>x.result!==undefined&&x.status!=="AUDIT_FAILED").length;
+  return `Live evidence inspection completed with ${completedTools} audited tool execution(s). Current evidence reports ${productCount} product record(s), ${storefrontOrderCount} storefront order record(s), ${internalOrderCount} internal order record(s), and ${approvalCount} pending approval(s). The local Gemma wording step was unavailable, so this is a deterministic summary of the verified tool evidence; no action was executed.`;
+}
+
 export async function POST(req:Request){
   const started=Date.now();
   try{
@@ -112,10 +122,11 @@ export async function POST(req:Request){
       return NextResponse.json({reply,mode:"ai-agent-live",agent,toolExecutions:trace,provider:process.env.AI_PROVIDER||"local-openai-compatible",model:aiModels().text,approval:result},{status:ok?200:503});
     }
 
-    // The 270M free-tier model is reliable for text inference but not for
-    // function-call JSON. Tool routing is therefore deterministic and audited;
-    // Gemma reasons over the returned evidence instead of being asked to emit
-    // fragile tool-call syntax.
+    // The 270M free-tier model is reliable for small text inference but not for
+    // function-call JSON. Tool routing is deterministic and audited; Gemma then
+    // reasons over compact returned evidence. If the wording pass times out, the
+    // endpoint remains useful by returning a transparent deterministic summary
+    // of the already-verified tool result instead of incorrectly failing the CEO.
     let live:any=null;
     if(allowed(agent,"inspect_live_business_data")) live=await runTool("inspect_live_business_data",{},agent,trace);
     if(/pending approvals?|approval queue/i.test(question)&&allowed(agent,"list_pending_approvals")) await runTool("list_pending_approvals",{},agent,trace);
@@ -125,18 +136,19 @@ export async function POST(req:Request){
     const evidence={live:compactLive(live),tools:compactTrace(trace),context:{productId:context.productId,productName:context.productName}};
     const messages:any[]=[
       {role:"system",content:`${BASE_SYSTEM}\nROLE: ${agent}. ${AGENT_FOCUS[agent]||"Operate only within assigned responsibilities."}`},
-      ...incoming.map((m:any)=>({role:m?.role==="assistant"?"assistant":"user",content:String(m?.content||"").slice(0,500)})).filter((m:any)=>m.content),
-      {role:"user",content:`QUESTION: ${question.slice(0,700)}\nLIVE EVIDENCE: ${JSON.stringify(evidence).slice(0,3200)}\nAnswer using only this evidence.`},
+      ...incoming.map((m:any)=>({role:m?.role==="assistant"?"assistant":"user",content:String(m?.content||"").slice(0,350)})).filter((m:any)=>m.content),
+      {role:"user",content:`QUESTION: ${question.slice(0,500)}\nLIVE EVIDENCE: ${JSON.stringify(evidence).slice(0,2200)}\nAnswer using only this evidence.`},
     ];
     try{
-      const result=await runText(messages,{model:aiModels().text,temperature:0.1,maxTokens:256});
+      const result=await runText(messages,{model:aiModels().text,temperature:0.1,maxTokens:160});
       const reply=result.content.trim();
       if(!reply)throw new Error("AI provider returned an empty final response");
       await auditDecision(agent,"SUCCESS","CEO produced an evidence-grounded decision after deterministic audited tool routing.",{question,toolExecutions:trace,decision:reply,provider:process.env.AI_PROVIDER||"local-openai-compatible",model:aiModels().text,durationMs:Date.now()-started});
-      return NextResponse.json({reply,mode:"ai-agent-live",agent,toolExecutions:trace,provider:process.env.AI_PROVIDER||"local-openai-compatible",model:aiModels().text,orchestration:"deterministic-audited-tools+local-gemma"});
+      return NextResponse.json({reply,mode:"ai-agent-live",agent,toolExecutions:trace,provider:process.env.AI_PROVIDER||"local-openai-compatible",model:aiModels().text,orchestration:"deterministic-audited-tools+local-gemma",modelStatus:"completed"});
     }catch(e){
-      await auditDecision(agent,"FAILED","Local Gemma failed after audited evidence collection.",{question,toolExecutions:trace,error:e instanceof Error?e.message:String(e)});
-      return NextResponse.json({error:"AI CEO is unavailable because the local Gemma text provider did not return a successful response.",code:"CEO_AI_UNAVAILABLE",agent,toolExecutions:trace},{status:503});
+      const reply=evidenceFallbackReply(live,trace);
+      await auditDecision(agent,"SUCCESS","CEO returned verified-tool fallback because the local Gemma wording pass was unavailable.",{question,toolExecutions:trace,decision:reply,provider:process.env.AI_PROVIDER||"local-openai-compatible",model:aiModels().text,modelError:e instanceof Error?e.message:String(e),durationMs:Date.now()-started});
+      return NextResponse.json({reply,mode:"ai-agent-live",agent,toolExecutions:trace,provider:process.env.AI_PROVIDER||"local-openai-compatible",model:aiModels().text,orchestration:"deterministic-audited-tools+local-gemma",modelStatus:"fallback",modelError:e instanceof Error?e.message:String(e)});
     }
   }catch(error){return NextResponse.json({error:error instanceof Error?error.message:"Agent chat failed",code:"CEO_CHAT_FAILED"},{status:500});}
 }

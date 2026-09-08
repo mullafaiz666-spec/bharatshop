@@ -21,7 +21,10 @@ async function checkSearXNG(deep: boolean) {
       signal: AbortSignal.timeout(30_000),
       headers: { "User-Agent": "BharatShop-Health/1.0" },
     });
-    const serviceReady = service.ok || (service.status >= 300 && service.status < 400);
+    // A 429 proves our self-hosted SearXNG endpoint is reachable; it means its
+    // public upstream engines are throttling. Report that as degraded instead
+    // of incorrectly declaring the BharatShop application unavailable.
+    const serviceReady = service.ok || (service.status >= 300 && service.status < 400) || service.status === 429;
     if (!serviceReady) {
       return { configured: true, ready: false, exercised: true, serviceStatus: service.status, reason: "service_rejected" };
     }
@@ -33,6 +36,7 @@ async function checkSearXNG(deep: boolean) {
         ready: true,
         exercised: true,
         serviceStatus: service.status,
+        degraded: service.status === 429 || results.length === 0,
         upstreamSearch: { ready: results.length > 0, resultCount: results.length },
       };
     } catch (error) {
@@ -44,6 +48,8 @@ async function checkSearXNG(deep: boolean) {
         ready: true,
         exercised: true,
         serviceStatus: service.status,
+        degraded: true,
+        reason: service.status === 429 ? "service_reachable_upstream_throttled" : "upstream_search_unavailable",
         upstreamSearch: {
           ready: false,
           reason: "upstream_search_unavailable",
