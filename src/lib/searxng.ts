@@ -1,6 +1,6 @@
 // IMAGE SEARCH CLIENT — SearXNG is the sole image-search provider.
 // The media resolver performs the authoritative reachability/content-type gate
-// and Claude Vision verification before an image can be published.
+// and local Gemma vision verification before an image can be published.
 
 export interface SearXNGImageResult {
   url: string;
@@ -22,15 +22,18 @@ export class SearXNGRateLimitError extends Error {
 }
 
 const DEFAULT_TIMEOUT_MS = 15000;
-const MAX_429_RETRIES = 2;
-const RETRY_BASE_MS = 2500;
-const CACHE_TTL_MS = 10 * 60 * 1000;
-const FAILURE_TTL_MS = 30 * 1000;
+const MAX_429_RETRIES = 1;
+const RETRY_BASE_MS = 3000;
+const CACHE_TTL_MS = 15 * 60 * 1000;
+const FAILURE_TTL_MS = 60 * 1000;
 const MAX_CACHE_ENTRIES = 500;
 const MAX_CONCURRENT_SEARCHES = 1;
+const MIN_SEARCH_GAP_MS = Number(process.env.SEARXNG_MIN_SEARCH_GAP_MS || 2500);
 
 const searchCache = new Map<string, { expiresAt: number; results: SearXNGImageResult[]; error?: SearXNGRateLimitError }>();
 let activeSearches = 0;
+let lastSearchAt = 0;
+let globallyRateLimitedUntil = 0;
 const waiters: Array<() => void> = [];
 
 function getSearxngBaseUrl(): string | null {
@@ -39,10 +42,9 @@ function getSearxngBaseUrl(): string | null {
 }
 
 function configuredImageEngines(): string[] {
-  // Keep one upstream by default. A comma/semicolon-separated fallback list can
-  // be supplied in production, e.g. "bing images,startpage images". Engines are
-  // tried sequentially so a rate-limited upstream never causes parallel hammering.
-  return (process.env.SEARXNG_IMAGE_ENGINES || "bing images,startpage images")
+  // Use one upstream by default to avoid multiplying requests on free infrastructure.
+  // Operators can explicitly configure fallbacks, which are still attempted sequentially.
+  return (process.env.SEARXNG_IMAGE_ENGINES || "bing images")
     .split(/[,;]/)
     .map(x => x.trim())
     .filter(Boolean);
@@ -76,10 +78,10 @@ function imageCandidates(result: Record<string, unknown>): string[] {
 function retryDelayMs(attempt: number, retryAfter?: string | null): number {
   const seconds = Number.parseFloat(String(retryAfter || ""));
   const retryAfterDate = retryAfter && Number.isNaN(seconds) ? Date.parse(retryAfter) : NaN;
-  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1000, 30000);
-  if (Number.isFinite(retryAfterDate)) return Math.min(Math.max(0, retryAfterDate - Date.now()), 30000);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1000, 60000);
+  if (Number.isFinite(retryAfterDate)) return Math.min(Math.max(0, retryAfterDate - Date.now()), 60000);
   const exponential = RETRY_BASE_MS * 2 ** attempt;
-  return Math.min(exponential, 30000) * (0.75 + Math.random() * 0.5);
+  return Math.min(exponential, 60000) * (0.85 + Math.random() * 0.3);
 }
 
 function cacheKey(query: string, limit: number): string {
@@ -105,6 +107,12 @@ function releaseSlot() {
   waiters.shift()?.();
 }
 
+async function respectSearchGap() {
+  const waitMs = Math.max(0, lastSearchAt + MIN_SEARCH_GAP_MS - Date.now());
+  if (waitMs) await new Promise(resolve => setTimeout(resolve, waitMs));
+  lastSearchAt = Date.now();
+}
+
 async function searchEngine(
   base: string,
   query: string,
@@ -123,6 +131,7 @@ async function searchEngine(
   }).toString();
 
   for (let attempt = 0; attempt <= MAX_429_RETRIES; attempt += 1) {
+    await respectSearchGap();
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -136,7 +145,8 @@ async function searchEngine(
         cache: "no-store",
       });
       if (res.status === 429) {
-        const delay = retryDelayMs(attempt, res.headers.get("retry-after"));
+        const delay = Math.max(retryDelayMs(attempt, res.headers.get("retry-after")), FAILURE_TTL_MS);
+        globallyRateLimitedUntil = Math.max(globallyRateLimitedUntil, Date.now() + delay);
         if (attempt < MAX_429_RETRIES) {
           await new Promise(resolve => setTimeout(resolve, delay));
           continue;
@@ -183,6 +193,9 @@ export async function searxngImageSearch(
   const base = getSearxngBaseUrl();
   if (!base) throw new Error("SEARXNG_URL is not configured");
 
+  const globalWait = globallyRateLimitedUntil - Date.now();
+  if (globalWait > 0) throw new SearXNGRateLimitError(globalWait);
+
   const key = cacheKey(query, limit);
   const cached = searchCache.get(key);
   if (cached && cached.expiresAt > Date.now()) {
@@ -193,6 +206,9 @@ export async function searxngImageSearch(
 
   await acquireSlot();
   try {
+    const secondGlobalWait = globallyRateLimitedUntil - Date.now();
+    if (secondGlobalWait > 0) throw new SearXNGRateLimitError(secondGlobalWait);
+
     let lastRateLimit: SearXNGRateLimitError | undefined;
     for (const engine of configuredImageEngines()) {
       try {
@@ -204,10 +220,8 @@ export async function searxngImageSearch(
       } catch (error) {
         if (error instanceof SearXNGRateLimitError) {
           lastRateLimit = error;
-          continue;
+          break;
         }
-        // A failed upstream engine should not prevent a configured fallback
-        // engine from being attempted.
         continue;
       }
     }
@@ -216,7 +230,7 @@ export async function searxngImageSearch(
       throw lastRateLimit;
     }
     const empty: SearXNGImageResult[] = [];
-    putCache(key, { results: empty }, 30 * 1000);
+    putCache(key, { results: empty }, 60 * 1000);
     return empty;
   } finally {
     releaseSlot();
