@@ -27,6 +27,11 @@ function parseCompleteEvent(text: string): any[] {
     if (!line) continue;
     return JSON.parse(line.slice(5).trim());
   }
+  const errorBlock = blocks.find((block) => block.includes("event: error"));
+  if (errorBlock) {
+    const line = errorBlock.split(/\r?\n/).find((x) => x.startsWith("data:"));
+    throw new Error(`ZeroGPU generation error${line ? `: ${line.slice(5).trim().slice(0, 500)}` : ""}`);
+  }
   const lastData = text.split(/\r?\n/).reverse().find((x) => x.startsWith("data:"));
   if (lastData) return JSON.parse(lastData.slice(5).trim());
   throw new Error("ZeroGPU returned no complete image event");
@@ -99,6 +104,86 @@ async function submitGeneration(base: string, data: unknown[], timeoutMs: number
   throw new Error(`ZeroGPU submit failed (${failures.join(", ")})`);
 }
 
+function collectImageRefs(value: unknown): string[] {
+  const refs: string[] = [];
+  const seen = new Set<unknown>();
+  const add = (raw: unknown) => {
+    if (typeof raw !== "string") return;
+    const value = raw.trim();
+    if (!value) return;
+    if (/^data:image\/(?:png|jpeg|webp);base64,/i.test(value) || /^https?:\/\//i.test(value) || value.startsWith("/") || /^(?:gradio_api\/)?file=/i.test(value)) refs.push(value);
+  };
+  const walk = (node: unknown, depth = 0) => {
+    if (depth > 6 || node == null) return;
+    if (typeof node === "string") return add(node);
+    if (typeof node !== "object") return;
+    if (seen.has(node)) return;
+    seen.add(node);
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item, depth + 1);
+      return;
+    }
+    const obj = node as Record<string, unknown>;
+    for (const key of ["url", "path", "image", "value", "data", "file"]) if (key in obj) walk(obj[key], depth + 1);
+    for (const [key, item] of Object.entries(obj)) if (!["url", "path", "image", "value", "data", "file"].includes(key)) walk(item, depth + 1);
+  };
+  walk(value);
+  return [...new Set(refs)];
+}
+
+function candidateUrls(ref: string, base: string): string[] {
+  if (/^data:image\//i.test(ref)) return [ref];
+  if (/^https?:\/\//i.test(ref)) return [ref];
+  if (/^\/tmp\//i.test(ref) || /^\/var\/tmp\//i.test(ref)) return [`${base}/gradio_api/file=${encodeURIComponent(ref)}`];
+  if (ref.startsWith("/gradio_api/")) return [`${base}${ref}`];
+  if (ref.startsWith("/file=")) return [`${base}/gradio_api${ref}`, `${base}${ref}`];
+  if (/^gradio_api\/file=/i.test(ref)) return [`${base}/${ref}`];
+  if (/^file=/i.test(ref)) return [`${base}/gradio_api/${ref}`];
+  if (ref.startsWith("/")) return [`${base}${ref}`];
+  return [];
+}
+
+async function downloadImageFromOutputs(outputs: unknown, base: string): Promise<{ bytes: Buffer; mimeType: string; sourceUrl: string }> {
+  const refs = collectImageRefs(outputs);
+  const failures: string[] = [];
+  for (const ref of refs) {
+    if (/^data:image\/(?:png|jpeg|webp);base64,/i.test(ref)) {
+      const match = ref.match(/^data:(image\/(?:png|jpeg|webp));base64,(.+)$/i);
+      if (!match) continue;
+      const bytes = Buffer.from(match[2], "base64");
+      if (bytes.length >= 10_000 && bytes.length <= 8_000_000) return { bytes, mimeType: match[1].toLowerCase(), sourceUrl: "data:image" };
+      continue;
+    }
+    for (const url of candidateUrls(ref, base)) {
+      const timer = withTimeout(30_000);
+      try {
+        const image = await fetch(url, { headers: authHeaders(), signal: timer.signal, cache: "no-store" });
+        if (!image.ok) {
+          failures.push(`${url}=>${image.status}`);
+          continue;
+        }
+        const mimeType = String(image.headers.get("content-type") || "").split(";")[0].toLowerCase();
+        if (!/^image\/(?:png|jpeg|webp)$/i.test(mimeType)) {
+          failures.push(`${url}=>${mimeType || "no-content-type"}`);
+          continue;
+        }
+        const bytes = Buffer.from(await image.arrayBuffer());
+        if (bytes.length < 10_000 || bytes.length > 8_000_000) {
+          failures.push(`${url}=>${bytes.length}bytes`);
+          continue;
+        }
+        return { bytes, mimeType, sourceUrl: url };
+      } catch (error) {
+        failures.push(`${url}=>${error instanceof Error ? error.message : String(error)}`);
+      } finally {
+        timer.clear();
+      }
+    }
+  }
+  const sample = JSON.stringify(outputs).slice(0, 700);
+  throw new Error(`ZeroGPU returned no downloadable raster image; refs=${refs.length}; failures=${failures.slice(0, 5).join(", ")}; output=${sample}`);
+}
+
 export async function generateEditorialImage(prompt: string, options?: { width?: number; height?: number; timeoutMs?: number; seed?: number }): Promise<GeneratedEditorial> {
   const base = String(process.env.FASHION_ZERO_GPU_URL || DEFAULT_SPACE).replace(/\/$/, "");
   const width = Math.max(512, Math.min(1024, Number(options?.width || 768)));
@@ -121,27 +206,6 @@ export async function generateEditorialImage(prompt: string, options?: { width?:
   }
   if (!result.ok) throw new Error(`ZeroGPU result HTTP ${result.status}`);
   const outputs = parseCompleteEvent(await result.text());
-  const first = outputs?.[0];
-  const imageUrl = typeof first === "string" ? first : String(first?.url || first?.path || "");
-  const normalizedImageUrl = /^https:\/\//i.test(imageUrl)
-    ? imageUrl
-    : imageUrl.startsWith("/")
-      ? `${base}${imageUrl}`
-      : "";
-  if (!normalizedImageUrl) throw new Error("ZeroGPU returned no public image URL");
-
-  const imageTimer = withTimeout(30_000);
-  let image: Response;
-  try {
-    image = await fetch(normalizedImageUrl, { headers: authHeaders(), signal: imageTimer.signal, cache: "no-store" });
-  } finally {
-    imageTimer.clear();
-  }
-  if (!image.ok) throw new Error(`ZeroGPU image HTTP ${image.status}`);
-  const bytes = Buffer.from(await image.arrayBuffer());
-  if (bytes.length < 10_000) throw new Error(`ZeroGPU image too small (${bytes.length} bytes)`);
-  if (bytes.length > 8_000_000) throw new Error(`ZeroGPU image too large (${bytes.length} bytes)`);
-  const mimeType = String(image.headers.get("content-type") || "image/webp").split(";")[0];
-  if (!/^image\/(?:png|jpeg|webp)$/i.test(mimeType)) throw new Error(`ZeroGPU returned unsupported media type ${mimeType}`);
-  return { bytes, mimeType, provider: "hf-zerogpu-flux1-schnell", sourceUrl: normalizedImageUrl, prompt };
+  const image = await downloadImageFromOutputs(outputs, base);
+  return { bytes: image.bytes, mimeType: image.mimeType, provider: "hf-zerogpu-flux1-schnell", sourceUrl: image.sourceUrl, prompt };
 }
