@@ -5,20 +5,20 @@ import { aiModels, runText } from "@/lib/ai/provider";
 
 export const dynamic = "force-dynamic";
 
-const BASE_SYSTEM = `You are BharatShop AI CEO, a model-driven ecommerce operator. You decide what evidence or tool is needed, inspect the result, and then answer. Do not behave like a status template or rules bot. Use only supplied live evidence and tool observations. Never invent actions, sources, approvals, stock, images, orders, financial facts, or successful execution. Speak naturally like a senior operator. Distinguish total database records from customer-visible published products. Human approval is mandatory before spending, purchasing, external commitments, or any other gated consequential action.`;
+const BASE_SYSTEM = `You are BharatShop AI CEO. Use only supplied facts. Never invent stock, orders, prices, approvals, sources, actions, or successful execution. Think like an ecommerce operator. Spending, purchasing, external commitments, refunds, payouts, credentials, and destructive database work require human approval.`;
 
 const AGENT_FOCUS: Record<string, string> = {
-  "AI CEO": "Coordinate the whole business, diagnose root problems, choose tools, and decide the next safe action from live evidence.",
+  "AI CEO": "Coordinate the business and choose the next safe action.",
   "Product Research": "Find product opportunities from public evidence.",
-  "Source Verification": "Verify source identity, pricing, availability, and economics.",
-  "Image & Media": "Build exact-product media without weakening evidence gates.",
-  "Fashion Designer": "Create original men, women, and kids fashion mapped to Qikink made-to-order production.",
-  "Fashion Enrichment": "Enrich evidence-backed fashion variants and sizing.",
-  "Listing & Marketing": "Prepare truthful customer-facing listings and publication decisions.",
-  "Learning & Analytics": "Explain business performance, weak points, and lessons.",
-  "Advertising": "Prepare advertising decisions; spending remains human-gated.",
-  "Order Re-check": "Re-check order economics; supplier purchasing remains human-gated.",
-  "Fulfilment & Tracking": "Review fulfilment, Qikink production, and tracking without inventing shipment state.",
+  "Source Verification": "Verify sources, pricing, availability, and economics.",
+  "Image & Media": "Resolve exact-product media from evidence.",
+  "Fashion Designer": "Handle explicitly requested fashion design work.",
+  "Fashion Enrichment": "Enrich explicitly requested fashion variants.",
+  "Listing & Marketing": "Prepare truthful listings and publication decisions.",
+  "Learning & Analytics": "Explain performance and lessons.",
+  "Advertising": "Prepare advertising decisions; spending stays human-gated.",
+  "Order Re-check": "Re-check order economics; purchases stay human-gated.",
+  "Fulfilment & Tracking": "Review fulfilment and tracking without inventing shipment state.",
 };
 
 const AGENT_TOOLS: Record<string, string[]> = {
@@ -35,15 +35,15 @@ const AGENT_TOOLS: Record<string, string[]> = {
   "Fulfilment & Tracking": ["list_pending_approvals", "create_approval"],
 };
 
-const TOOL_HELP: Record<string, string> = {
-  research_web: "Search current public web evidence. args: {query}",
-  resolve_product_images: "Resolve exact product images for a selected product. args: {product_id?, product_name?}",
-  fashion_studio: "Run a Fashion Studio slash command for a selected product. args: {command, product_id?, product_name?, count?, extra_prompt?}",
-  design_fashion_collection: "Create original Qikink made-to-order fashion records. args: {count}",
-  list_fashion_commands: "List supported Fashion Studio commands. args: {}",
-  reject_product: "Reject/hold a product that failed verification. args: {product_id?, product_name?, reason}",
-  create_approval: "Create a human approval request only; it never executes the gated action. args: {title, action_type, payload?, reason, risk_level?}",
-  list_pending_approvals: "Read pending human approvals. args: {}",
+const TOOL_LABELS: Record<string, string> = {
+  research_web: "web research",
+  resolve_product_images: "product media",
+  fashion_studio: "explicit fashion command",
+  design_fashion_collection: "explicit fashion collection",
+  list_fashion_commands: "fashion command list",
+  reject_product: "hold/reject product",
+  create_approval: "request human approval",
+  list_pending_approvals: "read approval queue",
 };
 
 const allowed = (agent: string, tool: string) => (AGENT_TOOLS[agent] || AGENT_TOOLS["AI CEO"]).includes(tool);
@@ -93,14 +93,26 @@ function compactLive(live: any) {
     products: live?.products,
     internalOrders: live?.internalOrders,
     storefrontOrders: live?.storefrontOrders,
-    pendingApprovals: Array.isArray(live?.pendingApprovals) ? live.pendingApprovals.slice(0, 8).map((x: any) => ({ id: x.id, title: x.title, action_type: x.action_type, status: x.status, risk_level: x.risk_level })) : [],
-    recentActivity: Array.isArray(live?.recentActivity) ? live.recentActivity.slice(0, 8).map((x: any) => ({ agent: x.agent_name, action: x.action_type, status: x.status, message: String(x.message || "").slice(0, 180) })) : [],
-    inspectedAt: live?.inspectedAt,
+    pendingApprovals: Array.isArray(live?.pendingApprovals) ? live.pendingApprovals.slice(0, 3).map((x: any) => ({ id: x.id, title: x.title, action_type: x.action_type, status: x.status, risk_level: x.risk_level })) : [],
+    recentActivity: Array.isArray(live?.recentActivity) ? live.recentActivity.slice(0, 2).map((x: any) => ({ agent: x.agent_name, action: x.action_type, status: x.status })) : [],
   };
 }
 
 function compactTrace(trace: any[]) {
-  return trace.slice(-5).map((x) => ({ tool: x.tool, status: x.status, auditId: x.auditId, result: JSON.stringify(x.result ?? {}).slice(0, 1400) }));
+  return trace.slice(-2).map(x => ({ tool: x.tool, status: x.status, result: JSON.stringify(x.result ?? {}).slice(0, 420) }));
+}
+
+function evidenceDigest(evidence: any) {
+  const live = evidence?.live || {};
+  return {
+    products: live.products,
+    storefrontOrders: live.storefrontOrders,
+    internalOrders: live.internalOrders,
+    pendingApprovals: Array.isArray(live.pendingApprovals) ? live.pendingApprovals.length : 0,
+    recent: Array.isArray(live.recentActivity) ? live.recentActivity.slice(0, 2) : [],
+    observations: Array.isArray(evidence?.tools) ? evidence.tools.slice(-2) : [],
+    product: evidence?.context || {},
+  };
 }
 
 async function auditDecision(agent: string, status: string, summary: string, evidence: any) {
@@ -108,35 +120,35 @@ async function auditDecision(agent: string, status: string, summary: string, evi
 }
 
 function parsePlannerResponse(text: string): PlannerDecision {
-  const cleaned = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
-  let raw: any = null;
-  try { raw = JSON.parse(cleaned); } catch {
-    const start = cleaned.indexOf("{");
-    const end = cleaned.lastIndexOf("}");
-    if (start >= 0 && end > start) {
-      try { raw = JSON.parse(cleaned.slice(start, end + 1)); } catch {}
-    }
-  }
-  if (raw) return normalizePlannerDecision(raw);
-  if (cleaned.length >= 12 && !BOTLIKE.test(cleaned)) return { kind: "final", answer: cleaned };
+  const cleaned = text.trim().replace(/^```\w*\s*/i, "").replace(/\s*```$/i, "");
+  const toolMatch = cleaned.match(/^TOOL\s*:\s*([a-z0-9_/-]+)/i);
+  if (toolMatch) return { kind: "tool", tool: toolMatch[1].toLowerCase() };
+  const answerMatch = cleaned.match(/^ANSWER\s*:\s*([\s\S]+)/i);
+  if (answerMatch?.[1]?.trim()) return { kind: "final", answer: answerMatch[1].trim() };
+  if (cleaned.length >= 8 && !BOTLIKE.test(cleaned) && !cleaned.startsWith("{")) return { kind: "final", answer: cleaned };
   throw new Error("Gemma planner returned unusable output");
 }
 
-function normalizePlannerDecision(raw: any): PlannerDecision {
-  const kind = String(raw?.kind || "").toLowerCase();
-  if (kind === "final") return { kind: "final", answer: typeof raw?.answer === "string" ? raw.answer.trim() : undefined };
-  if (kind === "tool") return { kind: "tool", tool: String(raw?.tool || ""), args: raw?.args && typeof raw.args === "object" ? raw.args : {}, reason: typeof raw?.reason === "string" ? raw.reason : undefined };
-  throw new Error("Gemma planner returned an invalid decision kind");
+function parseApprovalIntent(question: string) {
+  const title = question.match(/titled exactly\s+["“]([^"”]+)["”]/i)?.[1];
+  const action = question.match(/\bfor\s+([A-Z][A-Z0-9_]+)\b/i)?.[1]?.toUpperCase();
+  const payloadText = question.match(/with payload\s+(\{[\s\S]*?\})(?:\.|$)/i)?.[1];
+  if (!title || !action) return null;
+  let payload: Record<string, unknown> = {};
+  if (payloadText) { try { payload = JSON.parse(payloadText); } catch {} }
+  const risk = /low[- ]risk/i.test(question) ? "LOW" : /critical/i.test(question) ? "CRITICAL" : /high[- ]risk/i.test(question) ? "HIGH" : "MEDIUM";
+  return { title, action_type: action, payload, reason: "AI CEO requested human authorization; this request does not execute the gated action.", risk_level: risk };
 }
 
 function normalizeToolArgs(tool: string, args: Record<string, unknown>, question: string, context: any) {
   const next: Record<string, unknown> = { ...args };
-  if (tool === "research_web" && !String(next.query || "").trim()) next.query = question.slice(0, 500);
+  if (tool === "research_web" && !String(next.query || "").trim()) next.query = question.slice(0, 360);
   if (["resolve_product_images", "fashion_studio", "reject_product"].includes(tool)) {
     if (!next.product_id && context.productId) next.product_id = context.productId;
     if (!next.product_name && context.productName) next.product_name = context.productName;
   }
   if (tool === "design_fashion_collection") next.count = Math.max(3, Math.min(24, Number(next.count || 12)));
+  if (tool === "create_approval") Object.assign(next, parseApprovalIntent(question) || {});
   return next;
 }
 
@@ -154,30 +166,44 @@ function validateToolArgs(tool: string, args: Record<string, unknown>) {
 
 async function planWithGemma(question: string, incoming: any[], agent: string, evidence: any): Promise<PlannerDecision> {
   const toolNames = AGENT_TOOLS[agent] || AGENT_TOOLS["AI CEO"];
-  const toolText = toolNames.map((name) => `- ${name}: ${TOOL_HELP[name]}`).join("\n");
-  const recent = incoming.slice(-6).map((m: any) => `${m?.role === "assistant" ? "assistant" : "user"}: ${String(m?.content || "").slice(0, 260)}`).join("\n");
-  const system = `${BASE_SYSTEM}\nROLE: ${agent}. ${AGENT_FOCUS[agent] || "Operate only within assigned responsibilities."}\nYou are the decision engine, not a formatter. Decide whether to use ONE permitted tool or answer now. Never claim a tool ran unless it is present in observations. Output ONLY one JSON object in exactly one of these forms:\n{"kind":"tool","tool":"tool_name","args":{},"reason":"short reason"}\n{"kind":"final","answer":"natural answer grounded in evidence"}\nPermitted tools:\n${toolText}`;
-  const user = `QUESTION: ${question.slice(0, 700)}\nRECENT CONVERSATION:\n${recent || "(none)"}\nLIVE EVIDENCE AND OBSERVATIONS:\n${JSON.stringify(evidence).slice(0, 4200)}\nChoose the next step.`;
-  const result = await runText([{ role: "system", content: system }, { role: "user", content: user }], { model: aiModels().text, temperature: 0.1, maxTokens: 240, timeoutMs: 20_000 });
+  const tools = toolNames.map(name => `${name}=${TOOL_LABELS[name]}`).join(", ");
+  const recent = incoming.slice(-2).map((m: any) => `${m?.role === "assistant" ? "A" : "U"}:${String(m?.content || "").slice(0, 120)}`).join(" | ");
+  const facts = JSON.stringify(evidenceDigest(evidence)).slice(0, 1500);
+  const system = `${BASE_SYSTEM}\nRole: ${agent}. ${AGENT_FOCUS[agent] || "Operate within the assigned role."}\nChoose ONE next step. Reply exactly either TOOL:<tool_name> or ANSWER:<max 28 words>. If the user asks for a gated action, choose create_approval. Tools: ${tools}`;
+  const user = `Q:${question.slice(0, 320)}\nFacts:${facts}${recent ? `\nRecent:${recent}` : ""}`;
+  const result = await runText([{ role: "system", content: system }, { role: "user", content: user }], { model: aiModels().text, temperature: 0.1, maxTokens: 36, timeoutMs: 20_000 });
   return parsePlannerResponse(result.content);
 }
 
-async function finalWithGemma(question: string, incoming: any[], agent: string, evidence: any) {
-  const recent = incoming.slice(-6).map((m: any) => ({ role: m?.role === "assistant" ? "assistant" as const : "user" as const, content: String(m?.content || "").slice(0, 320) }));
+async function finalWithGemma(question: string, agent: string, evidence: any) {
+  const facts = JSON.stringify(evidenceDigest(evidence)).slice(0, 1700);
   const result = await runText([
-    { role: "system", content: `${BASE_SYSTEM}\nROLE: ${agent}. ${AGENT_FOCUS[agent] || "Operate only within assigned responsibilities."}\nAnswer the user directly from the evidence. Do not mention planner internals, JSON, telemetry, or hidden tool mechanics.` },
-    ...recent,
-    { role: "user", content: `QUESTION: ${question.slice(0, 700)}\nEVIDENCE: ${JSON.stringify(evidence).slice(0, 4800)}` },
-  ], { model: aiModels().text, temperature: 0.2, maxTokens: 280, timeoutMs: 22_000 });
-  const reply = result.content.trim();
+    { role: "system", content: `${BASE_SYSTEM}\nRole: ${agent}. Answer directly in at most 32 words. Do not mention JSON, telemetry, hidden tools, or system internals.` },
+    { role: "user", content: `Q:${question.slice(0, 320)}\nFacts:${facts}` },
+  ], { model: aiModels().text, temperature: 0.2, maxTokens: 40, timeoutMs: 20_000 });
+  const reply = result.content.trim().replace(/^ANSWER\s*:\s*/i, "");
   if (!reply || BOTLIKE.test(reply)) throw new Error("Gemma returned an empty or system-like final answer");
   return reply;
+}
+
+function actionReceipt(tool: string, result: any) {
+  if (tool === "create_approval") {
+    const id = result?.id ?? result?.approval?.id ?? result?.approvalId;
+    const title = result?.title ?? result?.approval?.title;
+    return `I created the human approval request${title ? ` “${title}”` : ""}${id ? ` (#${id})` : ""}. Nothing gated was executed.`;
+  }
+  if (tool === "list_pending_approvals") {
+    const approvals = Array.isArray(result) ? result : Array.isArray(result?.approvals) ? result.approvals : [];
+    return `There ${approvals.length === 1 ? "is" : "are"} ${approvals.length} pending human approval${approvals.length === 1 ? "" : "s"}.`;
+  }
+  if (tool === "list_fashion_commands") return `I checked the available explicit fashion commands. ${Array.isArray(result) ? result.length : 0} command(s) are available.`;
+  return "The model-selected action completed and its result is recorded in the CEO audit trail.";
 }
 
 function unavailableReply(error: unknown) {
   const detail = error instanceof Error ? error.message : String(error);
   return {
-    reply: "The local Gemma CEO is not responding right now, so I am not going to fake an AI answer with a canned system response. The live business tools remain intact; retry once the model runtime is ready.",
+    reply: "The local Gemma CEO is not responding right now, so I will not substitute a canned system answer.",
     modelStatus: "unavailable",
     modelError: detail.slice(0, 500),
   };
@@ -187,7 +213,7 @@ export async function POST(req: Request) {
   const started = Date.now();
   try {
     const body = await req.json();
-    const incoming = Array.isArray(body.messages) ? body.messages.slice(-8) : [];
+    const incoming = Array.isArray(body.messages) ? body.messages.slice(-6) : [];
     const question = String(body.question || incoming.at(-1)?.content || "").trim();
     if (!question) return NextResponse.json({ error: "Question required" }, { status: 400 });
 
@@ -207,50 +233,32 @@ export async function POST(req: Request) {
 
     const live = await runTool("inspect_live_business_data", {}, agent, trace, origin);
     let evidence = { live: compactLive(live), tools: compactTrace(trace), context: { productId: context.productId, productName: context.productName } };
-    let lastTool = "";
 
     try {
-      for (let turn = 0; turn < 2; turn += 1) {
-        const decision = await planWithGemma(question, incoming, agent, evidence);
-        if (decision.kind === "final") {
-          let reply = String(decision.answer || "").trim();
-          if (!reply || BOTLIKE.test(reply)) reply = await finalWithGemma(question, incoming, agent, evidence);
-          await auditDecision(agent, "SUCCESS", "Model-driven CEO produced an evidence-grounded decision.", { question, toolExecutions: trace, decision: reply, provider: process.env.AI_PROVIDER || "local-openai-compatible", model: aiModels().text, durationMs: Date.now() - started });
-          return NextResponse.json({ reply, mode: "ai-agent-live", agent, toolExecutions: trace, provider: process.env.AI_PROVIDER || "local-openai-compatible", model: aiModels().text, orchestration: "gemma-plan-act-observe", modelStatus: "completed" });
-        }
-
-        if (!decision.tool || !allowed(agent, decision.tool)) {
-          trace.push({ auditId: null, tool: decision.tool || "(missing)", input: decision.args || {}, result: { error: "Model selected a tool outside the agent permission set" }, status: "MODEL_TOOL_REJECTED" });
-          evidence = { live: compactLive(live), tools: compactTrace(trace), context: evidence.context };
-          continue;
-        }
-
-        if (decision.tool === lastTool && decision.tool !== "research_web") {
-          trace.push({ auditId: null, tool: decision.tool, input: decision.args || {}, result: { error: "Repeated identical tool selection was blocked to prevent loops" }, status: "MODEL_LOOP_BLOCKED" });
-          evidence = { live: compactLive(live), tools: compactTrace(trace), context: evidence.context };
-          break;
-        }
-
-        const args = normalizeToolArgs(decision.tool, decision.args || {}, question, context);
-        const invalid = validateToolArgs(decision.tool, args);
-        if (invalid) {
-          trace.push({ auditId: null, tool: decision.tool, input: args, result: { error: invalid }, status: "MODEL_ARGS_REJECTED" });
-          evidence = { live: compactLive(live), tools: compactTrace(trace), context: evidence.context };
-          continue;
-        }
-
-        await runTool(decision.tool, args, agent, trace, origin);
-        lastTool = decision.tool;
-        evidence = { live: compactLive(live), tools: compactTrace(trace), context: evidence.context };
+      const decision = await planWithGemma(question, incoming, agent, evidence);
+      if (decision.kind === "final") {
+        const reply = String(decision.answer || "").trim();
+        if (!reply || BOTLIKE.test(reply)) throw new Error("Gemma returned an unusable CEO answer");
+        await auditDecision(agent, "SUCCESS", "Compact Gemma CEO produced an evidence-grounded answer.", { question, toolExecutions: trace, provider: process.env.AI_PROVIDER || "local-openai-compatible", model: aiModels().text, durationMs: Date.now() - started });
+        return NextResponse.json({ reply, mode: "ai-agent-live", agent, toolExecutions: trace, provider: process.env.AI_PROVIDER || "local-openai-compatible", model: aiModels().text, orchestration: "gemma-compact-plan-act", modelStatus: "live" });
       }
 
-      const reply = await finalWithGemma(question, incoming, agent, evidence);
-      await auditDecision(agent, "SUCCESS", "Model-driven CEO completed its plan-act-observe cycle.", { question, toolExecutions: trace, decision: reply, provider: process.env.AI_PROVIDER || "local-openai-compatible", model: aiModels().text, durationMs: Date.now() - started });
-      return NextResponse.json({ reply, mode: "ai-agent-live", agent, toolExecutions: trace, provider: process.env.AI_PROVIDER || "local-openai-compatible", model: aiModels().text, orchestration: "gemma-plan-act-observe", modelStatus: "completed" });
+      if (!decision.tool || !allowed(agent, decision.tool)) throw new Error("Gemma selected a tool outside the agent permission set");
+      const args = normalizeToolArgs(decision.tool, decision.args || {}, question, context);
+      const invalid = validateToolArgs(decision.tool, args);
+      if (invalid) throw new Error(invalid);
+
+      const result = await runTool(decision.tool, args, agent, trace, origin);
+      evidence = { live: compactLive(live), tools: compactTrace(trace), context: evidence.context };
+
+      const needsSynthesis = ["research_web", "resolve_product_images", "reject_product", "fashion_studio", "design_fashion_collection"].includes(decision.tool);
+      const reply = needsSynthesis ? await finalWithGemma(question, agent, evidence) : actionReceipt(decision.tool, result);
+      await auditDecision(agent, "SUCCESS", "Compact Gemma CEO selected and completed a permitted action.", { question, selectedTool: decision.tool, toolExecutions: trace, provider: process.env.AI_PROVIDER || "local-openai-compatible", model: aiModels().text, durationMs: Date.now() - started });
+      return NextResponse.json({ reply, mode: "ai-agent-live", agent, toolExecutions: trace, provider: process.env.AI_PROVIDER || "local-openai-compatible", model: aiModels().text, orchestration: "gemma-compact-plan-act", modelStatus: "live" });
     } catch (modelError) {
       const unavailable = unavailableReply(modelError);
       await auditDecision(agent, "FAILED", "Local Gemma CEO was unavailable; no canned CEO answer was substituted.", { question, toolExecutions: trace, modelError: unavailable.modelError, durationMs: Date.now() - started });
-      return NextResponse.json({ ...unavailable, mode: "ai-agent-unavailable", agent, toolExecutions: trace, provider: process.env.AI_PROVIDER || "local-openai-compatible", model: aiModels().text, orchestration: "gemma-plan-act-observe" }, { status: 503 });
+      return NextResponse.json({ ...unavailable, mode: "ai-agent-unavailable", agent, toolExecutions: trace, provider: process.env.AI_PROVIDER || "local-openai-compatible", model: aiModels().text, orchestration: "gemma-compact-plan-act" }, { status: 503 });
     }
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Agent chat failed", code: "CEO_CHAT_FAILED" }, { status: 500 });
