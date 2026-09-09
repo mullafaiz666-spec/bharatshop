@@ -11,6 +11,7 @@ on:
       - 'src/app/api/automation/fashion-photo-studio/**'
       - 'src/app/api/fashion-photo/**'
       - 'src/app/api/storefront/products/route.ts'
+      - 'android-app/**'
       - '.github/workflows/bharatdrip-photo-studio.yml'
 
 concurrency:
