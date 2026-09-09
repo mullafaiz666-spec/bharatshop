@@ -17,6 +17,21 @@ test("production acceptance no longer bootstraps the removed fashion system", ()
   assert.match(workflow, /production-acceptance-v4\.mjs/);
 });
 
+test("production acceptance prep does not run the heavy CEO merchandising cycle", () => {
+  const workflow = read(".github/workflows/production-acceptance.yml");
+  assert.match(workflow, /api\/automation\/order-gate-status/);
+  assert.doesNotMatch(workflow, /api\/automation\/ceo-cycle/);
+  assert.doesNotMatch(workflow, /\/tmp\/ceo1\.json|\/tmp\/ceo2\.json/);
+});
+
+test("lightweight order gate status uses genuine-client classification", () => {
+  const src = read("src/app/api/automation/order-gate-status/route.ts");
+  assert.match(src, /function isRealClientOrder/);
+  assert.match(src, /\^BS-WEB-/);
+  assert.match(src, /humanInteractionGate:realOrders\.length>0/);
+  assert.match(src, /No human order gate before a genuine BS-WEB\/Shopify customer order/);
+});
+
 test("production acceptance verifies current storefront media and real Gemma inference", () => {
   const src = read("scripts/production-acceptance-v4.mjs");
   assert.match(src, /GATE 6 Storefront media live/);
@@ -31,10 +46,12 @@ test("pre-client production acceptance has zero manual approval gates", () => {
   const src = read("scripts/production-acceptance-v4.mjs");
   assert.match(src, /GATE 15 Client order classifier/);
   assert.match(src, /GATE 16 Human gate timing/);
+  assert.match(src, /api\/automation\/order-gate-status/);
   assert.match(src, /GATE 17 No synthetic approvals/);
   assert.match(src, /GATE 18 Consequential order protection/);
   assert.match(src, /0 manual gate\(s\)/);
   assert.match(src, /\^BS-WEB-/);
+  assert.doesNotMatch(src, /preparedCeoCycle/);
   assert.doesNotMatch(src, /APPROVAL_TOKEN/);
   assert.doesNotMatch(src, /Create a low-risk human approval request/);
   assert.doesNotMatch(src, /"MANUAL"/);

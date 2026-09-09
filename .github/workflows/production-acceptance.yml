@@ -17,7 +17,6 @@ jobs:
       BASE_URL: https://bharatshop-9w4a.onrender.com
       BHARATSHOP_URL: https://bharatshop-9w4a.onrender.com
       BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
-      # BHARATSHOP_OPERATOR_APPROVAL_TOKEN is intentionally not supplied.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -43,9 +42,8 @@ jobs:
           test -n "$BHARATSHOP_AUTOMATION_TOKEN"
           AUTH=(-H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" -H "x-automation-token: $BHARATSHOP_AUTOMATION_TOKEN" -H "Content-Type: application/json")
           curl --silent --show-error --fail-with-body --max-time 300 -X POST "$BHARATSHOP_URL/api/automation/deodap-bootstrap" "${AUTH[@]}" --data '{"limit":30,"maxPages":16}' | tee /tmp/deodap.json
-          curl --silent --show-error --fail-with-body --max-time 300 -X POST "$BHARATSHOP_URL/api/automation/ceo-cycle?skipResearch=1" "${AUTH[@]}" --data '{}' | tee /tmp/ceo1.json
-          curl --silent --show-error --fail-with-body --max-time 300 -X POST "$BHARATSHOP_URL/api/automation/ceo-cycle?skipResearch=1" "${AUTH[@]}" --data '{}' | tee /tmp/ceo2.json
-          curl --silent --show-error --fail-with-body --max-time 300 -X POST "$BHARATSHOP_URL/api/automation/ceo-delegation" "${AUTH[@]}" --data '{}' | tee /tmp/ceo-delegation.json
+          curl --silent --show-error --fail-with-body --max-time 45 -X POST "$BHARATSHOP_URL/api/automation/order-gate-status" "${AUTH[@]}" --data '{}' | tee /tmp/order-gate.json
+          curl --silent --show-error --fail-with-body --max-time 60 -X POST "$BHARATSHOP_URL/api/automation/ceo-delegation" "${AUTH[@]}" --data '{}' | tee /tmp/ceo-delegation.json
 
       - name: Run strict live production acceptance
         run: node scripts/production-acceptance-v4.mjs
