@@ -98,7 +98,12 @@ async function auditDecision(agent: string, status: string, summary: string, evi
 }
 
 const TOOL_ALIASES: Record<string, string> = {
+  p: "create_approval",
   approval: "create_approval",
+  create: "create_approval",
+  createapproval: "create_approval",
+  requestapproval: "create_approval",
+  approvalrequest: "create_approval",
   approvals: "list_pending_approvals",
   web: "research_web",
   research: "research_web",
@@ -106,16 +111,32 @@ const TOOL_ALIASES: Record<string, string> = {
   media: "resolve_product_images",
 };
 
+function normalizeModelTool(value: unknown) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) return "";
+  const exact = raw.replace(/^tool\s*:\s*/i, "");
+  if (Object.values(AGENT_TOOLS).some(xs => xs.includes(exact))) return exact;
+  const compact = exact.replace(/[^a-z0-9]/g, "");
+  return TOOL_ALIASES[compact] || TOOL_ALIASES[exact] || exact.replace(/[\s-]+/g, "_");
+}
+
 function parsePlannerResponse(text: string): PlannerDecision {
   const cleaned = text.trim().replace(/^```\w*\s*/i, "").replace(/\s*```$/i, "");
-  const toolMatch = cleaned.match(/^TOOL\s*:\s*([a-z0-9_/-]+)/i);
-  if (toolMatch) {
-    const raw = toolMatch[1].toLowerCase();
-    return { kind: "tool", tool: TOOL_ALIASES[raw] || raw };
-  }
-  const bareTool = cleaned.toLowerCase().replace(/[^a-z0-9_/-]/g, "");
-  if (TOOL_ALIASES[bareTool]) return { kind: "tool", tool: TOOL_ALIASES[bareTool] };
-  if (Object.values(AGENT_TOOLS).some(xs => xs.includes(bareTool))) return { kind: "tool", tool: bareTool };
+
+  try {
+    const raw = JSON.parse(cleaned);
+    const jsonTool = raw?.tool ?? raw?.name ?? raw?.action ?? raw?.next_tool ?? raw?.choice;
+    if (jsonTool) return { kind: "tool", tool: normalizeModelTool(jsonTool) };
+    const jsonAnswer = raw?.answer ?? raw?.reply ?? raw?.response;
+    if (typeof jsonAnswer === "string" && jsonAnswer.trim()) return { kind: "final", answer: jsonAnswer.trim() };
+  } catch {}
+
+  const toolMatch = cleaned.match(/^TOOL\s*:\s*([^\n]+)/i);
+  if (toolMatch) return { kind: "tool", tool: normalizeModelTool(toolMatch[1]) };
+
+  const bare = normalizeModelTool(cleaned);
+  if (TOOL_ALIASES[cleaned.toLowerCase()] || Object.values(AGENT_TOOLS).some(xs => xs.includes(bare))) return { kind: "tool", tool: bare };
+
   const answerMatch = cleaned.match(/^ANSWER\s*:\s*([\s\S]+)/i);
   if (answerMatch?.[1]?.trim()) return { kind: "final", answer: answerMatch[1].trim() };
   if (cleaned.length >= 5 && !BOTLIKE.test(cleaned) && !cleaned.startsWith("{")) return { kind: "final", answer: cleaned };
