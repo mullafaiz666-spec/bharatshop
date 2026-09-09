@@ -58,19 +58,6 @@ jobs:
             -H "Authorization: Bearer $TOKEN" -H "x-automation-token: $TOKEN" -H "Content-Type: application/json" \
             --data '{"limit":30,"maxPages":16}' | tee deodap-bootstrap.json
 
-      - name: Reprice or block uncompetitive supplier products
-        continue-on-error: true
-        env:
-          TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
-        run: |
-          set -euo pipefail
-          for round in 1 2; do
-            curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 \
-              -X POST "$BHARATSHOP_URL/api/automation/market-reprice" \
-              -H "Authorization: Bearer $TOKEN" -H "x-automation-token: $TOKEN" -H "Content-Type: application/json" \
-              --data '{"limit":6}' | tee "market-reprice-$round.json"
-          done
-
       - name: Create or refresh market-priced BharatShop and BharatDrip fashion
         env:
           TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
@@ -104,8 +91,21 @@ jobs:
             --data '{"limit":2}' | tee fashion-photo-studio.json
           node - <<'NODE'
           const d=require('./fashion-photo-studio.json');
-          console.log(JSON.stringify({provider:d.provider,generated:d.generated,deferred:(d.results||[]).filter(x=>x.status!=='GENERATED').length},null,2));
+          console.log(JSON.stringify({provider:d.provider,generated:d.generated,cachedRewired:d.cachedRewired||0,deferred:(d.results||[]).filter(x=>x.status==='DEFERRED_FREE_GPU').length},null,2));
           NODE
+
+      - name: Reprice or block uncompetitive supplier products
+        continue-on-error: true
+        env:
+          TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
+        run: |
+          set -euo pipefail
+          for round in 1 2; do
+            curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 \
+              -X POST "$BHARATSHOP_URL/api/automation/market-reprice" \
+              -H "Authorization: Bearer $TOKEN" -H "x-automation-token: $TOKEN" -H "Content-Type: application/json" \
+              --data '{"limit":6}' | tee "market-reprice-$round.json"
+          done
 
       - name: Publish queued products through CEO round 1
         env:
