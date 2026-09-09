@@ -50,7 +50,7 @@ export default function CEOChat() {
     try {
       const r = await fetch("/api/ceo-chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: q, messages: next, context }) });
       const d = await r.json();
-      if (d.modelStatus === "completed") setRuntime({ status:"ready", model:String(d.model || "Local Gemma") });
+      if (d.modelStatus === "live" || d.modelStatus === "completed") setRuntime({ status:"ready", model:String(d.model || "Local Gemma") });
       else if (d.modelStatus === "unavailable" || d.mode === "ai-agent-unavailable") setRuntime({ status:"unavailable", model:String(d.model || "Local Gemma") });
       setMessages(v => [...v, { role: "assistant", content: d.reply || d.error || "Local Gemma CEO is unavailable." }]);
       void refreshApprovals();
