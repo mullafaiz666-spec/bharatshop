@@ -39,3 +39,11 @@ test("Meta Pixel and Conversions API use shared event ids and do not let analyti
   assert.match(cashfree, /cashfreeCredentials/);
   assert.match(cashfree, /sendMetaConversion/);
 });
+
+test("Meta Marketing API connector requires approval and creates paused campaigns only", () => {
+  const src = read("src/app/api/marketing/meta/campaigns/route.ts");
+  assert.match(src, /approved===true/);
+  assert.match(src, /status:"PAUSED"/);
+  assert.match(src, /spendEnabled:false/);
+  assert.doesNotMatch(src, /status:"ACTIVE"/);
+});
