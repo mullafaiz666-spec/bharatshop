@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db, pool } from "@/db";
 import { aiActivityLogs, productDetails, productImages, products, storefrontOrders } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
+import { POST as runListingRoute } from "@/app/api/agents/listing/route";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -53,6 +54,13 @@ async function audit(agent: string, event: string, status: string, summary: stri
   );
 }
 
+async function parseResponse(response: Response) {
+  const raw = await response.text();
+  let data: any;
+  try { data = JSON.parse(raw); } catch { data = { raw: raw.slice(0, 2000) }; }
+  return { ok: response.ok, status: response.status, data };
+}
+
 async function callAgent(origin: string, path: string, body: unknown) {
   const token = automationToken();
   const response = await fetch(`${origin}${path}`, {
@@ -63,10 +71,21 @@ async function callAgent(origin: string, path: string, body: unknown) {
     },
     body: JSON.stringify(body), cache: "no-store",
   });
-  const raw = await response.text();
-  let data: any;
-  try { data = JSON.parse(raw); } catch { data = { raw: raw.slice(0, 2000) }; }
-  return { ok: response.ok, status: response.status, data };
+  return parseResponse(response);
+}
+
+async function callListingInProcess(origin: string, body: unknown) {
+  const token = automationToken();
+  const request = new Request(`${origin}/api/agents/listing`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}`, "x-automation-token": token } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+  const response = await runListingRoute(request);
+  return parseResponse(response);
 }
 
 async function researchDue() {
@@ -148,8 +167,6 @@ async function runCycle(req: Request) {
       await db.update(products).set({ status: "CEO_APPROVED", updatedAt: new Date() }).where(eq(products.id, product.id));
       approved.push({ productId: product.id, auditId: approval.id, marginPct: Number(margin.toFixed(2)), imageCount: verifiedImages.length });
     } else {
-      // Return repairable candidates to staging so source/media/enrichment workers
-      // can add missing evidence instead of dead-ending them permanently.
       await db.update(products).set({ status: "STAGED", updatedAt: new Date() }).where(eq(products.id, product.id));
       blocked.push({ productId: product.id, auditId: approval.id, imageCount: verifiedImages.length, hasSpecs, sourceVerified });
     }
@@ -160,7 +177,7 @@ async function runCycle(req: Request) {
 
   for (const item of approved) {
     try {
-      const listing = await callAgent(origin, "/api/agents/listing", { productId: item.productId, ceoApproved: true });
+      const listing = await callListingInProcess(origin, { productId: item.productId, ceoApproved: true });
       results.listings.push({ productId: item.productId, ...listing });
       if (!listing.ok || listing.data?.error) await db.update(products).set({ status: "CEO_APPROVED", updatedAt: new Date() }).where(eq(products.id, item.productId));
       await audit("Listing-Creative-Agent", "CEO_APPROVED_LISTING", listing.ok ? "SUCCESS" : "FAILED", `Listing execution for CEO-approved product ${item.productId}.`, listing.data);
