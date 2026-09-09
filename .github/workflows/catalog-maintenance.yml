@@ -9,10 +9,13 @@ on:
     paths:
       - 'src/app/api/automation/deodap-bootstrap/route.ts'
       - 'src/app/api/automation/market-reprice/**'
+      - 'src/app/api/automation/fashion-photo-studio/**'
       - 'src/app/api/automation/ceo-cycle/route.ts'
       - 'src/app/api/agents/listing/route.ts'
       - 'src/app/api/fashion-designer/**'
       - 'src/app/api/fashion-art/**'
+      - 'src/app/api/fashion-photo/**'
+      - 'src/lib/fashion/**'
       - 'src/app/api/storefront/products/route.ts'
       - 'src/lib/catalog/market-pricing.ts'
       - 'src/lib/suppliers/qikink-rate-card.ts'
@@ -68,7 +71,7 @@ jobs:
               --data '{"limit":6}' | tee "market-reprice-$round.json"
           done
 
-      - name: Create or refresh market-priced BharatShop fashion
+      - name: Create or refresh market-priced BharatShop and BharatDrip fashion
         env:
           TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
         run: |
@@ -80,9 +83,28 @@ jobs:
           node - <<'NODE'
           const d=require('./fashion-designer.json');
           if(!d.success || Number(d.generated)<8) throw new Error(`Fashion generation insufficient: ${JSON.stringify(d)}`);
-          const bad=(d.results||[]).filter(x=>x.sellingPriceInr>599||x.marginPct<18);
-          if(bad.length) throw new Error(`Fashion market pricing regression: ${JSON.stringify(bad)}`);
-          console.log(JSON.stringify({fashionGenerated:d.generated,pricingPolicy:d.pricingPolicy,maxPrice:Math.max(...d.results.map(x=>Number(x.sellingPriceInr||0)))},null,2));
+          const value=(d.results||[]).filter(x=>x.line==='VALUE');
+          const designer=(d.results||[]).filter(x=>x.line==='DESIGNER');
+          const badValue=value.filter(x=>Number(x.sellingPriceInr)>599||Number(x.marginPct)<18);
+          const badDesigner=designer.filter(x=>Number(x.sellingPriceInr)<599||Number(x.sellingPriceInr)>999||Number(x.marginPct)<18);
+          if(badValue.length||badDesigner.length) throw new Error(`Fashion lane pricing regression: ${JSON.stringify({badValue,badDesigner})}`);
+          if(designer.length<4) throw new Error(`BharatDrip designer lane missing: ${designer.length}`);
+          console.log(JSON.stringify({fashionGenerated:d.generated,value:value.length,bharatDrip:designer.length,pricingPolicy:d.pricingPolicy},null,2));
+          NODE
+
+      - name: Generate photoreal BharatDrip model shots on free GPU
+        continue-on-error: true
+        env:
+          TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
+        run: |
+          set -euo pipefail
+          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 \
+            -X POST "$BHARATSHOP_URL/api/automation/fashion-photo-studio" \
+            -H "Authorization: Bearer $TOKEN" -H "x-automation-token: $TOKEN" -H "Content-Type: application/json" \
+            --data '{"limit":2}' | tee fashion-photo-studio.json
+          node - <<'NODE'
+          const d=require('./fashion-photo-studio.json');
+          console.log(JSON.stringify({provider:d.provider,generated:d.generated,deferred:(d.results||[]).filter(x=>x.status!=='GENERATED').length},null,2));
           NODE
 
       - name: Publish queued products through CEO round 1
@@ -111,13 +133,16 @@ jobs:
           const d=require('./storefront.json');
           if(!Array.isArray(d.products)) throw new Error('Storefront products contract is invalid');
           const unsafe=d.products.filter(p=>!Array.isArray(p.imageUrls)||p.imageUrls.length<4||p.imageUrls.some(u=>!/^https:\/\//i.test(String(u||'')))||Number(p.sellingPriceInr)<=0||(!p.madeToOrder&&Number(p.stockCount)<=0));
-          const fashion=d.products.filter(p=>p.madeToOrder&&p.brand==='BharatShop Studio');
-          const overpricedFashion=fashion.filter(p=>Number(p.sellingPriceInr)>599);
+          const fashion=d.products.filter(p=>p.madeToOrder&&['BharatShop Studio','BharatDrip'].includes(p.brand));
+          const designer=fashion.filter(p=>p.brand==='BharatDrip');
+          const badValue=fashion.filter(p=>p.brand==='BharatShop Studio'&&Number(p.sellingPriceInr)>599);
+          const badDesigner=designer.filter(p=>Number(p.sellingPriceInr)<599||Number(p.sellingPriceInr)>999);
           if(d.products.length<12) throw new Error(`Storefront still too small: ${d.products.length} published`);
           if(fashion.length<8) throw new Error(`BharatShop fashion is not operational: ${fashion.length} live`);
-          if(overpricedFashion.length) throw new Error(`Fashion above market cap: ${JSON.stringify(overpricedFashion.map(p=>({id:p.id,price:p.sellingPriceInr})))}`);
+          if(designer.length<4) throw new Error(`BharatDrip designer line is not live: ${designer.length}`);
+          if(badValue.length||badDesigner.length) throw new Error(`Fashion pricing lanes invalid: ${JSON.stringify({badValue,badDesigner})}`);
           if(unsafe.length) throw new Error(`Published storefront contains ${unsafe.length} unsafe product(s)`);
-          console.log(JSON.stringify({published:d.products.length,bharatShopFashion:fashion.length,overpricedFashion:overpricedFashion.length,unsafe:unsafe.length},null,2));
+          console.log(JSON.stringify({published:d.products.length,fashion:fashion.length,bharatDrip:designer.length,unsafe:unsafe.length},null,2));
           NODE
 
       - name: Optional free-search discovery after core catalog is operational
