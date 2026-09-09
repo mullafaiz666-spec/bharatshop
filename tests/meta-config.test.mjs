@@ -88,3 +88,11 @@ test('CAPI requires acknowledged events and preserves deduplication ID', async (
     assert.equal((await sendMetaConversion(event)).sent, true);
   } finally { globalThis.fetch = original; }
 });
+
+test('Razorpay browser Purchase reuses the verified CAPI event ID and is session-deduplicated', () => {
+  const source = readFileSync(new URL('../src/app/store/page.tsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('`razorpay:${gatewayOrderId}:purchase`'));
+  assert.ok(source.includes('window.bharatTrackMeta?.("purchase"'));
+  assert.ok(source.includes('sessionStorage.getItem(storageKey)!=="sent"'));
+  assert.ok(source.includes('sessionStorage.setItem(storageKey,"sent")'));
+});
