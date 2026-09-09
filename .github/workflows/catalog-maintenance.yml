@@ -14,7 +14,7 @@ on:
 
 concurrency:
   group: bharatshop-catalog-maintenance
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   BHARATSHOP_URL: https://bharatshop-9w4a.onrender.com
