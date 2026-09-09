@@ -27,6 +27,28 @@ test("production acceptance verifies current storefront media and real Gemma inf
   assert.doesNotMatch(src, /fashion-designer/);
 });
 
+test("pre-client production acceptance has zero manual approval gates", () => {
+  const src = read("scripts/production-acceptance-v4.mjs");
+  assert.match(src, /GATE 15 Client order classifier/);
+  assert.match(src, /GATE 16 Human gate timing/);
+  assert.match(src, /GATE 17 No synthetic approvals/);
+  assert.match(src, /GATE 18 Consequential order protection/);
+  assert.match(src, /0 manual gate\(s\)/);
+  assert.match(src, /\^BS-WEB-/);
+  assert.doesNotMatch(src, /APPROVAL_TOKEN/);
+  assert.doesNotMatch(src, /Create a low-risk human approval request/);
+  assert.doesNotMatch(src, /"MANUAL"/);
+});
+
+test("CEO cycle activates human order gating only for genuine client orders", () => {
+  const src = read("src/app/api/automation/ceo-cycle/route.ts");
+  assert.match(src, /function isRealClientOrder/);
+  assert.match(src, /\^BS-WEB-/);
+  assert.match(src, /orderCandidates\.filter\(isRealClientOrder\)/);
+  assert.match(src, /humanInteractionGate:false/);
+  assert.match(src, /Human order gating starts only when a genuine client order exists/);
+});
+
 test("CEO uses a tiny Gemma decision protocol suitable for free CPU", () => {
   const src = read("src/app/api/ceo-chat/route.ts");
   assert.match(src, /TOOL:<name>/);
