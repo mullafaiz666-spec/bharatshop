@@ -1,7 +1,5 @@
 #!/usr/bin/env node
 
-import { readFileSync } from "node:fs";
-
 const BASE=(process.env.BHARATSHOP_URL||process.env.BASE_URL||"https://bharatshop-9w4a.onrender.com").replace(/\/$/,"");
 const TOKEN=process.env.BHARATSHOP_AUTOMATION_TOKEN||"";
 const gates=[];
@@ -25,9 +23,6 @@ function isRealClientOrder(order){
   const ownWebsite=source==="own_website"&&/^BS-WEB-/i.test(ref),shopify=source.includes("shopify")||shopifyId.length>0;
   const email=String(order?.customerEmail||"").trim(),phone=String(order?.customerPhone||"").replace(/\D/g,"");
   return Boolean((ownWebsite||shopify)&&email.includes("@")&&phone.length>=10&&Number(order?.totalAmountInr)>0);
-}
-function preparedCeoCycle(){
-  try{return JSON.parse(readFileSync("/tmp/ceo2.json","utf8"));}catch{return null;}
 }
 
 async function main(){
@@ -95,9 +90,8 @@ async function main(){
 
   try{const r=await req("/api/agents/listing");gate("GATE 11 Listing agent",r.r.status===200&&String(r.data?.status||"").startsWith("ready")?"PASS":"FAIL",`HTTP ${r.r.status}; status=${r.data?.status}; provider=${r.data?.provider}`);}catch(e){gate("GATE 11 Listing agent","FAIL",String(e));}
 
-  let ceo=null;
   try{
-    ceo=await req("/api/ceo-chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({question:"What is actually live right now, what is the biggest problem, and what should you do next?",context:{selectedAgent:"AI CEO"}}),timeoutMs:120000});
+    const ceo=await req("/api/ceo-chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({question:"What is actually live right now, what is the biggest problem, and what should you do next?",context:{selectedAgent:"AI CEO"}}),timeoutMs:120000});
     const trace=Array.isArray(ceo.data?.toolExecutions)?ceo.data.toolExecutions:[];
     const reply=String(ceo.data?.reply||"");
     const botlike=/(audited tool execution|deterministic summary|live evidence inspection completed|human fallback)/i.test(reply);
@@ -121,10 +115,11 @@ async function main(){
   }catch(e){gate("GATE 15 Client order classifier","FAIL",String(e));}
 
   try{
-    const cycle=preparedCeoCycle();
-    const gateActive=cycle?.orders?.humanInteractionGate===true;
+    const status=await req("/api/automation/order-gate-status",{timeoutMs:45000});
     const expected=realClientOrders.length>0;
-    gate("GATE 16 Human gate timing",cycle&&gateActive===expected?"PASS":"FAIL",`genuineClients=${realClientOrders.length}; humanInteractionGate=${cycle?.orders?.humanInteractionGate}; expected=${expected}`);
+    const gateActive=status.data?.humanInteractionGate===true;
+    const countsAgree=Number(status.data?.realOrderCount)===realClientOrders.length;
+    gate("GATE 16 Human gate timing",status.r.status===200&&status.data?.status==="READY"&&gateActive===expected&&countsAgree?"PASS":"FAIL",`HTTP ${status.r.status}; genuineClients=${realClientOrders.length}; runtimeRealOrders=${status.data?.realOrderCount}; humanInteractionGate=${status.data?.humanInteractionGate}; expected=${expected}`);
   }catch(e){gate("GATE 16 Human gate timing","FAIL",String(e));}
 
   try{
