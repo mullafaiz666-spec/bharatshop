@@ -52,6 +52,25 @@ function editorialPrompt(row: any, specs: Record<string, any>, view: number) {
   ].join(" ");
 }
 
+async function attachPublicPhoto(productId: number, view: number, title: string, specs: Record<string, any>, origin: string) {
+  const publicUrl = `${origin}/api/fashion-photo/${productId}/${view}`;
+  const updated = await pool.query(
+    `UPDATE product_images
+     SET image_url=$3,verification_status='AI_GENERATED_EDITORIAL',verification_confidence=1,verification_model='FLUX.1-schnell',verification_provider='hf-zerogpu',verified_at=NOW()
+     WHERE product_id=$1 AND sort_order=$2`,
+    [productId, view, publicUrl]
+  );
+  if (!updated.rowCount) {
+    const sourceUrl = String(specs.qikinkSourceUrl || specs.qikinkRateSource || "https://qikink.com/");
+    await pool.query(
+      `INSERT INTO product_images (product_id,image_url,source_url,sort_order,alt_text,verification_status,verification_confidence,verification_model,verification_provider,verification_metadata,verified_at)
+       VALUES ($1,$2,$3,$4,$5,'AI_GENERATED_EDITORIAL',1,'FLUX.1-schnell','hf-zerogpu',$6,NOW())`,
+      [productId, publicUrl, sourceUrl, view, `${title} ${view === 2 ? "back" : "front"} model editorial`, JSON.stringify({ fictionalModel: true, editorialPreview: true, productionTruth: "Qikink garment/design placement" })]
+    );
+  }
+  return publicUrl;
+}
+
 export async function POST(req: Request) {
   if (!authorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   await ensureTable();
@@ -71,12 +90,15 @@ export async function POST(req: Request) {
   const results: any[] = [];
   let generated = 0;
   for (const row of rows.rows) {
-    if (generated >= limit * 2) break;
     const specs = jsonObject(row.specifications_json);
     for (const view of [0, 2]) {
-      if (generated >= limit * 2) break;
-      const existing = await pool.query(`SELECT 1 FROM fashion_media_cache WHERE product_id=$1 AND view=$2 LIMIT 1`, [row.id, view]);
-      if (existing.rows[0]) continue;
+      const existing = await pool.query(`SELECT provider FROM fashion_media_cache WHERE product_id=$1 AND view=$2 LIMIT 1`, [row.id, view]);
+      if (existing.rows[0]) {
+        const publicUrl = await attachPublicPhoto(Number(row.id), view, String(row.title), specs, origin);
+        results.push({ productId: Number(row.id), title: row.title, view, status: "CACHED_REWIRED", publicUrl, provider: existing.rows[0].provider });
+        continue;
+      }
+      if (generated >= limit * 2) continue;
       const prompt = editorialPrompt(row, specs, view);
       try {
         const image = await generateEditorialImage(prompt, { width: 768, height: 1024, timeoutMs: 110_000 });
@@ -86,21 +108,7 @@ export async function POST(req: Request) {
            ON CONFLICT (product_id,view) DO UPDATE SET mime_type=EXCLUDED.mime_type,image_bytes=EXCLUDED.image_bytes,provider=EXCLUDED.provider,prompt=EXCLUDED.prompt,source_url=EXCLUDED.source_url,created_at=NOW()`,
           [row.id, view, image.mimeType, image.bytes, image.provider, prompt, image.sourceUrl]
         );
-        const publicUrl = `${origin}/api/fashion-photo/${row.id}/${view}`;
-        const updated = await pool.query(
-          `UPDATE product_images
-           SET image_url=$3,verification_status='AI_GENERATED_EDITORIAL',verification_confidence=1,verification_model='FLUX.1-schnell',verification_provider='hf-zerogpu',verified_at=NOW()
-           WHERE product_id=$1 AND sort_order=$2`,
-          [row.id, view, publicUrl]
-        );
-        if (!updated.rowCount) {
-          const sourceUrl = String(specs.qikinkSourceUrl || specs.qikinkRateSource || "https://qikink.com/");
-          await pool.query(
-            `INSERT INTO product_images (product_id,image_url,source_url,sort_order,alt_text,verification_status,verification_confidence,verification_model,verification_provider,verification_metadata,verified_at)
-             VALUES ($1,$2,$3,$4,$5,'AI_GENERATED_EDITORIAL',1,'FLUX.1-schnell','hf-zerogpu',$6,NOW())`,
-            [row.id, publicUrl, sourceUrl, view, `${row.title} ${view === 2 ? "back" : "front"} model editorial`, JSON.stringify({ fictionalModel: true, editorialPreview: true, productionTruth: "Qikink garment/design placement" })]
-          );
-        }
+        const publicUrl = await attachPublicPhoto(Number(row.id), view, String(row.title), specs, origin);
         generated++;
         results.push({ productId: Number(row.id), title: row.title, view, status: "GENERATED", publicUrl, provider: image.provider, bytes: image.bytes.length });
       } catch (error) {
@@ -109,12 +117,13 @@ export async function POST(req: Request) {
       }
     }
   }
+  const cachedRewired = results.filter((x) => x.status === "CACHED_REWIRED").length;
   await pool.query(
     `INSERT INTO ai_activity_logs (user_id,agent_name,action_type,message,metadata_json,status)
      VALUES (1,'BharatDrip Fashion Photo Studio','EDITORIAL_MODEL_SHOTS',$1,$2,$3)`,
-    [generated ? `Generated ${generated} photoreal BharatDrip model shot(s).` : "Free GPU unavailable; kept production-safe mockup fallbacks.", JSON.stringify({ generated, requestedProducts: limit, results }), generated ? "SUCCESS" : "DEGRADED"]
+    [generated || cachedRewired ? `Prepared ${generated + cachedRewired} BharatDrip model shot link(s); ${generated} newly generated.` : "Free GPU unavailable; kept production-safe mockup fallbacks.", JSON.stringify({ generated, cachedRewired, requestedProducts: limit, results }), generated || cachedRewired ? "SUCCESS" : "DEGRADED"]
   );
-  return NextResponse.json({ success: true, provider: "free-first-hf-zerogpu", generated, requestedProducts: limit, fallback: "BharatShop/Qikink-safe product mockups", results });
+  return NextResponse.json({ success: true, provider: "free-first-hf-zerogpu", generated, cachedRewired, requestedProducts: limit, fallback: "BharatShop/Qikink-safe product mockups", results });
 }
 
 export async function GET(req: Request) {
