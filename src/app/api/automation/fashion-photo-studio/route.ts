@@ -158,9 +158,12 @@ export async function POST(req: Request) {
       const specs = jsonObject(row.specifications_json);
       const prompt = editorialPrompt(row, specs, view);
       const existing = await pool.query(`SELECT provider,prompt FROM fashion_media_cache WHERE product_id=$1 AND view=$2 LIMIT 1`, [row.id, view]);
-      const currentStyle = Boolean(existing.rows[0]) && String(existing.rows[0]?.prompt || "").includes(`style=${STYLE_VERSION}`);
+      const existingProvider = String(existing.rows[0]?.provider || "");
+      const styleMatches = Boolean(existing.rows[0]) && String(existing.rows[0]?.prompt || "").includes(`style=${STYLE_VERSION}`);
+      const shouldTryExternalUpgrade = styleMatches && existingProvider === LOCAL_PROVIDER && externalAttemptLimit > 0 && attempted < externalAttemptLimit && Date.now() + 50_000 < deadline;
+      const currentStyle = styleMatches && !shouldTryExternalUpgrade;
       if (currentStyle) {
-        const provider = String(existing.rows[0].provider || LOCAL_PROVIDER);
+        const provider = existingProvider || LOCAL_PROVIDER;
         const publicUrl = await attachPublicPhoto(Number(row.id), view, String(row.title), specs, origin, provider);
         results.push({ productId: Number(row.id), title: row.title, view, status: "CACHED_REWIRED", publicUrl, provider, styleVersion: STYLE_VERSION });
         continue;
