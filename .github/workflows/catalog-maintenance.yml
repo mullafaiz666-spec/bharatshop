@@ -9,6 +9,7 @@ on:
     branches: [main]
     paths:
       - 'src/app/api/automation/deodap-bootstrap/route.ts'
+      - 'src/app/api/automation/ceo-cycle/route.ts'
       - 'src/app/api/agents/listing/route.ts'
       - '.github/workflows/catalog-maintenance.yml'
 
