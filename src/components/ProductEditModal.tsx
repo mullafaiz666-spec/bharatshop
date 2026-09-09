@@ -3,12 +3,10 @@
 import React, { useState } from "react";
 import {
   X,
-  Sliders,
-  DollarSign,
   Trash2,
   CheckCircle2,
-  TrendingUp,
-  Sparkles,
+  Upload,
+  Image as ImageIcon,
 } from "lucide-react";
 
 export interface ProductItem {
@@ -39,6 +37,9 @@ interface ProductEditModalProps {
   onDeleted: (id: number) => void;
 }
 
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+
 export function ProductEditModal({
   product,
   onClose,
@@ -59,6 +60,10 @@ export function ProductEditModal({
     product ? product.autoRepriceEnabled : true
   );
   const [isSaving, setIsSaving] = useState(false);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [imageError, setImageError] = useState("");
+  const [imageSuccess, setImageSuccess] = useState("");
+  const [previewUrl, setPreviewUrl] = useState(product?.imageUrl || "");
 
   React.useEffect(() => {
     if (product) {
@@ -67,6 +72,9 @@ export function ProductEditModal({
       setAiMarketingCopy(product.aiMarketingCopy);
       setStatus(product.status);
       setAutoRepriceEnabled(product.autoRepriceEnabled);
+      setPreviewUrl(product.imageUrl);
+      setImageError("");
+      setImageSuccess("");
     }
   }, [product]);
 
@@ -78,6 +86,42 @@ export function ProductEditModal({
   const netProfitNum = Number((priceNum - costNum - shipNum).toFixed(2));
   const marginPctNum =
     priceNum > 0 ? Number(((netProfitNum / priceNum) * 100).toFixed(1)) : 0;
+
+  async function handleImageUpload(file: File | null) {
+    if (!file) return;
+    setImageError("");
+    setImageSuccess("");
+
+    if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
+      setImageError("Use a JPG, PNG, or WebP image.");
+      return;
+    }
+    if (file.size <= 0 || file.size > MAX_IMAGE_BYTES) {
+      setImageError("Image must be between 1 byte and 8 MB.");
+      return;
+    }
+
+    setIsUploadingImage(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("view", "0");
+      const res = await fetch(`/api/products/${product.id}/image-upload`, {
+        method: "POST",
+        body: form,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || "Image upload failed");
+      const nextUrl = String(data?.imageUrl || "").trim();
+      if (nextUrl) setPreviewUrl(`${nextUrl}${nextUrl.includes("?") ? "&" : "?"}t=${Date.now()}`);
+      setImageSuccess("Product photo uploaded and made primary.");
+      onUpdated();
+    } catch (error) {
+      setImageError(error instanceof Error ? error.message : "Image upload failed");
+    } finally {
+      setIsUploadingImage(false);
+    }
+  }
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
@@ -122,7 +166,7 @@ export function ProductEditModal({
         <div className="flex items-center justify-between border-b border-slate-800 bg-slate-950/60 px-6 py-4">
           <div className="flex items-center gap-3">
             <img
-              src={product.imageUrl}
+              src={previewUrl || product.imageUrl}
               alt={product.title}
               className="h-10 w-10 rounded-lg object-cover border border-slate-800"
             />
@@ -149,6 +193,38 @@ export function ProductEditModal({
         </div>
 
         <form onSubmit={handleSave} className="p-6 space-y-4">
+          <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-4">
+            <div className="flex items-start gap-4">
+              <div className="h-28 w-24 shrink-0 overflow-hidden rounded-lg border border-slate-800 bg-slate-900">
+                {previewUrl ? (
+                  <img src={previewUrl} alt={`${product.title} primary`} className="h-full w-full object-cover" />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center text-slate-500"><ImageIcon className="h-8 w-8" /></div>
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-300">Primary product photo</div>
+                <p className="mt-1 text-xs leading-5 text-slate-500">Upload a normal JPG, PNG, or WebP photo. The uploaded raster image takes priority over generated SVG mockups.</p>
+                <label className={`mt-3 inline-flex cursor-pointer items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20 ${isUploadingImage ? "pointer-events-none opacity-60" : ""}`}>
+                  <Upload className="h-4 w-4" />
+                  {isUploadingImage ? "Uploading..." : "Upload product photo"}
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    className="hidden"
+                    disabled={isUploadingImage}
+                    onChange={(e) => {
+                      void handleImageUpload(e.target.files?.[0] || null);
+                      e.currentTarget.value = "";
+                    }}
+                  />
+                </label>
+                {imageError ? <p className="mt-2 text-xs text-red-400">{imageError}</p> : null}
+                {imageSuccess ? <p className="mt-2 text-xs text-emerald-400">{imageSuccess}</p> : null}
+              </div>
+            </div>
+          </div>
+
           <div className="grid grid-cols-3 gap-3">
             <div>
               <label className="block text-xs font-semibold uppercase text-slate-400 mb-1.5">
@@ -187,7 +263,6 @@ export function ProductEditModal({
             </div>
           </div>
 
-          {/* Unit Economics Pill Bar */}
           <div className="rounded-xl border border-emerald-500/30 bg-emerald-950/20 p-3.5 flex items-center justify-between">
             <div>
               <div className="text-[11px] uppercase tracking-wider text-slate-400">
