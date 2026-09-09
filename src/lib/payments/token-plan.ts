@@ -6,4 +6,4 @@ export function partialCodPlan(input:{sellingPriceInr:number;netProfitInr:number
  return{strategy:"MARGIN_PROTECTED_PARTIAL_COD",totalAmountInr:total,confirmationAmountInr:confirmation,codBalanceInr:codBalance,confirmationPct:total>0?Math.round(confirmation/total*10000)/100:0};
 }
 export function appendPaymentMeta(existing:string|undefined,meta:Record<string,string|number|boolean>){const bits=Object.entries(meta).map(([k,v])=>`${k}=${String(v)}`);return [String(existing||"").trim(),...bits].filter(Boolean).join(" | ");}
-export function readPaymentMeta(notes:string|undefined,key:string){const found=String(notes||"").split("|").map(x=>x.trim()).find(x=>x.startsWith(`${key}=`));return found?found.slice(key.length+1):"";}
+export function readPaymentMeta(notes:string|undefined,key:string){const found=String(notes||"").split("|").map(x=>x.trim()).reverse().find(x=>x.startsWith(`${key}=`));return found?found.slice(key.length+1):"";}

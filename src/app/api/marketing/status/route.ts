@@ -4,9 +4,11 @@ export const dynamic = "force-dynamic";
 const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || "https://bharatshop-9w4a.onrender.com").replace(/\/$/, "");
 
 export async function GET() {
-  const paidAdsEnabled = process.env.ALLOW_PAID_AD_SPEND === "YES";
+  const paidAdsEnabled = false;
   return NextResponse.json({
     mode: "ZERO_PAID_API_DEFAULT",
+    connectionsEndpoint: "/api/marketing/connections",
+    campaignPublication: "NOT_IMPLEMENTED",
     paidAds: {
       enabled: paidAdsEnabled,
       policy: paidAdsEnabled ? "Explicitly enabled by owner environment setting." : "Hard-disabled. BharatShop will not spend on Meta or Google Ads automatically.",

@@ -7,8 +7,8 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/* \
   && curl -fsSL https://ollama.com/install.sh | sh
 
-COPY package.json ./
-RUN npm install --ignore-scripts
+COPY package.json package-lock.json ./
+RUN npm ci --ignore-scripts
 COPY . .
 
 # Render free currently provides only 512 MB RAM. The 4B Gemma image is ~3.3 GB
