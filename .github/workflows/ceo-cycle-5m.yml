@@ -12,7 +12,7 @@ concurrency:
 jobs:
   cycle:
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 5
     steps:
       - name: Verify production health
         env:
@@ -23,7 +23,7 @@ jobs:
           curl --silent --show-error --fail-with-body --retry 3 --retry-delay 5 "$BHARATSHOP_URL/api/health"
           curl --silent --show-error --fail-with-body --retry 3 --retry-delay 5 "$BHARATSHOP_URL/api/storefront/products?limit=1"
 
-      - name: Run CEO cycle
+      - name: Run CEO cycle and delegated operations
         env:
           BHARATSHOP_URL: ${{ secrets.BHARATSHOP_URL }}
           BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
@@ -31,8 +31,6 @@ jobs:
           set -euo pipefail
           test -n "$BHARATSHOP_URL"
           test -n "$BHARATSHOP_AUTOMATION_TOKEN"
-          curl --silent --show-error --fail-with-body --retry 3 --retry-delay 5 \
-            -X POST "$BHARATSHOP_URL/api/automation/ceo-cycle" \
-            -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" \
-            -H "Content-Type: application/json" \
-            --data '{}'
+          AUTH=(-H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" -H "x-automation-token: $BHARATSHOP_AUTOMATION_TOKEN" -H "Content-Type: application/json")
+          curl --silent --show-error --fail-with-body --retry 3 --retry-delay 5 -X POST "$BHARATSHOP_URL/api/automation/ceo-cycle" "${AUTH[@]}" --data '{}'
+          curl --silent --show-error --fail-with-body --retry 3 --retry-delay 5 -X POST "$BHARATSHOP_URL/api/automation/ceo-delegation" "${AUTH[@]}" --data '{}'

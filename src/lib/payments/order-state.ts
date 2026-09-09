@@ -1,0 +1,11 @@
+import { db } from "@/db";
+import { storefrontOrders, orders, aiActivityLogs } from "@/db/schema";
+import { eq } from "drizzle-orm";
+import { appendPaymentMeta, readPaymentMeta } from "@/lib/payments/token-plan";
+
+export async function markGatewayPayment(input:{provider:"razorpay"|"cashfree";providerOrderId:string;status:"TOKEN_PAID"|"TOKEN_FAILED"|"TOKEN_REFUNDED";event:string;paymentId?:string}){
+ const all=await db.select().from(storefrontOrders),key=input.provider==="razorpay"?"razorpay_order_id":"cashfree_order_id",matched=all.filter(o=>readPaymentMeta(o.notes,key)===input.providerOrderId),refs:string[]=[];let codBalance=0;
+ for(const storefront of matched){refs.push(storefront.orderRef);codBalance+=Number(readPaymentMeta(storefront.notes,"cod_balance_inr"))||0;const nextFulfillment=input.status==="TOKEN_PAID"?"CEO_ROUTING_READY":"PAYMENT_BLOCKED",notes=appendPaymentMeta(storefront.notes,{[`${input.provider}_event`]:input.event,...(input.paymentId?{[`${input.provider}_payment_id`]:input.paymentId}:{})});await db.update(storefrontOrders).set({paymentStatus:input.status,fulfillmentStatus:nextFulfillment,notes}).where(eq(storefrontOrders.id,storefront.id));
+  const[core]=await db.select().from(orders).where(eq(orders.orderNumber,storefront.orderRef)).limit(1);if(core){await db.update(orders).set({paymentStatus:input.status,fulfillmentStatus:nextFulfillment,aiDecisionLog:`${core.aiDecisionLog}; ${input.provider}_event=${input.event}; token_status=${input.status}; next=${nextFulfillment}.`}).where(eq(orders.id,core.id));await db.insert(aiActivityLogs).values({userId:core.userId,agentName:`${input.provider} Payment Gateway`,actionType:`PAYMENT_${input.status}`,message:`${storefront.orderRef}: verified ${input.provider} event ${input.event}; routed to ${nextFulfillment}.`,profitImpactInr:input.status==="TOKEN_PAID"?String(readPaymentMeta(storefront.notes,"confirmation_amount_inr")||"0"):"0.00",metadataJson:{providerOrderId:input.providerOrderId,paymentId:input.paymentId,codBalanceInr:Number(readPaymentMeta(storefront.notes,"cod_balance_inr"))||0},status:input.status==="TOKEN_PAID"?"SUCCESS":"ERROR"});}}
+ return{matched:matched.length,orderRefs:refs,codBalanceInr:Number(codBalance.toFixed(2)),next:input.status==="TOKEN_PAID"?"CEO_ROUTING_READY":"PAYMENT_BLOCKED"};
+}

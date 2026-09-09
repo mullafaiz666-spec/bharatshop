@@ -1,38 +1,18 @@
 import { pool } from "@/db";
 
-export const dynamic = "force-dynamic";
-
+export const dynamic="force-dynamic";
 const esc=(s:unknown)=>String(s||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&apos;"}[c]||c));
 const safeHex=(v:unknown,fallback:string)=>/^#[0-9a-f]{6}$/i.test(String(v||""))?String(v):fallback;
-
-function garmentPath(kind:string){
-  const k=kind.toLowerCase();
-  if(k.includes("hood"))return "M300 190 L390 150 L470 220 L560 150 L650 190 L620 330 L570 310 L570 720 L330 720 L330 310 L280 330 Z M390 150 Q450 65 510 150 L480 240 L420 240 Z";
-  if(k.includes("dress"))return "M320 170 L390 135 L450 200 L510 135 L580 170 L550 330 L520 315 L610 760 L290 760 L380 315 L350 330 Z";
-  if(k.includes("crop"))return "M300 190 L385 150 L450 210 L515 150 L600 190 L570 335 L525 315 L525 500 L375 500 L375 315 L330 335 Z";
-  if(k.includes("polo"))return "M300 190 L385 150 L450 210 L515 150 L600 190 L570 335 L525 315 L525 720 L375 720 L375 315 L330 335 Z M425 185 L450 230 L475 185 L475 280 L425 280 Z";
-  return "M300 190 L385 150 L450 210 L515 150 L600 190 L570 335 L525 315 L525 720 L375 720 L375 315 L330 335 Z";
-}
+function garmentPath(kind:string){const k=kind.toLowerCase();if(k.includes("hood"))return "M300 190 L390 150 L470 220 L560 150 L650 190 L620 330 L570 310 L570 720 L330 720 L330 310 L280 330 Z M390 150 Q450 65 510 150 L480 240 L420 240 Z";if(k.includes("dress"))return "M320 170 L390 135 L450 200 L510 135 L580 170 L550 330 L520 315 L610 760 L290 760 L380 315 L350 330 Z";if(k.includes("crop"))return "M300 190 L385 150 L450 210 L515 150 L600 190 L570 335 L525 315 L525 500 L375 500 L375 315 L330 335 Z";if(k.includes("polo"))return "M300 190 L385 150 L450 210 L515 150 L600 190 L570 335 L525 315 L525 720 L375 720 L375 315 L330 335 Z M425 185 L450 230 L475 185 L475 280 L425 280 Z";return "M300 190 L385 150 L450 210 L515 150 L600 190 L570 335 L525 315 L525 720 L375 720 L375 315 L330 335 Z";}
 
 export async function GET(_req:Request,{params}:{params:Promise<{productId:string;view:string}>}){
-  const {productId,view}=await params;
-  const id=Number(productId),v=Math.max(0,Math.min(3,Number(view)||0));
-  if(!Number.isFinite(id))return new Response("Invalid product",{status:400});
-  const r=await pool.query(`SELECT p.title,p.category,p.brand,d.specifications_json FROM products p LEFT JOIN product_details d ON d.product_id=p.id WHERE p.id=$1 LIMIT 1`,[id]);
-  if(!r.rows[0])return new Response("Not found",{status:404});
-  const row=r.rows[0];
-  const specs=row.specifications_json&&typeof row.specifications_json==="object"?row.specifications_json:{};
-  const palette=Array.isArray(specs.palette)?specs.palette:[];
-  const a=safeHex(palette[0],"#111827"),b=safeHex(palette[1],"#f97316"),c=safeHex(palette[2],"#f8fafc");
-  const garment=String(specs.qikinkProductName||row.category||"T-Shirt");
-  const title=esc(row.title),code=esc(specs.qikinkProductCode||"QIKINK"),brief=esc(specs.designBrief||"Original BharatShop Studio design");
-  const label=v===0?"FRONT":v===1?"DETAIL":v===2?"BACK":"PALETTE";
-  const path=garmentPath(garment);
-  const pattern=v===2
-    ? `<path d="M350 360 C400 300 500 420 550 360" fill="none" stroke="${c}" stroke-width="16"/><circle cx="405" cy="395" r="24" fill="${b}"/><circle cx="495" cy="330" r="18" fill="${c}"/>`
-    : `<g transform="translate(450 420)"><circle cx="0" cy="0" r="86" fill="none" stroke="${b}" stroke-width="14"/><path d="M-105 40 C-35 -80 35 120 115 -30" fill="none" stroke="${c}" stroke-width="18" stroke-linecap="round"/><path d="M-90 -70 L85 75" stroke="${b}" stroke-width="10"/></g>`;
-  const detail=v===1?`<g transform="translate(650 610)"><rect x="-130" y="-115" width="260" height="230" rx="26" fill="#fff" stroke="#d1d5db"/><text x="0" y="-45" text-anchor="middle" font-family="Arial" font-size="20" font-weight="700" fill="#111827">PRINT DETAIL</text><circle cx="0" cy="30" r="62" fill="none" stroke="${b}" stroke-width="12"/><path d="M-70 50 C-20 -35 35 85 82 -18" fill="none" stroke="${a}" stroke-width="13"/></g>`:"";
-  const palettePanel=v===3?`<g transform="translate(635 420)"><rect x="-150" y="-150" width="300" height="300" rx="36" fill="#ffffff" stroke="#e5e7eb"/><circle cx="-70" cy="-35" r="38" fill="${a}"/><circle cx="20" cy="-35" r="38" fill="${b}"/><circle cx="110" cy="-35" r="38" fill="${c}" stroke="#cbd5e1"/><text x="0" y="70" text-anchor="middle" font-family="Arial" font-size="24" font-weight="800" fill="#111827">Qikink ${code}</text><text x="0" y="105" text-anchor="middle" font-family="Arial" font-size="16" fill="#64748b">Made to order</text></g>`:"";
-  const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1100" viewBox="0 0 900 1100"><defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f8fafc"/><stop offset="1" stop-color="#e2e8f0"/></linearGradient><filter id="shadow"><feDropShadow dx="0" dy="18" stdDeviation="18" flood-opacity=".16"/></filter></defs><rect width="900" height="1100" fill="url(#bg)"/><text x="54" y="72" font-family="Arial" font-size="18" font-weight="800" letter-spacing="4" fill="#f97316">BHARATSHOP STUDIO · ${label}</text><text x="54" y="112" font-family="Arial" font-size="28" font-weight="800" fill="#0f172a">${title}</text><g filter="url(#shadow)"><path d="${path}" fill="${a}" stroke="#0f172a" stroke-width="5"/>${pattern}</g>${detail}${palettePanel}<rect x="54" y="910" width="792" height="130" rx="28" fill="#ffffff"/><text x="82" y="955" font-family="Arial" font-size="17" font-weight="700" fill="#0f172a">Original design · Qikink ${code}</text><text x="82" y="990" font-family="Arial" font-size="15" fill="#475569">${brief}</text><text x="82" y="1020" font-family="Arial" font-size="14" fill="#64748b">Production: print-on-demand / made-to-order</text></svg>`;
-  return new Response(svg,{headers:{"Content-Type":"image/svg+xml; charset=utf-8","Cache-Control":"public, max-age=3600, stale-while-revalidate=86400","X-Content-Type-Options":"nosniff"}});
+ const {productId,view}=await params,id=Number(productId),v=Math.max(0,Math.min(3,Number(view)||0));if(!Number.isFinite(id))return new Response("Invalid product",{status:400});
+ const r=await pool.query(`SELECT p.title,p.category,d.specifications_json FROM products p LEFT JOIN product_details d ON d.product_id=p.id WHERE p.id=$1 AND p.status='Published' LIMIT 1`,[id]);if(!r.rows[0])return new Response("Not found",{status:404});
+ const row=r.rows[0],specs=row.specifications_json&&typeof row.specifications_json==="object"?row.specifications_json:{},palette=Array.isArray(specs.palette)?specs.palette:[];
+ const a=safeHex(palette[0],"#111827"),b=safeHex(palette[1],"#f97316"),c=safeHex(palette[2],"#f8fafc"),garment=String(specs.qikinkProductName||row.category||"T-Shirt"),title=esc(row.title),brief=esc(specs.designBrief||"Original BharatShop Studio design"),label=["FRONT","DETAIL","BACK","PALETTE"][v],path=garmentPath(garment);
+ const pattern=v===2?`<path d="M350 360 C400 300 500 420 550 360" fill="none" stroke="${c}" stroke-width="16"/><circle cx="405" cy="395" r="24" fill="${b}"/><circle cx="495" cy="330" r="18" fill="${c}"/>`:`<g transform="translate(450 420)"><circle cx="0" cy="0" r="86" fill="none" stroke="${b}" stroke-width="14"/><path d="M-105 40 C-35 -80 35 120 115 -30" fill="none" stroke="${c}" stroke-width="18" stroke-linecap="round"/><path d="M-90 -70 L85 75" stroke="${b}" stroke-width="10"/></g>`;
+ const detail=v===1?`<g transform="translate(650 610)"><rect x="-130" y="-115" width="260" height="230" rx="26" fill="#fff" stroke="#d1d5db"/><text x="0" y="-45" text-anchor="middle" font-family="Arial" font-size="20" font-weight="700" fill="#111827">PRINT DETAIL</text><circle cx="0" cy="30" r="62" fill="none" stroke="${b}" stroke-width="12"/><path d="M-70 50 C-20 -35 35 85 82 -18" fill="none" stroke="${a}" stroke-width="13"/></g>`:"";
+ const palettePanel=v===3?`<g transform="translate(635 420)"><rect x="-150" y="-150" width="300" height="300" rx="36" fill="#fff" stroke="#e5e7eb"/><circle cx="-70" cy="-35" r="38" fill="${a}"/><circle cx="20" cy="-35" r="38" fill="${b}"/><circle cx="110" cy="-35" r="38" fill="${c}" stroke="#cbd5e1"/><text x="0" y="70" text-anchor="middle" font-family="Arial" font-size="24" font-weight="800" fill="#111827">BHARATSHOP STUDIO</text><text x="0" y="105" text-anchor="middle" font-family="Arial" font-size="16" fill="#64748b">Made to order</text></g>`:"";
+ const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1100" viewBox="0 0 900 1100"><defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f8fafc"/><stop offset="1" stop-color="#e2e8f0"/></linearGradient><filter id="shadow"><feDropShadow dx="0" dy="18" stdDeviation="18" flood-opacity=".16"/></filter></defs><rect width="900" height="1100" fill="url(#bg)"/><text x="54" y="72" font-family="Arial" font-size="18" font-weight="800" letter-spacing="4" fill="#f97316">BHARATSHOP STUDIO · ${label}</text><text x="54" y="112" font-family="Arial" font-size="28" font-weight="800" fill="#0f172a">${title}</text><g filter="url(#shadow)"><path d="${path}" fill="${a}" stroke="#0f172a" stroke-width="5"/>${pattern}</g>${detail}${palettePanel}<rect x="54" y="910" width="792" height="130" rx="28" fill="#fff"/><text x="82" y="955" font-family="Arial" font-size="17" font-weight="700" fill="#0f172a">Original BharatShop Studio design</text><text x="82" y="990" font-family="Arial" font-size="15" fill="#475569">${brief}</text><text x="82" y="1020" font-family="Arial" font-size="14" fill="#64748b">Made after your order · no warehouse stock claim</text></svg>`;
+ return new Response(svg,{headers:{"Content-Type":"image/svg+xml; charset=utf-8","Cache-Control":"public, max-age=3600, stale-while-revalidate=86400","X-Content-Type-Options":"nosniff"}});
 }

@@ -46,9 +46,13 @@ jobs:
           curl --silent --show-error --fail-with-body --max-time 300 -X POST "$BHARATSHOP_URL/api/fashion-designer" "${AUTH[@]}" --data '{"count":12}' | tee /tmp/fashion.json
           curl --silent --show-error --fail-with-body --max-time 300 -X POST "$BHARATSHOP_URL/api/automation/ceo-cycle?skipResearch=1" "${AUTH[@]}" --data '{}' | tee /tmp/ceo1.json
           curl --silent --show-error --fail-with-body --max-time 300 -X POST "$BHARATSHOP_URL/api/automation/ceo-cycle?skipResearch=1" "${AUTH[@]}" --data '{}' | tee /tmp/ceo2.json
+          curl --silent --show-error --fail-with-body --max-time 300 -X POST "$BHARATSHOP_URL/api/automation/ceo-delegation" "${AUTH[@]}" --data '{}' | tee /tmp/ceo-delegation.json
 
       - name: Run strict live production acceptance
         run: node scripts/production-acceptance-v3.mjs
 
       - name: Verify zero-budget marketing surfaces
         run: node scripts/marketing-acceptance.mjs
+
+      - name: Verify storefront privacy images categories and payment capability
+        run: node scripts/storefront-privacy-acceptance.mjs
