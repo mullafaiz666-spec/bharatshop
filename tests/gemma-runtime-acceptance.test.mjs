@@ -42,6 +42,16 @@ test("production acceptance verifies current storefront media and real Gemma inf
   assert.doesNotMatch(src, /fashion-designer/);
 });
 
+test("production acceptance permits only safe same-origin BharatShop fashion SVG mockups", () => {
+  const src = read("scripts/production-acceptance-v4.mjs");
+  assert.match(src, /function safeStorefrontMedia/);
+  assert.match(src, /image\/svg\+xml/);
+  assert.match(src, /u\.origin!==base\.origin/);
+  assert.match(src, /fallback"\)!=="product-mockup"/);
+  assert.match(src, /script\|foreignObject/);
+  assert.match(src, /new TextDecoder\(\)\.decode/);
+});
+
 test("pre-client production acceptance has zero manual approval gates", () => {
   const src = read("scripts/production-acceptance-v4.mjs");
   assert.match(src, /GATE 15 Client order classifier/);
