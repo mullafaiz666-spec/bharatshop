@@ -28,12 +28,13 @@ test('missing setup stays unverified and never includes credentials', () => {
   process.env.NEXT_PUBLIC_META_PIXEL_ID = '123';
   const config = metaConfiguration();
   assert.equal(config.status, 'NOT_VERIFIED');
+  assert.equal(config.datasetConfigured, true);
   assert.equal(config.conversionsApiConfigured, true);
   assert.equal(config.spendEnabled, false);
   assert.ok(!JSON.stringify(config).includes(process.env.META_ACCESS_TOKEN));
 });
 
-test('invalid and mismatched IDs are reported and cannot dispatch events', async () => {
+test('invalid and mismatched legacy Pixel IDs are reported and cannot dispatch events', async () => {
   reset();
   process.env.NEXT_PUBLIC_META_PIXEL_ID = '123';
   process.env.META_PIXEL_ID = '456';
@@ -47,6 +48,24 @@ test('invalid and mismatched IDs are reported and cannot dispatch events', async
     process.env.META_PIXEL_ID = '123';
     process.env.META_GRAPH_API_VERSION = '../invalid';
     assert.equal((await sendMetaConversion({ eventName: 'PageView', eventId: 'test' })).reason, 'invalid_meta_graph_version');
+  } finally { globalThis.fetch = original; }
+});
+
+test('an explicit Dataset ID is accepted as the CAPI destination', async () => {
+  reset();
+  process.env.NEXT_PUBLIC_META_PIXEL_ID = '123';
+  process.env.META_DATASET_ID = '789';
+  process.env.META_CONVERSIONS_API_TOKEN = 'private-token';
+  assert.equal(metaConfiguration().status, 'NOT_VERIFIED');
+  assert.equal(metaConfiguration().datasetConfigured, true);
+  assert.equal(metaConfiguration().conversionsApiConfigured, true);
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    assert.match(String(url), /\/789\/events$/);
+    return Response.json({ events_received: 1 });
+  };
+  try {
+    assert.equal((await sendMetaConversion({ eventName: 'PageView', eventId: 'dataset-event' })).sent, true);
   } finally { globalThis.fetch = original; }
 });
 
