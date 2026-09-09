@@ -1,15 +1,17 @@
 import { NextResponse } from "next/server";
 import { pool } from "@/db";
 import { generateEditorialImage } from "@/lib/fashion/editorial-image";
+import { generateLocalEditorialRaster } from "@/lib/fashion/local-editorial-raster";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const STYLE_VERSION = "street-editorial-v2";
+const LOCAL_PROVIDER = "bharatshop-local-raster";
 
 function authorized(req: Request) {
   const expected = process.env.BHARATSHOP_AUTOMATION_TOKEN || process.env.AUTOMATION_TOKEN;
-  if (!expected) return true;
+  if (!expected) return false;
   return req.headers.get("authorization") === `Bearer ${expected}` || req.headers.get("x-automation-token") === expected;
 }
 
@@ -90,30 +92,49 @@ function editorialPrompt(row: any, specs: Record<string, any>, view: number) {
   ].join(" ");
 }
 
-async function attachPublicPhoto(productId: number, view: number, title: string, specs: Record<string, any>, origin: string) {
+async function attachPublicPhoto(productId: number, view: number, title: string, specs: Record<string, any>, origin: string, provider: string) {
   const publicUrl = `${origin}/api/fashion-photo/${productId}/${view}?style=${STYLE_VERSION}`;
+  const local = provider === LOCAL_PROVIDER;
+  const model = local ? "bharatshop-local-raster-v1" : "FLUX.1-schnell";
+  const metadata = JSON.stringify({
+    fictionalModel: true,
+    editorialPreview: true,
+    styleVersion: STYLE_VERSION,
+    productionTruth: "Qikink garment/design placement",
+    generatedRasterFallback: local,
+    representation: local ? "stylized-illustrated-editorial" : "ai-photoreal-editorial",
+  });
   const updated = await pool.query(
     `UPDATE product_images
-     SET image_url=$3,verification_status='AI_GENERATED_EDITORIAL',verification_confidence=1,verification_model='FLUX.1-schnell',verification_provider='hf-zerogpu',verification_metadata=$4,verified_at=NOW()
+     SET image_url=$3,verification_status='AI_GENERATED_EDITORIAL',verification_confidence=1,verification_model=$4,verification_provider=$5,verification_metadata=$6,verified_at=NOW()
      WHERE product_id=$1 AND sort_order=$2`,
-    [productId, view, publicUrl, JSON.stringify({ fictionalModel: true, editorialPreview: true, styleVersion: STYLE_VERSION, productionTruth: "Qikink garment/design placement" })]
+    [productId, view, publicUrl, model, provider, metadata]
   );
   if (!updated.rowCount) {
     const sourceUrl = String(specs.qikinkSourceUrl || specs.qikinkRateSource || "https://qikink.com/");
     await pool.query(
       `INSERT INTO product_images (product_id,image_url,source_url,sort_order,alt_text,verification_status,verification_confidence,verification_model,verification_provider,verification_metadata,verified_at)
-       VALUES ($1,$2,$3,$4,$5,'AI_GENERATED_EDITORIAL',1,'FLUX.1-schnell','hf-zerogpu',$6,NOW())`,
-      [productId, publicUrl, sourceUrl, view, `${title} ${view === 2 ? "back" : "front"} urban model editorial`, JSON.stringify({ fictionalModel: true, editorialPreview: true, styleVersion: STYLE_VERSION, productionTruth: "Qikink garment/design placement" })]
+       VALUES ($1,$2,$3,$4,$5,'AI_GENERATED_EDITORIAL',1,$6,$7,$8,NOW())`,
+      [productId, publicUrl, sourceUrl, view, `${title} ${view === 2 ? "back" : "front"} generated urban editorial`, model, provider, metadata]
     );
   }
   return publicUrl;
+}
+
+async function storeMedia(input: { productId: number; view: number; mimeType: string; bytes: Buffer; provider: string; prompt: string; sourceUrl: string }) {
+  await pool.query(
+    `INSERT INTO fashion_media_cache (product_id,view,mime_type,image_bytes,provider,prompt,source_url,created_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
+     ON CONFLICT (product_id,view) DO UPDATE SET mime_type=EXCLUDED.mime_type,image_bytes=EXCLUDED.image_bytes,provider=EXCLUDED.provider,prompt=EXCLUDED.prompt,source_url=EXCLUDED.source_url,created_at=NOW()`,
+    [input.productId, input.view, input.mimeType, input.bytes, input.provider, input.prompt, input.sourceUrl]
+  );
 }
 
 export async function POST(req: Request) {
   if (!authorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   await ensureTable();
   const body = await req.json().catch(() => ({}));
-  const limit = Math.max(1, Math.min(4, Number(body.limit || 2)));
+  const externalAttemptLimit = Math.max(0, Math.min(2, Number(body.externalAttemptLimit ?? 2)));
   const rows = await pool.query(
     `SELECT p.id,p.title,p.brand,p.category,d.specifications_json
      FROM products p
@@ -127,57 +148,105 @@ export async function POST(req: Request) {
   const origin = publicOrigin(req);
   const results: any[] = [];
   let generated = 0;
+  let externalGenerated = 0;
+  let localGenerated = 0;
   let attempted = 0;
   const deadline = Date.now() + 240_000;
 
-  // Refresh the hero shots first. A style-version change intentionally invalidates older dull studio generations.
   for (const view of [0, 2]) {
     for (const row of rows.rows) {
       const specs = jsonObject(row.specifications_json);
       const prompt = editorialPrompt(row, specs, view);
       const existing = await pool.query(`SELECT provider,prompt FROM fashion_media_cache WHERE product_id=$1 AND view=$2 LIMIT 1`, [row.id, view]);
-      const currentStyle = Boolean(existing.rows[0]) && String(existing.rows[0]?.prompt || "").includes(`style=${STYLE_VERSION}`);
+      const existingProvider = String(existing.rows[0]?.provider || "");
+      const styleMatches = Boolean(existing.rows[0]) && String(existing.rows[0]?.prompt || "").includes(`style=${STYLE_VERSION}`);
+      const shouldTryExternalUpgrade = styleMatches && existingProvider === LOCAL_PROVIDER && externalAttemptLimit > 0 && attempted < externalAttemptLimit && Date.now() + 50_000 < deadline;
+      const currentStyle = styleMatches && !shouldTryExternalUpgrade;
       if (currentStyle) {
-        const publicUrl = await attachPublicPhoto(Number(row.id), view, String(row.title), specs, origin);
-        results.push({ productId: Number(row.id), title: row.title, view, status: "CACHED_REWIRED", publicUrl, provider: existing.rows[0].provider, styleVersion: STYLE_VERSION });
+        const provider = existingProvider || LOCAL_PROVIDER;
+        const publicUrl = await attachPublicPhoto(Number(row.id), view, String(row.title), specs, origin, provider);
+        results.push({ productId: Number(row.id), title: row.title, view, status: "CACHED_REWIRED", publicUrl, provider, styleVersion: STYLE_VERSION });
         continue;
       }
-      if (attempted >= Math.min(limit * 2, 2) || Date.now() + 115_000 > deadline) {
-        results.push({ productId: Number(row.id), title: row.title, view, status: "STALE_WAITING_REFRESH", styleVersion: STYLE_VERSION });
-        continue;
-      }
-      try {
+
+      let image: { mimeType: string; bytes: Buffer; provider: string; sourceUrl: string } | null = null;
+      let externalError = "";
+      if (attempted < externalAttemptLimit && Date.now() + 50_000 < deadline) {
         attempted++;
-        const image = await generateEditorialImage(prompt, { width: 768, height: 1024, timeoutMs: 110_000 });
-        await pool.query(
-          `INSERT INTO fashion_media_cache (product_id,view,mime_type,image_bytes,provider,prompt,source_url,created_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
-           ON CONFLICT (product_id,view) DO UPDATE SET mime_type=EXCLUDED.mime_type,image_bytes=EXCLUDED.image_bytes,provider=EXCLUDED.provider,prompt=EXCLUDED.prompt,source_url=EXCLUDED.source_url,created_at=NOW()`,
-          [row.id, view, image.mimeType, image.bytes, image.provider, prompt, image.sourceUrl]
-        );
-        const publicUrl = await attachPublicPhoto(Number(row.id), view, String(row.title), specs, origin);
-        generated++;
-        results.push({ productId: Number(row.id), title: row.title, view, status: "GENERATED", publicUrl, provider: image.provider, bytes: image.bytes.length, styleVersion: STYLE_VERSION });
-      } catch (error) {
-        results.push({ productId: Number(row.id), title: row.title, view, status: "DEFERRED_FREE_GPU", styleVersion: STYLE_VERSION, error: error instanceof Error ? error.message : String(error) });
+        try {
+          image = await generateEditorialImage(prompt, { width: 768, height: 1024, timeoutMs: 45_000 });
+          externalGenerated++;
+        } catch (error) {
+          externalError = error instanceof Error ? error.message : String(error);
+        }
       }
+
+      let status = "GENERATED";
+      if (!image) {
+        const local = generateLocalEditorialRaster({
+          productId: Number(row.id),
+          title: String(row.title),
+          view,
+          palette: Array.isArray(specs.palette) ? specs.palette : [],
+          width: 480,
+          height: 600,
+        });
+        if (local.bytes.length <= 10_000) throw new Error(`Local editorial raster unexpectedly small for product ${row.id}: ${local.bytes.length} bytes`);
+        image = local;
+        localGenerated++;
+        status = "LOCAL_RASTER_FALLBACK";
+      }
+
+      await storeMedia({ productId: Number(row.id), view, mimeType: image.mimeType, bytes: image.bytes, provider: image.provider, prompt, sourceUrl: image.sourceUrl });
+      const publicUrl = await attachPublicPhoto(Number(row.id), view, String(row.title), specs, origin, image.provider);
+      generated++;
+      results.push({
+        productId: Number(row.id), title: row.title, view, status, publicUrl, provider: image.provider,
+        bytes: image.bytes.length, styleVersion: STYLE_VERSION, ...(externalError ? { externalError } : {}),
+      });
     }
   }
 
   const cachedRewired = results.filter((x) => x.status === "CACHED_REWIRED").length;
-  const frontReady = new Set(results.filter((x) => x.view === 0 && (x.status === "GENERATED" || x.status === "CACHED_REWIRED")).map((x) => x.productId)).size;
-  const waitingRefresh = results.filter((x) => x.status === "STALE_WAITING_REFRESH").length;
+  const frontReady = new Set(results.filter((x) => x.view === 0 && ["GENERATED", "LOCAL_RASTER_FALLBACK", "CACHED_REWIRED"].includes(x.status)).map((x) => x.productId)).size;
+  const totalProducts = rows.rows.length;
   await pool.query(
     `INSERT INTO ai_activity_logs (user_id,agent_name,action_type,message,metadata_json,status)
      VALUES (1,'BharatDrip Fashion Photo Studio','EDITORIAL_MODEL_SHOTS',$1,$2,$3)`,
-    [generated || cachedRewired ? `Prepared ${generated + cachedRewired} BharatDrip ${STYLE_VERSION} model shot link(s); ${frontReady} product card(s) have current-style front photography.` : "Free GPU unavailable; older model shots were not promoted as current-style photography.", JSON.stringify({ styleVersion: STYLE_VERSION, generated, cachedRewired, frontReady, waitingRefresh, requestedProducts: limit, results }), generated || cachedRewired ? "SUCCESS" : "DEGRADED"]
+    [
+      `Prepared ${generated + cachedRewired} BharatDrip ${STYLE_VERSION} editorial raster link(s); ${frontReady}/${totalProducts} product card(s) have current-style front media.`,
+      JSON.stringify({ styleVersion: STYLE_VERSION, generated, externalGenerated, localGenerated, cachedRewired, frontReady, totalProducts, results }),
+      frontReady === totalProducts && totalProducts > 0 ? "SUCCESS" : "WARNING",
+    ]
   );
-  return NextResponse.json({ success: frontReady > 0, status: frontReady > 0 ? "READY" : "DEFERRED_FREE_GPU", attempted, provider: "free-first-hf-zerogpu", styleVersion: STYLE_VERSION, generated, cachedRewired, frontReady, waitingRefresh, requestedProducts: limit, fallback: "BharatShop/Qikink-safe product mockups", results });
+  return NextResponse.json({
+    success: totalProducts > 0 && frontReady === totalProducts,
+    status: totalProducts > 0 && frontReady === totalProducts ? "READY" : "PARTIAL",
+    attempted,
+    provider: "free-external-with-local-raster-fallback",
+    styleVersion: STYLE_VERSION,
+    generated,
+    externalGenerated,
+    localGenerated,
+    cachedRewired,
+    frontReady,
+    totalProducts,
+    waitingRefresh: Math.max(0, totalProducts - frontReady),
+    fallback: "Original BharatShop local stylized raster editorial; Qikink garment/design mapping remains production truth",
+    results,
+  });
 }
 
 export async function GET(req: Request) {
   if (!authorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   await ensureTable();
   const count = await pool.query(`SELECT COUNT(*)::int AS count,COUNT(DISTINCT product_id)::int AS products FROM fashion_media_cache`);
-  return NextResponse.json({ status: "READY", provider: "hf-zerogpu-flux1-schnell", styleVersion: STYLE_VERSION, cachedShots: Number(count.rows[0]?.count || 0), cachedProducts: Number(count.rows[0]?.products || 0), productionMockups: "Qikink free mockup generator remains production truth" });
+  return NextResponse.json({
+    status: "READY",
+    provider: "free-external-with-local-raster-fallback",
+    styleVersion: STYLE_VERSION,
+    cachedShots: Number(count.rows[0]?.count || 0),
+    cachedProducts: Number(count.rows[0]?.products || 0),
+    productionMockups: "Qikink free mockup generator remains production truth",
+  });
 }

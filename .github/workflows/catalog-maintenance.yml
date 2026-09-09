@@ -79,7 +79,7 @@ jobs:
           console.log(JSON.stringify({fashionGenerated:d.generated,value:value.length,bharatDrip:designer.length,pricingPolicy:d.pricingPolicy},null,2));
           NODE
 
-      - name: Generate photoreal BharatDrip model shots on free GPU
+      - name: Try free-GPU BharatDrip editorial upgrade
         continue-on-error: true
         env:
           TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
@@ -88,10 +88,10 @@ jobs:
           curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 \
             -X POST "$BHARATSHOP_URL/api/automation/fashion-photo-studio" \
             -H "Authorization: Bearer $TOKEN" -H "x-automation-token: $TOKEN" -H "Content-Type: application/json" \
-            --data '{"limit":2}' | tee fashion-photo-studio.json
+            --data '{"externalAttemptLimit":2}' | tee fashion-photo-studio.json
           node - <<'NODE'
           const d=require('./fashion-photo-studio.json');
-          console.log(JSON.stringify({provider:d.provider,generated:d.generated,cachedRewired:d.cachedRewired||0,deferred:(d.results||[]).filter(x=>x.status==='DEFERRED_FREE_GPU').length},null,2));
+          console.log(JSON.stringify({provider:d.provider,externalGenerated:d.externalGenerated||0,localGenerated:d.localGenerated||0,cachedRewired:d.cachedRewired||0,frontReady:d.frontReady||0},null,2));
           NODE
 
       - name: Reprice or block uncompetitive supplier products
@@ -124,6 +124,24 @@ jobs:
           curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 \
             -X POST "$BHARATSHOP_URL/api/automation/ceo-cycle?skipResearch=1" \
             -H "Authorization: Bearer $TOKEN" -H "x-automation-token: $TOKEN" -H "Content-Type: application/json" --data '{}' | tee ceo-cycle-2.json
+
+      - name: Ensure zero-cost BharatDrip editorial media after publication
+        env:
+          TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$TOKEN"
+          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 \
+            -X POST "$BHARATSHOP_URL/api/automation/fashion-photo-studio" \
+            -H "Authorization: Bearer $TOKEN" -H "x-automation-token: $TOKEN" -H "Content-Type: application/json" \
+            --data '{"externalAttemptLimit":0}' | tee fashion-media-ready.json
+          node - <<'NODE'
+          const d=require('./fashion-media-ready.json');
+          if(!d.success) throw new Error(`BharatDrip media not ready: ${JSON.stringify(d)}`);
+          if(Number(d.frontReady)<4) throw new Error(`Only ${d.frontReady} BharatDrip front editorial assets are ready`);
+          if(Number(d.waitingRefresh)!==0) throw new Error(`${d.waitingRefresh} BharatDrip products still lack current editorial media`);
+          console.log(JSON.stringify({frontReady:d.frontReady,totalProducts:d.totalProducts,externalGenerated:d.externalGenerated||0,localGenerated:d.localGenerated||0,cachedRewired:d.cachedRewired||0},null,2));
+          NODE
 
       - name: Require a substantial safe live catalog
         run: |
