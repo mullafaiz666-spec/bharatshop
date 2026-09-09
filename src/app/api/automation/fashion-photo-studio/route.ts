@@ -44,9 +44,10 @@ function publicOrigin(req: Request) {
 }
 
 function editorialPrompt(row: any, specs: Record<string, any>, view: number) {
-  const title = String(row.title || "BharatDrip streetwear");
+  const brand = String(specs.designOrigin || row.brand || "BharatShop Studio");
+  const title = String(row.title || `${brand} streetwear`);
   const garment = String(specs.qikinkProductName || "oversized heavyweight t-shirt");
-  const brief = String(specs.designBrief || "original minimal streetwear chest graphic");
+  const brief = String(specs.designBrief || "original minimal streetwear graphic");
   const palette = Array.isArray(specs.palette) ? specs.palette.join(", ") : "black, charcoal, white, one electric accent";
   const back = view === 2;
   const scenes = [
@@ -58,13 +59,13 @@ function editorialPrompt(row: any, specs: Record<string, any>, view: number) {
   ];
   const scene = scenes[Math.abs((Number(row.id) || 0) * 11 + view * 17) % scenes.length];
   return [
-    `BharatDrip style=${STYLE_VERSION}.`,
+    `${brand} style=${STYLE_VERSION}.`,
     "PHOTOREALISTIC REAL HUMAN FASHION PHOTO ONLY. No illustration, vector art, pixel art, mannequin, 3D render, game character or synthetic cutout look.",
     "Contemporary drip/streetwear styling inspired by real street-fashion photography: oversized graphic tee or hoodie, very baggy washed denim or parachute cargos, stacked hems, clean chunky sneakers, subtle chain/cap/crossbody details.",
     "Fictional adult Indian fashion model age 20-28, natural skin texture, realistic hair, realistic hands and proportions, confident candid expression, non-celebrity.",
     back ? "Three-quarter rear full-body pose with the back of the garment clearly visible." : "Front or three-quarter full-body fashion pose, slightly low camera angle, one foot offset, natural relaxed confidence.",
     `Hero garment: ${garment}; realistic heavyweight cotton drape, oversized drop shoulders, premium streetwear fit.`,
-    `Product concept: ${title}. Original BharatDrip artwork direction: ${brief}. Palette: ${palette}.`,
+    `Product concept: ${title}. Original ${brand} artwork direction: ${brief}. Palette: ${palette}.`,
     back ? "Keep a clean original back graphic area as the garment focal point." : "Keep the front artwork area crisp, tasteful and visible; do not invent third-party logos or licensed characters.",
     `Real-world location: ${scene}.`,
     "Use high-quality smartphone/DSLR fashion photography, 35mm equivalent lens, believable depth of field, fabric texture, natural shadows, punchy but realistic contrast and subtle grain.",
@@ -131,7 +132,11 @@ export async function POST(req: Request) {
     `SELECT p.id,p.title,p.brand,p.category,d.specifications_json,COALESCE(c.provider,'') AS front_provider,COALESCE(c.prompt,'') AS front_prompt
      FROM products p JOIN product_details d ON d.product_id=p.id
      LEFT JOIN fashion_media_cache c ON c.product_id=p.id AND c.view=0
-     WHERE p.status='Published' AND p.brand='BharatDrip' AND COALESCE(d.specifications_json->>'designLine','')='DESIGNER'
+     WHERE p.status='Published'
+       AND LOWER(COALESCE(d.specifications_json->>'designOrigin',p.brand,'')) IN ('bharatdrip','bharatshop studio')
+       AND UPPER(COALESCE(d.specifications_json->>'inventoryMode',''))='MADE_TO_ORDER'
+       AND LOWER(COALESCE(d.specifications_json->>'productionSupplier',''))='qikink'
+       AND COALESCE(d.specifications_json->>'qikinkProductCode','')<>''
      ORDER BY CASE WHEN COALESCE(c.provider,'')=$1 OR COALESCE(c.prompt,'') NOT LIKE $2 THEN 0 ELSE 1 END,p.updated_at DESC,p.id DESC
      LIMIT $3`,
     [LOCAL_PROVIDER, `%style=${STYLE_VERSION}%`, productLimit]
@@ -179,15 +184,28 @@ export async function POST(req: Request) {
   }
 
   const totals = await pool.query(
-    `SELECT COUNT(*) FILTER (WHERE p.status='Published' AND p.brand='BharatDrip' AND COALESCE(d.specifications_json->>'designLine','')='DESIGNER')::int AS total,
-            COUNT(*) FILTER (WHERE p.status='Published' AND p.brand='BharatDrip' AND COALESCE(d.specifications_json->>'designLine','')='DESIGNER' AND c.provider IS NOT NULL AND c.provider<>$1 AND COALESCE(c.prompt,'') LIKE $2)::int AS photoreal
+    `SELECT COUNT(*) FILTER (
+              WHERE p.status='Published'
+                AND LOWER(COALESCE(d.specifications_json->>'designOrigin',p.brand,'')) IN ('bharatdrip','bharatshop studio')
+                AND UPPER(COALESCE(d.specifications_json->>'inventoryMode',''))='MADE_TO_ORDER'
+                AND LOWER(COALESCE(d.specifications_json->>'productionSupplier',''))='qikink'
+                AND COALESCE(d.specifications_json->>'qikinkProductCode','')<>''
+            )::int AS total,
+            COUNT(*) FILTER (
+              WHERE p.status='Published'
+                AND LOWER(COALESCE(d.specifications_json->>'designOrigin',p.brand,'')) IN ('bharatdrip','bharatshop studio')
+                AND UPPER(COALESCE(d.specifications_json->>'inventoryMode',''))='MADE_TO_ORDER'
+                AND LOWER(COALESCE(d.specifications_json->>'productionSupplier',''))='qikink'
+                AND COALESCE(d.specifications_json->>'qikinkProductCode','')<>''
+                AND c.provider IS NOT NULL AND c.provider<>$1 AND COALESCE(c.prompt,'') LIKE $2
+            )::int AS photoreal
      FROM products p JOIN product_details d ON d.product_id=p.id LEFT JOIN fashion_media_cache c ON c.product_id=p.id AND c.view=0`,
     [LOCAL_PROVIDER, `%style=${STYLE_VERSION}%`]
   );
   const totalProducts = Number(totals.rows[0]?.total || 0), photorealFrontReady = Number(totals.rows[0]?.photoreal || 0);
   await pool.query(
-    `INSERT INTO ai_activity_logs (user_id,agent_name,action_type,message,metadata_json,status) VALUES (1,'BharatDrip Fashion Photo Studio','REALWORLD_STREETWEAR_REFRESH',$1,$2,$3)`,
-    [`BharatDrip ${STYLE_VERSION}: ${photorealFrontReady}/${totalProducts} published designer cards now have real-human photoreal front media.`, JSON.stringify({ views, productLimit, attempted, generated, cached, mockupFallbacks, photorealFrontReady, totalProducts, results }), photorealFrontReady === totalProducts && totalProducts > 0 ? "SUCCESS" : "WARNING"]
+    `INSERT INTO ai_activity_logs (user_id,agent_name,action_type,message,metadata_json,status) VALUES (1,'Fashion Photo Studio','REALWORLD_STREETWEAR_REFRESH',$1,$2,$3)`,
+    [`Made-to-order fashion ${STYLE_VERSION}: ${photorealFrontReady}/${totalProducts} published fashion cards now have real-human photoreal front media.`, JSON.stringify({ views, productLimit, attempted, generated, cached, mockupFallbacks, photorealFrontReady, totalProducts, results }), photorealFrontReady === totalProducts && totalProducts > 0 ? "SUCCESS" : "WARNING"]
   );
   return NextResponse.json({
     success: totalProducts > 0,
@@ -219,6 +237,6 @@ export async function GET(req: Request) {
     cachedShots: Number(count.rows[0]?.cached_shots || 0),
     cachedProducts: Number(count.rows[0]?.cached_products || 0),
     photorealCurrentShots: Number(count.rows[0]?.photoreal_current || 0),
-    productionTruth: "Qikink garment/design mapping; non-photoreal mockups are not labeled editorial photos",
+    productionTruth: "Qikink garment/design mapping; non-photoreal mockups are kept internal until a verified photoreal front image is ready",
   });
 }
