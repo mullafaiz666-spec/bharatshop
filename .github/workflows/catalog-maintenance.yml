@@ -22,7 +22,7 @@ env:
 jobs:
   maintain-catalog:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -33,12 +33,9 @@ jobs:
             code=$(curl -sS -o /tmp/health.json -w '%{http_code}' --max-time 25 "$BHARATSHOP_URL/api/health" || true)
             revision=$(node -e "try{const d=require('/tmp/health.json');process.stdout.write(String(d.revision||''))}catch{}")
             echo "health=$code revision=$revision expected=$GITHUB_SHA"
-            if [ "$code" = "200" ] && { [ -z "$revision" ] || [ "$revision" = "$GITHUB_SHA" ]; }; then
-              if [ "${{ github.event_name }}" != "push" ] || [ "$revision" = "$GITHUB_SHA" ]; then exit 0; fi
-            fi
+            if [ "$code" = "200" ] && [ "$revision" = "$GITHUB_SHA" ]; then exit 0; fi
             sleep 10
           done
-          echo "Production did not expose the current main revision in time"
           exit 1
 
       - name: Import verified DeoDap supplier products
@@ -54,55 +51,7 @@ jobs:
             -H "Content-Type: application/json" \
             --data '{"limit":5}' | tee deodap-bootstrap.json
 
-      - name: Discover additional candidates through free search
-        env:
-          BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
-        run: |
-          set -euo pipefail
-          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 240 --retry 1 --retry-delay 10 \
-            -X POST "$BHARATSHOP_URL/api/automation/research-products" \
-            -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" \
-            -H "x-automation-token: $BHARATSHOP_AUTOMATION_TOKEN" \
-            -H "Content-Type: application/json" \
-            --data '{"limit":2}' | tee research-products.json
-
-      - name: Repair staged supplier evidence
-        env:
-          BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
-        run: |
-          set -euo pipefail
-          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 --retry 1 --retry-delay 10 \
-            -X POST "$BHARATSHOP_URL/api/automation/source-verify" \
-            -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" \
-            -H "x-automation-token: $BHARATSHOP_AUTOMATION_TOKEN" \
-            -H "Content-Type: application/json" \
-            --data '{"limit":2,"minMarginPct":30}' | tee source-verify.json || true
-
-      - name: Repair staged product enrichment
-        env:
-          BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
-        run: |
-          set -euo pipefail
-          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 --retry 1 --retry-delay 10 \
-            -X POST "$BHARATSHOP_URL/api/automation/product-enrich" \
-            -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" \
-            -H "x-automation-token: $BHARATSHOP_AUTOMATION_TOKEN" \
-            -H "Content-Type: application/json" \
-            --data '{"limit":2}' | tee product-enrich.json || true
-
-      - name: Repair staged media when free search is available
-        env:
-          BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
-        run: |
-          set -euo pipefail
-          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 --retry 1 --retry-delay 10 \
-            -X POST "$BHARATSHOP_URL/api/catalog/image-resolve" \
-            -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" \
-            -H "x-automation-token: $BHARATSHOP_AUTOMATION_TOKEN" \
-            -H "Content-Type: application/json" \
-            --data '{"limit":2}' | tee media-resolve.json || true
-
-      - name: Run CEO verification and publication
+      - name: Run CEO verification and publication immediately
         env:
           BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
         run: |
@@ -127,3 +76,15 @@ jobs:
           if(unsafe.length) throw new Error(`Published storefront contains ${unsafe.length} unsafe product(s)`);
           console.log(JSON.stringify({published:d.products.length,total:d.total,unsafe:unsafe.length},null,2));
           NODE
+
+      - name: Optional free-search discovery after storefront is operational
+        continue-on-error: true
+        env:
+          BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
+        run: |
+          curl --silent --show-error --connect-timeout 10 --max-time 90 \
+            -X POST "$BHARATSHOP_URL/api/automation/research-products" \
+            -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" \
+            -H "x-automation-token: $BHARATSHOP_AUTOMATION_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data '{"limit":1}' | tee research-products.json
