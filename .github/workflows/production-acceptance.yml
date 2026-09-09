@@ -43,7 +43,6 @@ jobs:
           test -n "$BHARATSHOP_AUTOMATION_TOKEN"
           AUTH=(-H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" -H "x-automation-token: $BHARATSHOP_AUTOMATION_TOKEN" -H "Content-Type: application/json")
           curl --silent --show-error --fail-with-body --max-time 300 -X POST "$BHARATSHOP_URL/api/automation/deodap-bootstrap" "${AUTH[@]}" --data '{"limit":30,"maxPages":16}' | tee /tmp/deodap.json
-          curl --silent --show-error --fail-with-body --max-time 300 -X POST "$BHARATSHOP_URL/api/fashion-designer" "${AUTH[@]}" --data '{"count":12}' | tee /tmp/fashion.json
           curl --silent --show-error --fail-with-body --max-time 300 -X POST "$BHARATSHOP_URL/api/automation/ceo-cycle?skipResearch=1" "${AUTH[@]}" --data '{}' | tee /tmp/ceo1.json
           curl --silent --show-error --fail-with-body --max-time 300 -X POST "$BHARATSHOP_URL/api/automation/ceo-cycle?skipResearch=1" "${AUTH[@]}" --data '{}' | tee /tmp/ceo2.json
           curl --silent --show-error --fail-with-body --max-time 300 -X POST "$BHARATSHOP_URL/api/automation/ceo-delegation" "${AUTH[@]}" --data '{}' | tee /tmp/ceo-delegation.json
