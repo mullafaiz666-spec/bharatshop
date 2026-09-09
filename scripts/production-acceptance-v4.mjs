@@ -16,6 +16,18 @@ async function req(path,options={}){
 }
 
 const bool=x=>x===true;
+function safeStorefrontMedia(url,contentType,bytes,body=""){
+  if(!/^https:\/\//i.test(String(url||""))||bytes<=0)return false;
+  if(/^image\/(?:png|jpeg|webp|avif)$/i.test(contentType))return bytes>2000;
+  if(contentType!=="image/svg+xml"||bytes<=1000)return false;
+  let u,base;
+  try{u=new URL(url);base=new URL(BASE);}catch{return false;}
+  if(u.origin!==base.origin||!/^\/api\/fashion-art\/\d+\/[0-3]$/.test(u.pathname)||u.searchParams.get("fallback")!=="product-mockup")return false;
+  const svg=String(body||"");
+  return /^\s*<svg\b/i.test(svg)
+    && !/<(?:script|foreignObject)\b/i.test(svg)
+    && !/\b(?:href|xlink:href)\s*=\s*["'](?:https?:|javascript:|data:text\/html)/i.test(svg);
+}
 function isRealClientOrder(order){
   const ref=String(order?.orderRef||"").trim(),source=String(order?.source||"").toLowerCase(),shopifyId=String(order?.shopifyOrderId||"").trim();
   const markers=`${ref} ${source} ${order?.notes||""} ${order?.customerName||""} ${order?.customerEmail||""}`.toLowerCase();
@@ -64,8 +76,10 @@ async function main(){
     }else{
       const art=await fetch(sample,{signal:AbortSignal.timeout(30000)});
       const ct=(art.headers.get("content-type")||"").split(";")[0];
-      const bytes=art.ok?(await art.arrayBuffer()).byteLength:0;
-      const ok=art.ok&&/^image\/(?:png|jpeg|webp|avif)$/i.test(ct)&&bytes>2000;
+      const buffer=art.ok?await art.arrayBuffer():new ArrayBuffer(0);
+      const bytes=buffer.byteLength;
+      const body=ct==="image/svg+xml"?new TextDecoder().decode(buffer):"";
+      const ok=art.ok&&safeStorefrontMedia(sample,ct,bytes,body);
       gate("GATE 6 Storefront media live",ok?"PASS":"FAIL",`HTTP ${art.status}; type=${ct}; bytes=${bytes}; ${sample}`);
     }
   }catch(e){
