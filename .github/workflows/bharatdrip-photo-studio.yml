@@ -24,7 +24,7 @@ env:
 jobs:
   model-photography:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -49,36 +49,40 @@ jobs:
           curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 \
             -X POST "$BHARATSHOP_URL/api/automation/fashion-photo-studio" \
             -H "Authorization: Bearer $TOKEN" -H "x-automation-token: $TOKEN" -H "Content-Type: application/json" \
-            --data '{"limit":1}' | tee fashion-photo-studio.json
+            --data '{"limit":4}' | tee fashion-photo-studio.json
           node - <<'NODE'
           const d=require('./fashion-photo-studio.json');
-          const usable=Number(d.generated||0)+Number(d.cachedRewired||0);
           if(!d.success) throw new Error(`Photo studio failed: ${JSON.stringify(d)}`);
-          if(usable<1) throw new Error(`No real BharatDrip model photos available yet: ${JSON.stringify(d)}`);
-          const prepared=(d.results||[]).filter(x=>x.status==='GENERATED'||x.status==='CACHED_REWIRED');
-          console.log(JSON.stringify({provider:d.provider,generated:d.generated,cachedRewired:d.cachedRewired,prepared:prepared.map(x=>({productId:x.productId,title:x.title,view:x.view,publicUrl:x.publicUrl,status:x.status}))},null,2));
+          console.log(JSON.stringify({provider:d.provider,generated:d.generated,cachedRewired:d.cachedRewired,frontReady:d.frontReady,results:d.results},null,2));
           NODE
 
-      - name: Verify storefront prioritizes model photography
+      - name: Verify every BharatDrip card prioritizes model photography
         run: |
           set -euo pipefail
           curl --silent --show-error --fail-with-body --max-time 90 "$BHARATSHOP_URL/api/storefront/products?category=BharatDrip%20Streetwear&limit=24" | tee bharatdrip-storefront.json
           node - <<'NODE'
           const d=require('./bharatdrip-storefront.json');
           const products=Array.isArray(d.products)?d.products:[];
-          const modelled=products.filter(p=>Array.isArray(p.imageUrls)&&p.imageUrls.some(u=>String(u).includes('/api/fashion-photo/')));
-          if(!modelled.length) throw new Error(`No BharatDrip storefront item prioritizes model photography: ${JSON.stringify(products.slice(0,3))}`);
-          console.log(JSON.stringify({bharatDripProducts:products.length,modelledProducts:modelled.length,sample:modelled.slice(0,4).map(p=>({id:p.id,title:p.title,imageUrl:p.imageUrl,imageUrls:p.imageUrls}))},null,2));
+          if(products.length<4) throw new Error(`BharatDrip catalog unexpectedly small: ${products.length}`);
+          const modelled=products.filter(p=>String(p.imageUrl||'').includes('/api/fashion-photo/'));
+          const fallback=products.filter(p=>!String(p.imageUrl||'').includes('/api/fashion-photo/'));
+          if(fallback.length) throw new Error(`BharatDrip cards still using fallback art: ${JSON.stringify(fallback.map(p=>({id:p.id,title:p.title,imageUrl:p.imageUrl})))}`);
+          console.log(JSON.stringify({bharatDripProducts:products.length,modelledProducts:modelled.length,sample:modelled.map(p=>({id:p.id,title:p.title,imageUrl:p.imageUrl}))},null,2));
           NODE
 
-      - name: Verify one live model image is raster media
+      - name: Verify every live primary model image is raster media
         run: |
           set -euo pipefail
-          image=$(node -e "const d=require('./bharatdrip-storefront.json'); const p=(d.products||[]).find(x=>(x.imageUrls||[]).some(u=>String(u).includes('/api/fashion-photo/'))); process.stdout.write(String((p?.imageUrls||[]).find(u=>String(u).includes('/api/fashion-photo/'))||''));")
-          test -n "$image"
-          curl -sS -D /tmp/model-headers.txt -o /tmp/model-image --fail --max-time 90 "$image"
-          type=$(awk 'BEGIN{IGNORECASE=1}/^content-type:/{print $2}' /tmp/model-headers.txt | tr -d '\r' | tail -1)
-          bytes=$(wc -c < /tmp/model-image | tr -d ' ')
-          echo "model image=$image type=$type bytes=$bytes"
-          case "$type" in image/png|image/jpeg|image/webp) ;; *) echo "Expected raster image, got $type"; exit 1;; esac
-          test "$bytes" -gt 10000
+          node -e "const d=require('./bharatdrip-storefront.json'); for(const p of d.products||[]) console.log(p.imageUrl);" > /tmp/model-urls.txt
+          count=0
+          while IFS= read -r image; do
+            test -n "$image"
+            curl -sS -D /tmp/model-headers.txt -o /tmp/model-image --fail --max-time 90 "$image"
+            type=$(awk 'BEGIN{IGNORECASE=1}/^content-type:/{print $2}' /tmp/model-headers.txt | tr -d '\r' | tail -1)
+            bytes=$(wc -c < /tmp/model-image | tr -d ' ')
+            echo "model image=$image type=$type bytes=$bytes"
+            case "$type" in image/png|image/jpeg|image/webp) ;; *) echo "Expected raster image, got $type"; exit 1;; esac
+            test "$bytes" -gt 10000
+            count=$((count+1))
+          done < /tmp/model-urls.txt
+          test "$count" -ge 4
