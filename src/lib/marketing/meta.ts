@@ -37,6 +37,9 @@ export async function sendMetaConversion(input: MetaConversionInput) {
   const pixelId = metaPixelId(), token = capiToken();
   if (!pixelId || !token) return { configured: false, sent: false, reason: "missing_meta_pixel_or_capi_token" as const };
   if (!/^\d+$/.test(pixelId)) return { configured: true, sent: false, reason: "invalid_meta_pixel_id" as const };
+  if (!/^v\d+\.\d+$/.test(graphVersion())) return { configured: true, sent: false, reason: "invalid_meta_graph_version" as const };
+  const browserPixel = process.env.NEXT_PUBLIC_META_PIXEL_ID?.trim();
+  if (browserPixel && browserPixel !== pixelId) return { configured: true, sent: false, reason: "meta_pixel_id_mismatch" as const };
   const userData = cleanObject({
     client_ip_address: input.clientIpAddress,
     client_user_agent: input.userAgent,
@@ -66,6 +69,7 @@ export async function sendMetaConversion(input: MetaConversionInput) {
   });
   let result: any = null; try { result = await response.json(); } catch {}
   if (!response.ok) return { configured: true, sent: false, httpStatus: response.status, reason: "meta_rejected_event" as const };
+  if (Number(result?.events_received || 0) < 1) return { configured: true, sent: false, httpStatus: response.status, reason: "meta_event_not_acknowledged" as const };
   return { configured: true, sent: true, httpStatus: response.status, eventsReceived: Number(result?.events_received || 0), traceId: result?.fbtrace_id ? String(result.fbtrace_id) : undefined };
 }
 
