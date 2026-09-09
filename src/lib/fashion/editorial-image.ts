@@ -38,21 +38,22 @@ function normalizeEndpointName(raw: string) {
   return String(raw || "").replace(/^\/+|\/+$/g, "");
 }
 
-function parseCompleteEvent(text: string): any[] {
-  const blocks = text.split(/\n\n+/);
+export function parseCompleteEvent(text: string): any[] {
+  const blocks = text.split(/\r?\n\r?\n+/);
   for (const block of blocks) {
     if (!block.includes("event: complete")) continue;
     const line = block.split(/\r?\n/).find((x) => x.startsWith("data:"));
-    if (line) return JSON.parse(line.slice(5).trim());
+    if (!line) continue;
+    const value = JSON.parse(line.slice(5).trim());
+    if (!Array.isArray(value)) throw new Error("Completion did not contain image outputs");
+    return value;
   }
   const errorBlock = blocks.find((block) => block.includes("event: error"));
   if (errorBlock) {
     const line = errorBlock.split(/\r?\n/).find((x) => x.startsWith("data:"));
     const detail = line ? line.slice(5).trim().slice(0, 500) : "unknown";
-    throw new Error(`generation event failed: ${detail}`);
+    throw new Error(`Generation failed; no image was produced: ${detail}`);
   }
-  const lastData = text.split(/\r?\n/).reverse().find((x) => x.startsWith("data:"));
-  if (lastData) return JSON.parse(lastData.slice(5).trim());
   throw new Error("generation returned no complete event");
 }
 
@@ -66,7 +67,7 @@ function candidateKey(candidate: SubmitCandidate) {
   return `${candidate.submitUrl}|${candidate.mode}|${candidate.paramNames.join(",")}`;
 }
 
-async function discoverSubmitCandidates(spec: ProviderSpec): Promise<SubmitCandidate[]> {
+async function discoverSubmitCandidates(spec: ProviderSpec, signal: AbortSignal): Promise<SubmitCandidate[]> {
   const candidates: SubmitCandidate[] = [];
   const seen = new Set<string>();
   const add = (candidate: SubmitCandidate) => {
@@ -80,7 +81,7 @@ async function discoverSubmitCandidates(spec: ProviderSpec): Promise<SubmitCandi
   try {
     const response = await fetch(`${spec.base}/gradio_api/openapi.json`, {
       headers: { Accept: "application/json", ...authHeaders() },
-      signal: openapiTimer.signal,
+      signal: AbortSignal.any([openapiTimer.signal, signal]),
       cache: "no-store",
     });
     if (response.ok) {
@@ -105,7 +106,7 @@ async function discoverSubmitCandidates(spec: ProviderSpec): Promise<SubmitCandi
   try {
     const response = await fetch(`${spec.base}/gradio_api/info`, {
       headers: { Accept: "application/json", ...authHeaders() },
-      signal: infoTimer.signal,
+      signal: AbortSignal.any([infoTimer.signal, signal]),
       cache: "no-store",
     });
     if (response.ok) {
@@ -117,7 +118,6 @@ async function discoverSubmitCandidates(spec: ProviderSpec): Promise<SubmitCandi
           if (!endpoint) continue;
           const params = Array.isArray(definition?.parameters) ? definition.parameters : [];
           const names = params.map((p: any) => String(p?.parameter_name || p?.name || "").trim()).filter(Boolean);
-          add({ submitUrl: `${spec.base}/gradio_api/call/v2/${endpoint}`, resultBaseUrl: `${spec.base}/gradio_api/call/${endpoint}`, mode: names.length ? "named" : "data", paramNames: names });
           add({ submitUrl: `${spec.base}/gradio_api/call/${endpoint}`, resultBaseUrl: `${spec.base}/gradio_api/call/${endpoint}`, mode: "data", paramNames: names });
         }
       }
@@ -128,10 +128,9 @@ async function discoverSubmitCandidates(spec: ProviderSpec): Promise<SubmitCandi
     infoTimer.clear();
   }
 
-  for (const endpoint of [...spec.endpointHints, "predict", "0", "false"]) {
+  for (const endpoint of [...spec.endpointHints, "predict"]) {
     const name = normalizeEndpointName(endpoint);
     if (!name) continue;
-    add({ submitUrl: `${spec.base}/gradio_api/call/v2/${name}`, resultBaseUrl: `${spec.base}/gradio_api/call/${name}`, mode: "data", paramNames: [] });
     add({ submitUrl: `${spec.base}/gradio_api/call/${name}`, resultBaseUrl: `${spec.base}/gradio_api/call/${name}`, mode: "data", paramNames: [] });
   }
   return candidates;
@@ -146,8 +145,8 @@ function requestBody(candidate: SubmitCandidate, data: unknown[]) {
   return body;
 }
 
-async function submitGeneration(spec: ProviderSpec, data: unknown[], timeoutMs: number): Promise<{ eventId: string; resultBaseUrl: string }> {
-  const candidates = await discoverSubmitCandidates(spec);
+async function submitGeneration(spec: ProviderSpec, data: unknown[], timeoutMs: number, signal: AbortSignal): Promise<{ eventId: string; resultBaseUrl: string }> {
+  const candidates = await discoverSubmitCandidates(spec, signal);
   const failures: string[] = [];
   for (const candidate of candidates) {
     const timer = withTimeout(Math.min(30_000, timeoutMs));
@@ -156,7 +155,7 @@ async function submitGeneration(spec: ProviderSpec, data: unknown[], timeoutMs: 
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify(requestBody(candidate, data)),
-        signal: timer.signal,
+        signal: AbortSignal.any([timer.signal, signal]),
         cache: "no-store",
       });
       if (!response.ok) {
@@ -214,7 +213,7 @@ function candidateUrls(ref: string, base: string): string[] {
   return [];
 }
 
-async function downloadImage(outputs: unknown, base: string): Promise<{ bytes: Buffer; mimeType: string; sourceUrl: string }> {
+async function downloadImage(outputs: unknown, base: string, signal: AbortSignal): Promise<{ bytes: Buffer; mimeType: string; sourceUrl: string }> {
   const refs = collectImageRefs(outputs);
   const failures: string[] = [];
   for (const ref of refs) {
@@ -228,7 +227,7 @@ async function downloadImage(outputs: unknown, base: string): Promise<{ bytes: B
     for (const url of candidateUrls(ref, base)) {
       const timer = withTimeout(30_000);
       try {
-        const response = await fetch(url, { headers: authHeaders(), signal: timer.signal, cache: "no-store" });
+        const response = await fetch(url, { headers: new URL(url).origin === new URL(base).origin ? authHeaders() : {}, signal: AbortSignal.any([timer.signal, signal]), cache: "no-store" });
         if (!response.ok) {
           failures.push(`${url}=>${response.status}`);
           continue;
@@ -254,19 +253,19 @@ async function downloadImage(outputs: unknown, base: string): Promise<{ bytes: B
   throw new Error(`no raster image; refs=${refs.length}; failures=${failures.slice(0, 5).join(", ")}`);
 }
 
-async function runProvider(spec: ProviderSpec, prompt: string, seed: number, width: number, height: number, timeoutMs: number): Promise<GeneratedEditorial> {
-  const { eventId, resultBaseUrl } = await submitGeneration(spec, spec.data(prompt, seed, width, height), timeoutMs);
+async function runProvider(spec: ProviderSpec, prompt: string, seed: number, width: number, height: number, timeoutMs: number, signal: AbortSignal): Promise<GeneratedEditorial> {
+  const { eventId, resultBaseUrl } = await submitGeneration(spec, spec.data(prompt, seed, width, height), timeoutMs, signal);
   const resultUrl = `${resultBaseUrl}/${encodeURIComponent(eventId)}`;
   const timer = withTimeout(timeoutMs);
-  let response: Response;
+  let outputs: any[];
   try {
-    response = await fetch(resultUrl, { headers: { Accept: "text/event-stream", ...authHeaders() }, signal: timer.signal, cache: "no-store" });
+    const response = await fetch(resultUrl, { headers: { Accept: "text/event-stream", ...authHeaders() }, signal: AbortSignal.any([timer.signal, signal]), cache: "no-store" });
+    if (!response.ok) throw new Error(`result HTTP ${response.status}`);
+    outputs = parseCompleteEvent(await response.text());
   } finally {
     timer.clear();
   }
-  if (!response.ok) throw new Error(`result HTTP ${response.status}`);
-  const outputs = parseCompleteEvent(await response.text());
-  const image = await downloadImage(outputs, spec.base);
+  const image = await downloadImage(outputs, spec.base, signal);
   return { bytes: image.bytes, mimeType: image.mimeType, provider: spec.name, sourceUrl: image.sourceUrl, prompt };
 }
 
@@ -287,9 +286,11 @@ export async function generateEditorialImage(prompt: string, options?: { width?:
 
   const unique = providers.filter((provider, index, all) => all.findIndex((x) => x.base === provider.base) === index);
   const failures: string[] = [];
+  const signal = AbortSignal.timeout(timeoutMs);
   for (const provider of unique) {
+    if (signal.aborted) break;
     try {
-      return await runProvider(provider, prompt, seed, width, height, timeoutMs);
+      return await runProvider(provider, prompt, seed, width, height, timeoutMs, signal);
     } catch (error) {
       failures.push(`${provider.name}: ${error instanceof Error ? error.message : String(error)}`);
     }

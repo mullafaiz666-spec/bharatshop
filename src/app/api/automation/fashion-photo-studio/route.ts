@@ -127,6 +127,8 @@ export async function POST(req: Request) {
   const origin = publicOrigin(req);
   const results: any[] = [];
   let generated = 0;
+  let attempted = 0;
+  const deadline = Date.now() + 240_000;
 
   // Refresh the hero shots first. A style-version change intentionally invalidates older dull studio generations.
   for (const view of [0, 2]) {
@@ -140,11 +142,12 @@ export async function POST(req: Request) {
         results.push({ productId: Number(row.id), title: row.title, view, status: "CACHED_REWIRED", publicUrl, provider: existing.rows[0].provider, styleVersion: STYLE_VERSION });
         continue;
       }
-      if (generated >= limit * 2) {
+      if (attempted >= Math.min(limit * 2, 2) || Date.now() + 115_000 > deadline) {
         results.push({ productId: Number(row.id), title: row.title, view, status: "STALE_WAITING_REFRESH", styleVersion: STYLE_VERSION });
         continue;
       }
       try {
+        attempted++;
         const image = await generateEditorialImage(prompt, { width: 768, height: 1024, timeoutMs: 110_000 });
         await pool.query(
           `INSERT INTO fashion_media_cache (product_id,view,mime_type,image_bytes,provider,prompt,source_url,created_at)
@@ -169,7 +172,7 @@ export async function POST(req: Request) {
      VALUES (1,'BharatDrip Fashion Photo Studio','EDITORIAL_MODEL_SHOTS',$1,$2,$3)`,
     [generated || cachedRewired ? `Prepared ${generated + cachedRewired} BharatDrip ${STYLE_VERSION} model shot link(s); ${frontReady} product card(s) have current-style front photography.` : "Free GPU unavailable; older model shots were not promoted as current-style photography.", JSON.stringify({ styleVersion: STYLE_VERSION, generated, cachedRewired, frontReady, waitingRefresh, requestedProducts: limit, results }), generated || cachedRewired ? "SUCCESS" : "DEGRADED"]
   );
-  return NextResponse.json({ success: true, provider: "free-first-hf-zerogpu", styleVersion: STYLE_VERSION, generated, cachedRewired, frontReady, waitingRefresh, requestedProducts: limit, fallback: "BharatShop/Qikink-safe product mockups", results });
+  return NextResponse.json({ success: frontReady > 0, status: frontReady > 0 ? "READY" : "DEFERRED_FREE_GPU", attempted, provider: "free-first-hf-zerogpu", styleVersion: STYLE_VERSION, generated, cachedRewired, frontReady, waitingRefresh, requestedProducts: limit, fallback: "BharatShop/Qikink-safe product mockups", results });
 }
 
 export async function GET(req: Request) {

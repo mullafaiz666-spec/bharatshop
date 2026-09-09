@@ -12,7 +12,7 @@ try { host = new URL(raw).hostname; } catch {
   process.exit(1);
 }
 
-const local = ["localhost", "127.0.0.1", "::1"].includes(host) || host.endsWith(".internal");
+const local = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(host);
 if (!local && process.env.ALLOW_REMOTE_DB_PUSH !== "YES") {
   console.error(`Refusing schema push to remote PostgreSQL host ${host}.`);
   console.error("Production data is source-of-truth and destructive/forced pushes are forbidden.");

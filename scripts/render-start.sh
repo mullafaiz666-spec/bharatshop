@@ -1,4 +1,4 @@
 #!/bin/sh
 set -e
-npx drizzle-kit push --force
+# Deployments must never mutate the production schema implicitly.
 exec npm run start
