@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { products, productDetails } from "@/db/schema";
-import { asc, eq, or } from "drizzle-orm";
+import { desc, eq, or } from "drizzle-orm";
 import { serpSearch, openAIJson } from "@/lib/ai/agent-tools";
 
 export const dynamic = "force-dynamic";
@@ -13,6 +13,15 @@ function auth(req: Request) {
   return !!expected && supplied === expected;
 }
 
+function isEvidenceEnriched(specs: unknown) {
+  if (!specs || typeof specs !== "object" || Array.isArray(specs)) return false;
+  const value = specs as Record<string, unknown>;
+  const provider = String(value.enrichmentProvider || "").trim();
+  const enrichedAt = String(value.enrichedAt || "").trim();
+  const sources = Array.isArray(value.verifiedEnrichmentSources) ? value.verifiedEnrichmentSources : [];
+  return provider === "SearXNG+local-Gemma" && Boolean(enrichedAt) && sources.length > 0;
+}
+
 export async function POST(req: Request) {
   try {
     if (!auth(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -21,26 +30,24 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json().catch(() => ({}));
-    const limit = Math.max(1, Math.min(5, Number(body.limit || 2)));
+    const limit = Math.max(1, Math.min(8, Number(body.limit || 3)));
     const rows = await db.select().from(products)
       .where(or(eq(products.status, "STAGED"), eq(products.status, "CEO_PENDING")))
-      .orderBy(asc(products.id));
+      .orderBy(desc(products.id));
 
     const selected: Array<{ product: typeof products.$inferSelect; details: typeof productDetails.$inferSelect }> = [];
     for (const product of rows) {
       if (selected.length >= limit) break;
       const [details] = await db.select().from(productDetails).where(eq(productDetails.productId, product.id)).limit(1);
       if (!details || details.verificationStatus !== "SOURCE_VERIFIED" || !/^https?:\/\//i.test(String(details.sourceUrl || ""))) continue;
-      const specs = details.specificationsJson;
-      const alreadyEnriched = Boolean(specs && typeof specs === "object" && !Array.isArray(specs) && Object.keys(specs as Record<string, unknown>).length > 0);
-      if (alreadyEnriched && body.force !== true) continue;
+      if (isEvidenceEnriched(details.specificationsJson) && body.force !== true) continue;
       selected.push({ product, details });
     }
 
     const results: any[] = [];
     for (const { product, details } of selected) {
       try {
-        const search = await serpSearch(`${product.title} ${product.brand} specifications material dimensions warranty country of origin`, "google");
+        const search = await serpSearch(`${product.title} ${product.brand} specifications features material dimensions warranty country of origin`, "google");
         const sources = (search.organic_results || []).slice(0, 8).map((x: any) => ({
           title: String(x.title || ""),
           link: String(x.link || ""),
@@ -99,7 +106,6 @@ export async function POST(req: Request) {
           warranty: String(out.warranty || details.warranty || ""),
           countryOfOrigin: String(out.countryOfOrigin || details.countryOfOrigin || ""),
           careInstructions: String(out.careInstructions || details.careInstructions || ""),
-          // Preserve SOURCE_VERIFIED; enrichment must never overwrite source proof.
           verificationStatus: "SOURCE_VERIFIED",
           sourceUrl: details.sourceUrl,
           verifiedAt: details.verifiedAt || new Date(),
@@ -120,7 +126,8 @@ export async function POST(req: Request) {
       errors,
       results,
       provider: "SearXNG+local-Gemma",
-      policy: "Only evidence-backed facts are persisted; SOURCE_VERIFIED supplier evidence is preserved.",
+      selectionPolicy: "newest source-verified products first",
+      policy: "Discovery/source metadata alone never counts as enrichment. Only evidence-backed customer facts mark a product enriched; SOURCE_VERIFIED supplier evidence is preserved.",
     }, { status: errors ? 207 : 200 });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Product enrichment failed" }, { status: 500 });
@@ -135,5 +142,6 @@ export async function GET() {
     provider: "SearXNG+local-Gemma",
     paidProvidersRequired: false,
     prerequisite: "SOURCE_VERIFIED",
+    selectionPolicy: "newest-first",
   });
 }

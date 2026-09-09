@@ -79,7 +79,8 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => ({}));
     const queries = Array.isArray(body.queries) && body.queries.length ? body.queries : DEFAULT_QUERIES;
     const userId = Number(body.userId || 1);
-    const maxProducts = Math.min(120, Math.max(1, Number(body.limit || 50)));
+    const maxProducts = Math.min(160, Math.max(1, Number(body.limit || 50)));
+    const perQueryLimit = Math.min(8, Math.max(1, Number(body.perQueryLimit || 3)));
     const created: any[] = [];
     const searchErrors: Array<{ query: string; error: string }> = [];
     const categoryCounts: Record<string, number> = {};
@@ -103,8 +104,9 @@ export async function POST(req: Request) {
         continue;
       }
 
+      let createdForQuery = 0;
       for (const item of Array.isArray(data.shopping_results) ? data.shopping_results : []) {
-        if (created.length >= maxProducts) break;
+        if (created.length >= maxProducts || createdForQuery >= perQueryLimit) break;
         const title = String(item.title || "").trim();
         const sourceUrl = String(item.link || "").trim();
         const sourceName = String(item.source || item.merchant || "Web source").trim();
@@ -156,6 +158,7 @@ export async function POST(req: Request) {
 
         categoryCounts[category] = (categoryCounts[category] || 0) + 1;
         sourceCounts[sourceName] = (sourceCounts[sourceName] || 0) + 1;
+        createdForQuery += 1;
         created.push({
           id: product.id,
           title,
@@ -179,7 +182,7 @@ export async function POST(req: Request) {
         message: `Product discovery completed with ${searchErrors.length} rate-limited or unavailable search queries; downstream verification remains active.`,
         profitImpactInr: "0.00",
         status: "WARNING",
-        metadataJson: { searchErrors, queriesAttempted, queriesSucceeded, created: created.length, categoryCounts, sourceCounts },
+        metadataJson: { searchErrors, queriesAttempted, queriesSucceeded, created: created.length, perQueryLimit, categoryCounts, sourceCounts },
       });
     }
 
@@ -195,8 +198,10 @@ export async function POST(req: Request) {
       sourceCounts,
       queriesScanned: queriesAttempted,
       queriesSucceeded,
+      perQueryLimit,
       searchErrors,
       provider: "SearXNG/Google-Shopping->PostgreSQL",
+      selectionPolicy: "balanced per-query discovery so one category cannot consume the whole batch",
       nextStage: "source verification -> enrichment -> media verification -> CEO review",
       publicationPolicy: "Discovery never implies fulfilment. Publish only after live source qualification, evidence-backed enrichment, verified media and CEO approval.",
     });
@@ -213,6 +218,7 @@ export async function GET() {
     status: localAI && searxng ? "ready" : "blocked_missing_provider",
     providers: { localGemma: localAI, searxng },
     queryCount: DEFAULT_QUERIES.length,
+    defaultPerQueryLimit: 3,
     priorityCoverage: ["Meesho fashion", "mobiles", "tablets", "laptops", "desktop computers", "computer components", "mobile accessories", "home", "beauty", "sports", "automotive"],
   });
 }
