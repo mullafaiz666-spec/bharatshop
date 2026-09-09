@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { productImages, productDetails, products } from "@/db/schema";
 import { desc } from "drizzle-orm";
+import { criticalCoverageCounts } from "@/lib/catalog/priority-coverage";
 
 const BAD_IMAGE=/(?:unsplash\.com|source\.unsplash\.com|via\.placeholder\.com|placeholder\.com|placehold\.co|placehold\.it|dummyimage\.com|picsum\.photos|loremflickr\.com|placekitten\.com)/i;
 const LOCAL_HOST=/^(?:0\.0\.0\.0|127(?:\.\d{1,3}){3}|localhost|\[::1\])$/i;
@@ -36,7 +37,7 @@ export async function GET(req:Request){
     const rawImage=oldLocalEditorial?`${origin}/api/fashion-art/${row.productId}/${view}?style=${FASHION_EDITORIAL_STYLE}&fallback=product-mockup`:row.imageUrl;
     const image=cleanUrl(rawImage,origin);if(!image||!row.verifiedAt)continue;
     const sourceBacked=APPROVED_SOURCE_MEDIA.has(String(row.verificationStatus))&&Number(row.verificationConfidence)>=MIN_CONFIDENCE&&APPROVED_SOURCE_PROVIDERS.has(String(row.verificationProvider));
-    const originalFashion=(String(row.verificationStatus)==="AI_GENERATED_ORIGINAL"&&String(row.verificationProvider)==="bharatshop-studio"||oldLocalEditorial)&&MTO_FASHION_BRANDS.has(fashionOrigin(d).toLowerCase())&&String(s.productionSupplier||"").toLowerCase()==="qikink"&&mto;
+    const originalFashion=((String(row.verificationStatus)==="AI_GENERATED_ORIGINAL"&&String(row.verificationProvider)==="bharatshop-studio")||oldLocalEditorial)&&MTO_FASHION_BRANDS.has(fashionOrigin(d).toLowerCase())&&String(s.productionSupplier||"").toLowerCase()==="qikink"&&mto;
     const editorialFashion=String(row.verificationStatus)==="AI_GENERATED_EDITORIAL"&&APPROVED_EDITORIAL_PROVIDERS.has(String(row.verificationProvider))&&mto;
     const currentEditorial=editorialFashion&&String(rawImage||"").includes(`style=${FASHION_EDITORIAL_STYLE}`);
     if(!sourceBacked&&!originalFashion&&!editorialFashion)continue;
@@ -47,9 +48,10 @@ export async function GET(req:Request){
 
   const publishable=all.filter(p=>{
     const gallery=galleryMap.get(p.id)||[],d=detailMap.get(p.id),mto=madeToOrder(d),validPricing=Number(p.sellingPriceInr)>0&&Number(p.mrpInr)>=Number(p.sellingPriceInr),availabilityValid=mto||Number(p.stockCount)>0;
-    const mediaReady=mto?gallery.length>=MIN_FASHION_IMAGES&&gallery.some(x=>x.editorial):gallery.length>=MIN_STANDARD_IMAGES;
+    const mediaReady=mto?gallery.length>=MIN_FASHION_IMAGES:gallery.length>=MIN_STANDARD_IMAGES;
     return p.status==="Published"&&Boolean(p.title)&&validPricing&&availabilityValid&&mediaReady;
   });
+  const criticalCoverage=criticalCoverageCounts(publishable,p=>({title:p.title,category:p.category,brand:p.brand,madeToOrder:madeToOrder(detailMap.get(p.id))}));
   let filtered=publishable;
   if(requestedId)filtered=filtered.filter(p=>p.id===requestedId);
   if(featured)filtered=filtered.filter(p=>p.aiScore>=92);
@@ -60,14 +62,14 @@ export async function GET(req:Request){
   const total=filtered.length,offset=(page-1)*limit,paginated=filtered.slice(offset,offset+limit);
   const customerProducts=paginated.map(p=>{
     const gallery=galleryMap.get(p.id)||[],d=detailMap.get(p.id),spec=specsOf(d),mto=madeToOrder(d),fashionBrand=fashionOrigin(d),publicBrand=mto?(MTO_FASHION_BRANDS.has(fashionBrand.toLowerCase())?fashionBrand:"BharatShop Studio"):"BharatShop Select";
-    const derivedFashion=mto?Array.from({length:4},(_,i)=>`${origin}/api/fashion-art/${p.id}/${i}?style=${FASHION_EDITORIAL_STYLE}`):[];
+    const derivedFashion=mto?Array.from({length:4},(_,i)=>`${origin}/api/fashion-art/${p.id}/${i}?style=${FASHION_EDITORIAL_STYLE}&fallback=product-mockup`):[];
     const preferred=mto?[...gallery.filter(x=>x.currentEditorial),...gallery.filter(x=>x.editorial&&!x.currentEditorial),...gallery.filter(x=>!x.editorial)]:gallery;
     const combined=mto?[...preferred.map(x=>x.url),...derivedFashion]:preferred.map(x=>x.url),imageUrls=Array.from(new Set(combined)).slice(0,8);
-    const imageLabels=imageUrls.map((u,i)=>gallery.find(x=>x.url===u)?.label||(["Editorial view","Design detail","Back view","Colour palette"][i]||"Product view"));
+    const imageLabels=imageUrls.map((u,i)=>gallery.find(x=>x.url===u)?.label||(["Editorial / product view","Design detail","Back view","Colour palette"][i]||"Product view"));
     const media=spec.media&&typeof spec.media==="object"&&!Array.isArray(spec.media)?spec.media as Record<string,unknown>:{},productVideos=Array.isArray(media.videos)?media.videos.filter(v=>typeof v==="string"&&/^https:\/\//i.test(v as string)&&!INTERNAL_VENDOR.test(v as string)&&!/(?:0\.0\.0\.0|localhost|127\.0\.0\.1)/i.test(v as string)):[],sizeOptions=Array.isArray(spec.sizes)?spec.sizes.map(String).map(customerText).filter(Boolean):[];
     const editorialStyleState=mto?(gallery.some(x=>x.currentEditorial)?"PHOTOREAL_CURRENT":"PHOTOREAL_UPGRADE_PENDING"):undefined;
     return{id:p.id,sku:`BS-${p.id}`,title:customerText(p.title)||p.title,category:customerText(p.category)||p.category,brand:publicBrand,storefrontLabel:publicBrand,imageUrl:imageUrls[0]||"",imageUrls,imageLabels,productVideos,sellingPriceInr:p.sellingPriceInr,mrpInr:p.mrpInr,stockCount:Number(p.stockCount)||0,madeToOrder:mto,availabilityMode:mto?"MADE_TO_ORDER":"IN_STOCK",sizeOptions,editorialStyleState,aiMarketingCopy:customerText(p.aiMarketingCopy),details:d?{description:customerText(d.description),includedItems:customerText(d.includedItems),dimensions:customerText(d.dimensions),weight:customerText(d.weight),material:customerText(d.material),colorOptions:customerText(d.colorOptions),warranty:customerText(d.warranty),countryOfOrigin:customerText(d.countryOfOrigin),careInstructions:customerText(d.careInstructions)}:null};
   });
   const catCounts:Record<string,number>={};publishable.forEach(p=>{const c=customerText(p.category)||"Other";catCounts[c]=(catCounts[c]||0)+1;});
-  return NextResponse.json({products:customerProducts,total,page,totalPages:Math.max(1,Math.ceil(total/limit)),categoryCount:catCounts,privacy:"customer-safe-v6",availabilityPolicy:"Standard sourced products need verified primary media; made-to-order fashion remains visible only after its stricter photoreal editorial set is ready.",fashionEditorialStyle:FASHION_EDITORIAL_STYLE},{headers:{"Cache-Control":"no-store"}});
+  return NextResponse.json({products:customerProducts,total,page,totalPages:Math.max(1,Math.ceil(total/limit)),categoryCount:catCounts,criticalCoverage,privacy:"customer-safe-v7",availabilityPolicy:"Standard sourced products need verified primary media. Made-to-order BharatShop Studio/BharatDrip products are visible after four verified original design views; photoreal editorial imagery is an upgrade, not a visibility prerequisite.",fashionEditorialStyle:FASHION_EDITORIAL_STYLE},{headers:{"Cache-Control":"no-store"}});
 }
