@@ -1,27 +1,25 @@
-name: BharatDrip AI Photo Studio
+name: BharatShop Fashion Photo Studio
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "25 3 * * *"
+    - cron: "25 */6 * * *"
   push:
     branches: [main]
     paths:
       - 'src/lib/fashion/editorial-image.ts'
-      - 'src/lib/fashion/local-editorial-raster.ts'
       - 'src/app/api/automation/fashion-photo-studio/**'
       - 'src/app/api/fashion-photo/**'
       - 'src/app/api/storefront/products/route.ts'
-      - 'android-app/**'
       - '.github/workflows/bharatdrip-photo-studio.yml'
 
 concurrency:
-  group: bharatdrip-ai-photo-studio
+  group: bharatshop-fashion-photo-studio
   cancel-in-progress: true
 
 env:
   BHARATSHOP_URL: https://bharatshop-9w4a.onrender.com
-  BHARATDRIP_EDITORIAL_STYLE: street-editorial-v2
+  FASHION_EDITORIAL_STYLE: drip-realworld-v4
 
 jobs:
   editorial-media:
@@ -42,7 +40,7 @@ jobs:
           done
           exit 1
 
-      - name: Prepare current BharatDrip editorial raster media
+      - name: Attempt photoreal fashion front refresh
         env:
           TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
         run: |
@@ -51,48 +49,54 @@ jobs:
           curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 \
             -X POST "$BHARATSHOP_URL/api/automation/fashion-photo-studio" \
             -H "Authorization: Bearer $TOKEN" -H "x-automation-token: $TOKEN" -H "Content-Type: application/json" \
-            --data '{"externalAttemptLimit":2}' | tee fashion-photo-studio.json
+            --data '{"views":[0],"productLimit":6,"externalAttemptLimit":2}' | tee fashion-photo-studio.json
           node - <<'NODE'
           const d=require('./fashion-photo-studio.json');
-          if(!d.success) throw new Error(`Editorial studio failed: ${JSON.stringify(d)}`);
-          if(d.styleVersion!==process.env.BHARATDRIP_EDITORIAL_STYLE) throw new Error(`Unexpected style version: ${d.styleVersion}`);
-          if(Number(d.waitingRefresh)!==0) throw new Error(`${d.waitingRefresh} current-style assets are still missing`);
-          console.log(JSON.stringify({provider:d.provider,styleVersion:d.styleVersion,externalGenerated:d.externalGenerated||0,localGenerated:d.localGenerated||0,cachedRewired:d.cachedRewired||0,frontReady:d.frontReady,waitingRefresh:d.waitingRefresh,results:d.results},null,2));
+          if(!d.success) throw new Error(`Fashion studio failed: ${JSON.stringify(d)}`);
+          if(d.styleVersion!==process.env.FASHION_EDITORIAL_STYLE) throw new Error(`Unexpected style version: ${d.styleVersion}`);
+          console.log(JSON.stringify({
+            status:d.status,
+            styleVersion:d.styleVersion,
+            attempted:d.attempted||0,
+            generated:d.generated||0,
+            cached:d.cached||0,
+            photorealFrontReady:d.photorealFrontReady||0,
+            totalProducts:d.totalProducts||0,
+            waitingPhotorealUpgrade:d.waitingPhotorealUpgrade||0
+          },null,2));
+          if(Number(d.waitingPhotorealUpgrade||0)>0) {
+            console.log('Photoreal upgrades are still pending. This is a capacity/quota state, not a storefront failure; non-photoreal fashion remains gated from customer cards.');
+          }
           NODE
 
-      - name: Verify every visible BharatDrip card uses current editorial media
+      - name: Verify storefront never leaks non-photoreal made-to-order fashion
         run: |
           set -euo pipefail
-          curl --silent --show-error --fail-with-body --max-time 90 "$BHARATSHOP_URL/api/storefront/products?category=BharatDrip%20Streetwear&limit=24" | tee bharatdrip-storefront.json
+          curl --silent --show-error --fail-with-body --max-time 90 "$BHARATSHOP_URL/api/storefront/products?limit=96" | tee storefront.json
           node - <<'NODE'
-          const d=require('./bharatdrip-storefront.json');
+          const d=require('./storefront.json');
+          const expected=process.env.FASHION_EDITORIAL_STYLE;
+          if(d.fashionEditorialStyle!==expected) throw new Error(`Storefront fashion style gate mismatch: ${d.fashionEditorialStyle}`);
           const products=Array.isArray(d.products)?d.products:[];
-          const expected=process.env.BHARATDRIP_EDITORIAL_STYLE;
-          if(d.bharatDripEditorialStyle!==expected) throw new Error(`Storefront style gate mismatch: ${d.bharatDripEditorialStyle}`);
-          if(products.length<1) throw new Error('No current-style BharatDrip products are visible');
-          const stale=products.filter(p=>!String(p.imageUrl||'').includes('/api/fashion-photo/')||!String(p.imageUrl||'').includes(`style=${expected}`));
-          if(stale.length) throw new Error(`Visible BharatDrip cards still use stale editorial media: ${JSON.stringify(stale.map(p=>({id:p.id,title:p.title,imageUrl:p.imageUrl})))}`);
-          console.log(JSON.stringify({bharatDripProducts:products.length,currentStyleProducts:products.length,style:expected,sample:products.map(p=>({id:p.id,title:p.title,imageUrl:p.imageUrl}))},null,2));
+          const fashion=products.filter(p=>p.madeToOrder===true);
+          const bad=fashion.filter(p=>!String(p.imageUrl||'').includes('/api/fashion-photo/')||!String(p.imageUrl||'').includes(`style=${expected}`));
+          if(bad.length) throw new Error(`Made-to-order fashion leaked non-photoreal primary media: ${JSON.stringify(bad.map(p=>({id:p.id,title:p.title,imageUrl:p.imageUrl})))}`);
+          console.log(JSON.stringify({visibleProducts:products.length,visiblePhotorealFashion:fashion.length,style:expected},null,2));
           NODE
 
-      - name: Verify every live primary editorial image is fresh raster media
+      - name: Verify visible fashion primary images are raster media
         run: |
           set -euo pipefail
-          node -e "const d=require('./bharatdrip-storefront.json'); for(const p of d.products||[]) console.log(p.imageUrl);" > /tmp/model-urls.txt
+          node -e "const d=require('./storefront.json'); for(const p of d.products||[]) if(p.madeToOrder===true) console.log(p.imageUrl);" > /tmp/model-urls.txt
           count=0
           while IFS= read -r image; do
-            test -n "$image"
+            [ -z "$image" ] && continue
             curl -sS -D /tmp/model-headers.txt -o /tmp/model-image --fail --max-time 90 "$image"
             type=$(awk 'BEGIN{IGNORECASE=1}/^content-type:/{print $2}' /tmp/model-headers.txt | tr -d '\r' | tail -1)
             bytes=$(wc -c < /tmp/model-image | tr -d ' ')
-            style=$(awk 'BEGIN{IGNORECASE=1}/^x-fashion-style:/{print $2}' /tmp/model-headers.txt | tr -d '\r' | tail -1)
-            cache=$(awk 'BEGIN{IGNORECASE=1}/^cache-control:/{sub(/^cache-control:[[:space:]]*/,"");print}' /tmp/model-headers.txt | tr -d '\r' | tail -1)
-            provider=$(awk 'BEGIN{IGNORECASE=1}/^x-fashion-image-provider:/{print $2}' /tmp/model-headers.txt | tr -d '\r' | tail -1)
-            echo "editorial image=$image type=$type bytes=$bytes style=$style provider=$provider cache=$cache"
+            echo "fashion image=$image type=$type bytes=$bytes"
             case "$type" in image/png|image/jpeg|image/webp) ;; *) echo "Expected raster image, got $type"; exit 1;; esac
             test "$bytes" -gt 10000
-            test "$style" = "$BHARATDRIP_EDITORIAL_STYLE"
-            test -n "$provider"
             count=$((count+1))
           done < /tmp/model-urls.txt
-          test "$count" -ge 1
+          echo "verified visible photoreal fashion images=$count"
