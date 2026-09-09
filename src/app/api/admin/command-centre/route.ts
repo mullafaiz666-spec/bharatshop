@@ -4,7 +4,7 @@ import { getAdminUser } from "@/lib/admin-auth";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-type ActionName = "ceo-cycle" | "google-refresh" | "catalog-repair" | "product-research" | "fashion-fronts" | "fashion-backs" | "learning-review";
+type ActionName = "ceo-cycle" | "google-refresh" | "catalog-repair" | "product-research" | "fashion-fronts" | "fashion-backs" | "learning-review" | "marketing-verify" | "payment-status";
 
 type ActionSpec = {
   label: string;
@@ -22,6 +22,8 @@ const ACTIONS: Record<ActionName, ActionSpec> = {
   "fashion-fronts": { label: "BharatDrip real-human front photo generation", path: "/api/automation/fashion-photo-studio", method: "POST", body: { views: [0], productLimit: 6, externalAttemptLimit: 6 }, timeoutMs: 285_000 },
   "fashion-backs": { label: "BharatDrip real-human back photo generation", path: "/api/automation/fashion-photo-studio", method: "POST", body: { views: [2], productLimit: 4, externalAttemptLimit: 4 }, timeoutMs: 285_000 },
   "learning-review": { label: "Learning and evidence review", path: "/api/agents/learning?userId=1", method: "GET", timeoutMs: 40_000 },
+  "marketing-verify": { label: "Meta / Google marketing connection verification", path: "/api/agents/advertising-status?verify=1", method: "GET", timeoutMs: 40_000 },
+  "payment-status": { label: "Razorpay / Cashfree configuration check", path: "/api/payments/status", method: "GET", timeoutMs: 20_000 },
 };
 
 function token() {
@@ -50,13 +52,20 @@ async function internalCall(origin: string, spec: ActionSpec) {
 function compactService(value: any) {
   if (!value || typeof value !== "object") return { status: "UNKNOWN" };
   return {
-    status: value.status || (value.error ? "ERROR" : "READY"),
+    status: value.status || (value.productionReady === true ? "READY" : value.error ? "ERROR" : "READY"),
     provider: value.provider,
     styleVersion: value.styleVersion,
     photorealCurrentShots: value.photorealCurrentShots,
     cachedProducts: value.cachedProducts,
     sharedWithAllAgents: value.sharedWithAllAgents,
     evidenceCount: Array.isArray(value.evidence) ? value.evidence.length : undefined,
+    anyConnected: value.anyConnected,
+    anyConfigured: value.anyConfigured,
+    productionReady: value.productionReady,
+    providers: value.providers,
+    channels: value.channels,
+    summary: value.summary,
+    freeInfrastructure: value.freeInfrastructure,
     error: value.error,
   };
 }
@@ -75,12 +84,15 @@ export async function GET(req: Request) {
       return { status: "ERROR", error: error instanceof Error ? error.message : String(error) };
     }
   }
-  const [fashion, google, research, learning, agentSuite] = await Promise.all([
+  const [fashion, google, research, learning, agentSuite, agentHealth, advertising, payments] = await Promise.all([
     safeGet("/api/automation/fashion-photo-studio"),
     safeGet("/api/automation/google-intelligence"),
     safeGet("/api/automation/research-products"),
     safeGet("/api/agents/learning?userId=1", 35_000),
     safeGet("/api/agents"),
+    safeGet("/api/agents/health"),
+    safeGet("/api/agents/advertising-status?verify=1", 40_000),
+    safeGet("/api/payments/status"),
   ]);
   return NextResponse.json({
     status: "READY",
@@ -91,6 +103,9 @@ export async function GET(req: Request) {
       googleIntelligence: compactService(google),
       productResearch: compactService(research),
       learningAgent: compactService(learning),
+      agentHealth: compactService(agentHealth),
+      advertisingConnections: compactService(advertising),
+      payments: compactService(payments),
       agentSuite: { status: agentSuite?.suite ? "READY" : agentSuite?.status || "UNKNOWN", suite: agentSuite?.suite, promptVersion: agentSuite?.promptVersion, operationalAgents: Array.isArray(agentSuite?.operationalAgents) ? agentSuite.operationalAgents.length : 0 },
     },
     actions: Object.entries(ACTIONS).map(([id, spec]) => ({ id, label: spec.label })),
@@ -105,7 +120,8 @@ export async function POST(req: Request) {
   const action = String(body.action || "") as ActionName;
   const spec = ACTIONS[action];
   if (!spec) return NextResponse.json({ error: "Unknown command-centre action" }, { status: 400 });
-  if (!token() && action !== "learning-review") return NextResponse.json({ error: "Automation token is not configured on the server" }, { status: 503 });
+  const readOnly = action === "learning-review" || action === "marketing-verify" || action === "payment-status";
+  if (!token() && !readOnly) return NextResponse.json({ error: "Automation token is not configured on the server" }, { status: 503 });
   try {
     const origin = new URL(req.url).origin;
     const result = await internalCall(origin, spec);
