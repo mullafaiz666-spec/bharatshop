@@ -39,7 +39,11 @@ export async function POST(req: Request) {
     let copyProvider = "verified-facts-fallback";
     let aiError = "";
     try {
-      ai = await openAIJson("You are BharatShop Marketing and Listing Agent running on the configured local Gemma provider. Create truthful ecommerce copy from supplied verified facts only. Do not invent certifications, claims, discounts or specifications. Return JSON with title,description,marketingCopy,targetAudience,hook,cta.", { product: { brand: p.brand, title: p.title, sellingPriceInr: selling, stockCount: p.stockCount, source: p.supplierName, sourceUrl, specifications: specs }, marginPct: +margin.toFixed(2) });
+      ai = await openAIJson(
+        "You are BharatShop Marketing and Listing Agent running on the configured local Gemma provider. Create truthful ecommerce copy from supplied verified facts only. Do not invent certifications, claims, discounts or specifications. Return JSON with title,description,marketingCopy,targetAudience,hook,cta.",
+        { product: { brand: p.brand, title: p.title, sellingPriceInr: selling, stockCount: p.stockCount, source: p.supplierName, sourceUrl, specifications: specs }, marginPct: +margin.toFixed(2) },
+        { timeoutMs: 5000, maxTokens: 768 },
+      );
       copyProvider = "local-Gemma";
     } catch (error) {
       aiError = error instanceof Error ? error.message : String(error);
@@ -63,5 +67,5 @@ export async function POST(req: Request) {
 }
 
 export async function GET() {
-  return NextResponse.json({ agent: "Listing-Creative-Agent", status: process.env.AI_BASE_URL||process.env.LOCAL_AI_BASE_URL ? "ready" : "ready_with_verified_facts_fallback", provider:"local-Gemma with verified-facts fallback", publicationGate: "SOURCE_VERIFIED + 4-8 verified media + specs + economics + CEO", capabilities: ["local_ai_copy", "verified_facts_fallback", "positioning", "creative", "source_gate", "verified_media_gate", "publication_gate"] });
+  return NextResponse.json({ agent: "Listing-Creative-Agent", status: process.env.AI_BASE_URL||process.env.LOCAL_AI_BASE_URL ? "ready" : "ready_with_verified_facts_fallback", provider:"local-Gemma (5s max) with verified-facts fallback", publicationGate: "SOURCE_VERIFIED + 4-8 verified media + specs + economics + CEO", capabilities: ["bounded_local_ai_copy", "verified_facts_fallback", "positioning", "creative", "source_gate", "verified_media_gate", "publication_gate"] });
 }
