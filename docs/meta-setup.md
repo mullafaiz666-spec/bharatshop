@@ -1,8 +1,8 @@
 # BharatShop Meta configuration
 
 Open `/dashboard/meta` while signed in, or use the **Meta setup** dashboard link.
-This screen reports missing environment variables, invalid IDs, mismatched Pixel
-IDs, test mode, and account-access verification results. It never displays tokens.
+This screen reports missing environment variables, invalid IDs, Pixel/Dataset state,
+test mode, and account-access verification results. It never displays tokens.
 Configuration presence is not evidence of a working provider connection.
 
 ## Render settings
@@ -14,8 +14,9 @@ Next.js embeds them during the build.
 
 | Setting | Value |
 | --- | --- |
-| NEXT_PUBLIC_META_PIXEL_ID | Numeric website Pixel/Dataset ID from Events Manager |
-| META_PIXEL_ID | Same ID; can be omitted to use the public ID |
+| NEXT_PUBLIC_META_PIXEL_ID | Numeric website Pixel ID used by the browser |
+| META_DATASET_ID | Preferred explicit Dataset ID used by server-side Conversions API events |
+| META_PIXEL_ID | Legacy server-side Pixel/Dataset alias; can be omitted when `META_DATASET_ID` is set |
 | META_CONVERSIONS_API_TOKEN | Server-only token generated for that dataset |
 | NEXT_PUBLIC_META_DOMAIN_VERIFICATION | Verification code for the owned storefront domain |
 | META_PAGE_ID | Numeric Facebook Page ID |
@@ -25,6 +26,11 @@ Next.js embeds them during the build.
 | META_CATALOG_ID | Optional catalog ID for setup inventory; no automatic catalog upload |
 | META_GRAPH_API_VERSION | Version used by the existing connector; default v26.0 |
 | META_TEST_EVENT_CODE | Temporary Events Manager test code; remove after validation |
+
+For most migrated web event sources, Meta shows the same numeric identifier as both
+the Pixel and Dataset ID. BharatShop also supports an explicit `META_DATASET_ID` so
+the server integration follows the identifier shown in Events Manager without
+forcing it into a public browser variable.
 
 ## Catalog and domain
 
@@ -39,15 +45,18 @@ control of the domain you verify; a verification tag alone does not confirm owne
 ## Verification
 
 1. Use **Verify connections** on the setup page. These are read-only Graph API
-   account-access checks, not test-event sends or campaign publication.
+   account-access checks, not campaign publication.
 2. With a temporary test-event code, visit the storefront, open products and add
    items to the cart. Check Events Manager for accepted events.
 3. Browser and server copies of a storefront event share an event ID for
-   deduplication. Their Pixel/Dataset IDs must also match. Page views wait for the
-   Pixel queue to initialize and follow storefront navigation.
+   deduplication. The browser uses `NEXT_PUBLIC_META_PIXEL_ID`; the server uses
+   `META_DATASET_ID`, falling back to the legacy Pixel ID variables.
 4. Validate Purchase only through an actual authorized payment flow. Public event
    ingestion cannot submit Purchase. Analytics failure must not fail a payment.
-5. Remove the test-event code and deploy again after verification.
+5. Cashfree's verified checkout-success route sends a browser Purchase using the
+   same event ID as its verified server-side CAPI Purchase, allowing Meta to
+   deduplicate the two copies.
+6. Remove the test-event code and deploy again after verification.
 
 Paid advertising remains disabled. The existing campaign connector only prepares
 paused containers under its existing approval rules. Configuring credentials does
