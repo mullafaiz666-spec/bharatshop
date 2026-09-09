@@ -56,3 +56,6 @@ jobs:
 
       - name: Verify storefront privacy images categories and payment capability
         run: node scripts/storefront-privacy-acceptance.mjs
+
+      - name: Verify Razorpay and Cashfree credentials without charging
+        run: node scripts/payment-live-acceptance.mjs
