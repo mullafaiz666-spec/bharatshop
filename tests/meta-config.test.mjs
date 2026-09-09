@@ -9,9 +9,9 @@ function load(path) {
   const code = ts.transpileModule(readFileSync(new URL(`../${path}`, import.meta.url), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
   }).outputText;
-  const module = { exports: {} };
-  runInThisContext(`(function(require,module,exports){${code}\n})`)(require, module, module.exports);
-  return module.exports;
+  const compiledModule = { exports: {} };
+  runInThisContext(`(function(require,module,exports){${code}\n})`)(require, compiledModule, compiledModule.exports);
+  return compiledModule.exports;
 }
 const { metaConfiguration } = load('src/lib/marketing/meta-config.ts');
 const { sendMetaConversion } = load('src/lib/marketing/meta.ts');
