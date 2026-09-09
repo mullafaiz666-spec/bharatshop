@@ -7,7 +7,8 @@ const STOP = new Set(["the","with","and","for","from","pack","piece","pieces","n
 const BAD = /(unsplash|placeholder|placehold|picsum|loremflickr|placekitten|dummyimage|via\.placeholder)/i;
 const FASHION = /(fashion|women|woman|men|man|saree|sari|kurti|kurta|dress|shirt|tshirt|t-shirt|jeans|trouser|petticoat|shapewear|lehenga|salwar|apparel|clothing|footwear|shoe|sandal|jewellery|jewelry)/i;
 const MIN_CONFIDENCE = Number(process.env.IMAGE_VERIFY_MIN_CONFIDENCE || 0.75);
-const MIN_IMAGES = 4;
+const MIN_STANDARD_IMAGES = Math.max(1, Number(process.env.MIN_STANDARD_PRODUCT_IMAGES || 1));
+const MIN_FASHION_IMAGES = Math.max(4, Number(process.env.MIN_FASHION_PRODUCT_IMAGES || 4));
 const MAX_IMAGES = 8;
 const MAX_CANDIDATES = 12;
 const SEARCH_LIMIT = 10;
@@ -29,6 +30,14 @@ function textScore(item: Candidate, product: Product) {
   const hay = `${item.title || ""} ${item.sourceUrl || ""} ${item.url || ""}`.toLowerCase();
   const hits = expected.filter(t => hay.includes(t)).length;
   return expected.length ? hits / expected.length : 0;
+}
+
+function isFashion(product: Product) {
+  return FASHION.test(`${product.category} ${product.title}`);
+}
+
+function minimumImages(product: Product) {
+  return isFashion(product) ? MIN_FASHION_IMAGES : MIN_STANDARD_IMAGES;
 }
 
 function candidateDataReady(product: Product) {
@@ -94,6 +103,7 @@ async function resolveOne(productId?: number, productName?: string) {
   if (!product && productName) product = (await db.select().from(products).where(ilike(products.title, `%${productName}%`)).orderBy(asc(products.id)).limit(1))[0] as Product | undefined;
   if (!product) return { status: "NOT_FOUND", reason: "Product was not found in the catalogue" };
 
+  const minImages = minimumImages(product);
   const cachedFailure = recentFailures.get(product.id);
   if (cachedFailure && cachedFailure.expiresAt > Date.now()) return { ...cachedFailure.result, cachedFailure: true };
   if (cachedFailure) recentFailures.delete(product.id);
@@ -105,7 +115,7 @@ async function resolveOne(productId?: number, productName?: string) {
     .filter(x => ["local-evidence", "local-ai"].includes(String(x.verificationProvider)))
     .sort((a, b) => a.sortOrder - b.sortOrder);
 
-  if (approved.length >= MIN_IMAGES) {
+  if (approved.length >= minImages) {
     const dataReady = candidateDataReady(product);
     const nextStatus = nextMediaStatus(product, dataReady);
     if (dataReady && nextStatus !== product.status) {
@@ -118,6 +128,7 @@ async function resolveOne(productId?: number, productName?: string) {
       productId: product.id,
       product: product.title,
       imageCount: Math.min(approved.length, MAX_IMAGES),
+      requiredImageCount: minImages,
       images: approved.slice(0, MAX_IMAGES).map(x => ({ url: x.imageUrl, confidence: Number(x.verificationConfidence), reason: String((x.verificationMetadata as any)?.reason || "Previously verified") })),
       cached: true,
       publicationGate: dataReady ? "PASS" : "BLOCK",
@@ -127,9 +138,9 @@ async function resolveOne(productId?: number, productName?: string) {
   }
 
   const base = `${product.title} ${product.brand !== "Generic" ? product.brand : ""}`.trim();
-  const queries = FASHION.test(`${product.category} ${product.title}`)
+  const queries = isFashion(product)
     ? [`${base} product photo`, `${base} front back colour variant`]
-    : [`${base} official product image`, `${base} packaging front back product images`];
+    : [`${base} official product image`, `${base} packaging product image`];
 
   const found: Candidate[] = [];
   for (const q of queries) {
@@ -160,7 +171,7 @@ async function resolveOne(productId?: number, productName?: string) {
     .slice(0, MAX_CANDIDATES);
 
   if (!candidates.length) {
-    const result = { status: "NEEDS_IMAGES", productId: product.id, product: product.title, imageCount: 0, searched: queries, publicationGate: "BLOCK", message: "No HTTPS image candidates returned by SearXNG. Product remains staged." };
+    const result = { status: "NEEDS_IMAGES", productId: product.id, product: product.title, imageCount: 0, requiredImageCount: minImages, searched: queries, publicationGate: "BLOCK", message: "No HTTPS image candidates returned by SearXNG. Product remains staged." };
     cacheFailure(product.id, result);
     return result;
   }
@@ -169,7 +180,7 @@ async function resolveOne(productId?: number, productName?: string) {
     .filter(x => x.image) as Array<{ candidate: Candidate; image: { data: string; mediaType: string; byteSize: number } }>;
 
   if (!usable.length) {
-    const result = { status: "NEEDS_IMAGES", productId: product.id, product: product.title, imageCount: 0, searched: queries, publicationGate: "BLOCK", message: "SearXNG returned no reachable HTTPS image bytes. Product remains staged." };
+    const result = { status: "NEEDS_IMAGES", productId: product.id, product: product.title, imageCount: 0, requiredImageCount: minImages, searched: queries, publicationGate: "BLOCK", message: "SearXNG returned no reachable HTTPS image bytes. Product remains staged." };
     cacheFailure(product.id, result);
     return result;
   }
@@ -181,18 +192,19 @@ async function resolveOne(productId?: number, productName?: string) {
     .sort((a, b) => b.confidence - a.confidence)
     .slice(0, MAX_IMAGES);
 
-  if (accepted.length < MIN_IMAGES) {
+  if (accepted.length < minImages) {
     const result = {
       status: "NEEDS_IMAGES",
       productId: product.id,
       product: product.title,
       imageCount: accepted.length,
+      requiredImageCount: minImages,
       verdicts,
       searched: queries,
       publicationGate: "BLOCK",
       provider: VERIFIER_PROVIDER,
       model: VERIFIER_MODEL,
-      message: `Only ${accepted.length} image(s) passed the local evidence verifier (need ${MIN_IMAGES}). Product remains staged.`,
+      message: `Only ${accepted.length} image(s) passed the local evidence verifier (need ${minImages}). Product remains staged.`,
     };
     cacheFailure(product.id, result);
     return result;
@@ -226,12 +238,13 @@ async function resolveOne(productId?: number, productName?: string) {
     productId: product.id,
     product: product.title,
     imageCount: accepted.length,
+    requiredImageCount: minImages,
     images: accepted.map(v => ({ url: v.item.candidate.url, confidence: v.confidence, reason: v.reason })),
     cached: false,
     publicationGate: dataReady ? "PASS" : "BLOCK",
     productStatus: nextStatus,
     nextStage: dataReady && nextStatus === "CEO_PENDING" ? "CEO_REVIEW" : nextStatus,
-    message: dataReady ? `${accepted.length} images passed local evidence verification. Product is queued for CEO review and was not published by the media resolver.` : `${accepted.length} images passed verification, but basic pricing/stock data is incomplete; product remains non-published.`,
+    message: dataReady ? `${accepted.length} verified image(s) passed. Product is queued for CEO review and was not published by the media resolver.` : `${accepted.length} image(s) passed verification, but basic pricing/stock data is incomplete; product remains non-published.`,
   };
 }
 
