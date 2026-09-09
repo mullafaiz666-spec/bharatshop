@@ -15,7 +15,8 @@ async function main(){
   const s=await req('/api/storefront/products?limit=96');storefront=Array.isArray(s.data?.products)?s.data.products:[];
   const unsafe=storefront.filter(p=>!Array.isArray(p.imageUrls)||p.imageUrls.length<4||p.imageUrls.some(u=>!/^https:\/\//i.test(String(u||'')))||Number(p.sellingPriceInr)<=0||(!p.madeToOrder&&Number(p.stockCount)<=0));
   const leakedKeys=['supplierName','supplierCity','supplierCostInr','supplierProductUrl','sourceUrl','sourceProductUrl','productionSupplier','procurementUrl','netProfitInr','profitMarginPct','commissionInr'];
-  const privacyLeaks=storefront.filter(p=>leakedKeys.some(k=>Object.prototype.hasOwnProperty.call(p,k))||!['BharatShop Select','BharatShop Studio'].includes(String(p.brand||''))||/(?:deodap|qikink)/i.test(JSON.stringify(p)));
+  const publicBrands=new Set(['BharatShop Select','BharatShop Studio','BharatDrip']);
+  const privacyLeaks=storefront.filter(p=>leakedKeys.some(k=>Object.prototype.hasOwnProperty.call(p,k))||!publicBrands.has(String(p.brand||''))||/(?:deodap|qikink)/i.test(JSON.stringify(p)));
   const fashion=storefront.filter(p=>p.madeToOrder);
   const categoryCounts=s.data?.categoryCount&&typeof s.data.categoryCount==='object'?s.data.categoryCount:{};
   const badCategories=Object.entries(categoryCounts).filter(([,count])=>Number(count)<=0);
