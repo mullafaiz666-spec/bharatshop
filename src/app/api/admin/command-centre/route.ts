@@ -32,13 +32,17 @@ function token() {
 
 async function internalCall(origin: string, spec: ActionSpec) {
   const automationToken = token();
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+  };
+  if (spec.method === "POST") headers["Content-Type"] = "application/json";
+  if (automationToken) {
+    headers.Authorization = `Bearer ${automationToken}`;
+    headers["x-automation-token"] = automationToken;
+  }
   const response = await fetch(`${origin}${spec.path}`, {
     method: spec.method,
-    headers: {
-      Accept: "application/json",
-      ...(spec.method === "POST" ? { "Content-Type": "application/json" } : {}),
-      ...(automationToken ? { Authorization: `Bearer ${automationToken}`, "x-automation-token": automationToken } : {}),
-    },
+    headers,
     ...(spec.method === "POST" ? { body: JSON.stringify(spec.body || {}) } : {}),
     cache: "no-store",
     signal: AbortSignal.timeout(spec.timeoutMs),
@@ -92,7 +96,11 @@ export async function GET(req: Request) {
   if (!admin) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const origin = new URL(req.url).origin;
   const automationToken = token();
-  const headers = automationToken ? { Authorization: `Bearer ${automationToken}`, "x-automation-token": automationToken } : {};
+  const headers: Record<string, string> = {};
+  if (automationToken) {
+    headers.Authorization = `Bearer ${automationToken}`;
+    headers["x-automation-token"] = automationToken;
+  }
   async function safeGet(path: string, timeoutMs = 25_000) {
     try {
       const r = await fetch(`${origin}${path}`, { headers, cache: "no-store", signal: AbortSignal.timeout(timeoutMs) });
