@@ -17,9 +17,10 @@ export type MetaConversionInput = {
 };
 
 const graphVersion = () => process.env.META_GRAPH_API_VERSION || "v26.0";
-export const metaPixelId = () => (process.env.META_PIXEL_ID || process.env.NEXT_PUBLIC_META_PIXEL_ID || "").trim();
+export const metaPixelId = () => (process.env.NEXT_PUBLIC_META_PIXEL_ID || process.env.META_PIXEL_ID || "").trim();
+export const metaDatasetId = () => (process.env.META_DATASET_ID || process.env.META_PIXEL_ID || process.env.NEXT_PUBLIC_META_PIXEL_ID || "").trim();
 const capiToken = () => (process.env.META_CONVERSIONS_API_TOKEN || process.env.META_ACCESS_TOKEN || "").trim();
-export const metaCapiConfigured = () => Boolean(metaPixelId() && capiToken());
+export const metaCapiConfigured = () => Boolean(metaDatasetId() && capiToken());
 
 function hash(value?: string, mode: "email" | "phone" | "generic" = "generic") {
   if (!value?.trim()) return undefined;
@@ -34,20 +35,31 @@ function cleanObject<T extends Record<string, unknown>>(input: T) {
 }
 
 export async function sendMetaConversion(input: MetaConversionInput) {
-  const pixelId = metaPixelId(), token = capiToken();
-  if (!pixelId || !token) return { configured: false, sent: false, reason: "missing_meta_pixel_or_capi_token" as const };
-  if (!/^\d+$/.test(pixelId)) return { configured: true, sent: false, reason: "invalid_meta_pixel_id" as const };
+  const datasetId = metaDatasetId(), token = capiToken();
+  if (!datasetId || !token) return { configured: false, sent: false, reason: "missing_meta_dataset_or_capi_token" as const };
+  if (!/^\d+$/.test(datasetId)) return { configured: true, sent: false, reason: "invalid_meta_dataset_id" as const };
   if (!/^v\d+\.\d+$/.test(graphVersion())) return { configured: true, sent: false, reason: "invalid_meta_graph_version" as const };
+
+  // META_PIXEL_ID is the legacy server-side alias for the browser Pixel ID. When a
+  // dedicated META_DATASET_ID is supplied it is allowed to differ from the browser
+  // value; otherwise matching IDs are required so Pixel+CAPI copies can deduplicate.
   const browserPixel = process.env.NEXT_PUBLIC_META_PIXEL_ID?.trim();
-  if (browserPixel && browserPixel !== pixelId) return { configured: true, sent: false, reason: "meta_pixel_id_mismatch" as const };
+  const legacyServerPixel = process.env.META_PIXEL_ID?.trim();
+  if (!process.env.META_DATASET_ID?.trim() && browserPixel && legacyServerPixel && browserPixel !== legacyServerPixel) {
+    return { configured: true, sent: false, reason: "meta_pixel_id_mismatch" as const };
+  }
+
+  const emailHash = hash(input.email, "email");
+  const phoneHash = hash(input.phone, "phone");
+  const externalIdHash = hash(input.externalId);
   const userData = cleanObject({
     client_ip_address: input.clientIpAddress,
     client_user_agent: input.userAgent,
     fbp: input.fbp,
     fbc: input.fbc,
-    em: hash(input.email, "email") ? [hash(input.email, "email")] : undefined,
-    ph: hash(input.phone, "phone") ? [hash(input.phone, "phone")] : undefined,
-    external_id: hash(input.externalId) ? [hash(input.externalId)] : undefined,
+    em: emailHash ? [emailHash] : undefined,
+    ph: phoneHash ? [phoneHash] : undefined,
+    external_id: externalIdHash ? [externalIdHash] : undefined,
   });
   const event = cleanObject({
     event_name: input.eventName,
@@ -60,7 +72,7 @@ export async function sendMetaConversion(input: MetaConversionInput) {
   });
   const body: Record<string, unknown> = { data: [event] };
   if (process.env.META_TEST_EVENT_CODE?.trim()) body.test_event_code = process.env.META_TEST_EVENT_CODE.trim();
-  const response = await fetch(`https://graph.facebook.com/${graphVersion()}/${pixelId}/events`, {
+  const response = await fetch(`https://graph.facebook.com/${graphVersion()}/${datasetId}/events`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify(body),

@@ -11,6 +11,7 @@ declare global {
     fbq?: (...args: unknown[]) => void;
     _fbq?: unknown;
     bharatTrack?: (name: string, params?: Record<string, unknown>) => void;
+    bharatTrackMeta?: (name: string, params?: Record<string, unknown>, eventId?: string) => void;
   }
 }
 
@@ -30,7 +31,7 @@ const metaEventMap: Record<string, string> = {
   search: "Search",
 };
 
-function eventId() {
+function generatedEventId() {
   try { return crypto.randomUUID(); } catch { return `bs-${Date.now()}-${Math.random().toString(36).slice(2)}`; }
 }
 
@@ -40,11 +41,13 @@ function emit(name: string, params: Record<string, unknown> = {}) {
   emitMeta(name, params);
 }
 
-function emitMeta(name: string, params: Record<string, unknown> = {}) {
+function emitMeta(name: string, params: Record<string, unknown> = {}, sharedEventId?: string) {
   const metaName = metaEventMap[name];
   if (!metaName || !META_PIXEL_ID) return;
-  const id = eventId();
+  const id = sharedEventId?.trim() || generatedEventId();
   window.fbq?.("track", metaName, params, { eventID: id });
+  // Purchase is emitted server-side only after a verified payment. Browser Purchase
+  // calls pass the same event ID so Meta can deduplicate Pixel + CAPI copies.
   if (metaName !== "Purchase") {
     void fetch("/api/marketing/meta/events", {
       method: "POST",
@@ -59,13 +62,25 @@ export default function MarketingPixels() {
   const pathname = usePathname();
   const [metaReady, setMetaReady] = useState(false);
   const storefront = pathname === "/" || pathname.startsWith("/store");
+  const verifiedCheckout = pathname.startsWith("/checkout/success");
+  const trackingSurface = storefront || verifiedCheckout;
+
   useEffect(() => {
-    if (!metaReady || !storefront) return;
+    if (!metaReady || !trackingSurface) return;
     emitMeta("page_view", { page_location: window.location.href, page_title: document.title });
-  }, [metaReady, pathname, storefront]);
+  }, [metaReady, pathname, trackingSurface]);
+
   useEffect(() => {
-    if (!storefront) return;
+    if (!trackingSurface) return;
     window.bharatTrack = emit;
+    window.bharatTrackMeta = emitMeta;
+
+    if (!storefront) {
+      return () => {
+        delete window.bharatTrack;
+        delete window.bharatTrackMeta;
+      };
+    }
 
     const onClick = (event: MouseEvent) => {
       const target = event.target as HTMLElement | null;
@@ -95,10 +110,11 @@ export default function MarketingPixels() {
       document.removeEventListener("click", onClick, true);
       document.removeEventListener("submit", onSubmit, true);
       delete window.bharatTrack;
+      delete window.bharatTrackMeta;
     };
-  }, [storefront]);
+  }, [storefront, trackingSurface]);
 
-  if (!storefront) return null;
+  if (!trackingSurface) return null;
 
   return (
     <>
