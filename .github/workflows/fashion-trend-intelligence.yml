@@ -1,0 +1,58 @@
+name: BharatShop Fashion Trend Intelligence
+
+on:
+  schedule:
+    - cron: "35 */4 * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'src/lib/fashion/trend-intelligence.ts'
+      - 'src/app/api/automation/fashion-trend-intelligence/**'
+      - '.github/workflows/fashion-trend-intelligence.yml'
+
+concurrency:
+  group: bharatshop-fashion-trend-intelligence
+  cancel-in-progress: true
+
+env:
+  BHARATSHOP_URL: https://bharatshop-9w4a.onrender.com
+
+jobs:
+  scan-fashion-trends:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Wait for exact Render revision
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 42); do
+            code=$(curl -sS -o /tmp/health.json -w '%{http_code}' --max-time 20 "$BHARATSHOP_URL/api/health" || true)
+            revision=$(node -e "try{const d=require('/tmp/health.json');process.stdout.write(String(d.revision||''))}catch{}")
+            echo "health=$code revision=$revision expected=$GITHUB_SHA"
+            if [ "$code" = "200" ] && [ "$revision" = "$GITHUB_SHA" ]; then exit 0; fi
+            sleep 10
+          done
+          exit 1
+
+      - name: Scan marketplace fashion signals
+        env:
+          TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$TOKEN"
+          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 \
+            -X POST "$BHARATSHOP_URL/api/automation/fashion-trend-intelligence" \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "x-automation-token: $TOKEN" \
+            -H "Content-Type: application/json" \
+            --data '{}' | tee fashion-trends.json
+          node - <<'NODE'
+          const d=require('./fashion-trends.json');
+          if(!d.success) throw new Error(`Fashion trend scan failed: ${JSON.stringify(d)}`);
+          if(!Array.isArray(d.directions)||d.directions.length<4) throw new Error(`Too few safe design directions: ${d.directions?.length||0}`);
+          if(d.ipPolicy!=='TREND_ONLY_NO_COPY_NO_LICENSED_IP') throw new Error('Fashion IP policy regression');
+          console.log(JSON.stringify({status:d.status,signalCount:(d.signals||[]).length,directionCount:d.directions.length,summary:d.summary,ipPolicy:d.ipPolicy},null,2));
+          NODE
