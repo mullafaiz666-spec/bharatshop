@@ -11,7 +11,7 @@ const LOCAL_PROVIDER = "bharatshop-local-raster";
 
 function authorized(req: Request) {
   const expected = process.env.BHARATSHOP_AUTOMATION_TOKEN || process.env.AUTOMATION_TOKEN;
-  if (!expected) return true;
+  if (!expected) return false;
   return req.headers.get("authorization") === `Bearer ${expected}` || req.headers.get("x-automation-token") === expected;
 }
 
