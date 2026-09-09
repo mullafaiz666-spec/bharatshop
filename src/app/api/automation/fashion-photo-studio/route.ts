@@ -115,9 +115,9 @@ async function storeMedia(input: { productId: number; view: number; mimeType: st
   );
 }
 
-function requestedViews(body: any) {
-  const raw = Array.isArray(body?.views) ? body.views.map(Number) : [0];
-  const views = [...new Set(raw.filter((x: number) => x === 0 || x === 2))];
+function requestedViews(body: any): number[] {
+  const raw: number[] = Array.isArray(body?.views) ? body.views.map(Number) : [0];
+  const views: number[] = [...new Set<number>(raw.filter((x: number) => x === 0 || x === 2))];
   return views.length ? views : [0];
 }
 
@@ -125,7 +125,7 @@ export async function POST(req: Request) {
   if (!authorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   await ensureTable();
   const body = await req.json().catch(() => ({}));
-  const views = requestedViews(body);
+  const views: number[] = requestedViews(body);
   const productLimit = Math.max(1, Math.min(12, Number(body.productLimit ?? 6)));
   const externalAttemptLimit = Math.max(1, Math.min(12, Number(body.externalAttemptLimit ?? productLimit * views.length)));
   const rows = await pool.query(
