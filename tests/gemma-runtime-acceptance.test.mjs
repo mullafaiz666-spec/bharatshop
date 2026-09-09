@@ -57,6 +57,17 @@ test("pre-client production acceptance has zero manual approval gates", () => {
   assert.doesNotMatch(src, /"MANUAL"/);
 });
 
+test("legacy synthetic production-acceptance approvals are quarantined without deletion", () => {
+  const route = read("src/app/api/ceo-approvals/route.ts");
+  const tools = read("src/lib/ai/ceo-tools.ts");
+  assert.match(route, /title ILIKE 'Production acceptance%'/);
+  assert.match(route, /SYNTHETIC_APPROVAL_QUARANTINED/);
+  assert.match(route, /destructiveCleanup:false/);
+  assert.match(tools, /title NOT ILIKE 'Production acceptance%'/);
+  assert.doesNotMatch(route, /DELETE FROM ceo_approvals/i);
+  assert.doesNotMatch(tools, /DELETE FROM ceo_approvals/i);
+});
+
 test("CEO cycle activates human order gating only for genuine client orders", () => {
   const src = read("src/app/api/automation/ceo-cycle/route.ts");
   assert.match(src, /function isRealClientOrder/);
