@@ -28,11 +28,25 @@ const metaEventMap: Record<string, string> = {
   search: "Search",
 };
 
+function eventId() {
+  try { return crypto.randomUUID(); } catch { return `bs-${Date.now()}-${Math.random().toString(36).slice(2)}`; }
+}
+
 function emit(name: string, params: Record<string, unknown> = {}) {
   if (typeof window === "undefined") return;
   window.gtag?.("event", name, params);
   const metaName = metaEventMap[name];
-  if (metaName && window.fbq) window.fbq("track", metaName, params);
+  if (!metaName || !META_PIXEL_ID) return;
+  const id = eventId();
+  window.fbq?.("track", metaName, params, { eventID: id });
+  if (metaName !== "Purchase") {
+    void fetch("/api/marketing/meta/events", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      keepalive: true,
+      body: JSON.stringify({ eventName: metaName, eventId: id, eventSourceUrl: window.location.href, customData: params }),
+    }).catch(() => undefined);
+  }
 }
 
 export default function MarketingPixels() {
@@ -47,7 +61,7 @@ export default function MarketingPixels() {
       const text = (el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
       const scope = el.closest("article,section,[role='dialog']") || document.body;
       const title = (scope.querySelector("h1,h2,h3")?.textContent || "").trim();
-      const params: Record<string, unknown> = title ? { item_name: title, content_name: title } : {};
+      const params: Record<string, unknown> = title ? { item_name: title, content_name: title, content_type: "product" } : {};
 
       if (text.includes("add to bag") || text.includes("add to cart")) emit("add_to_cart", params);
       else if (text.includes("buy now") || text.includes("checkout")) emit("begin_checkout", params);
@@ -99,17 +113,10 @@ export default function MarketingPixels() {
               t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}
               (window, document,'script','https://connect.facebook.net/en_US/fbevents.js');
               fbq('init', '${META_PIXEL_ID}');
-              fbq('track', 'PageView');
             `}
           </Script>
           <noscript>
-            <img
-              height="1"
-              width="1"
-              style={{ display: "none" }}
-              alt=""
-              src={`https://www.facebook.com/tr?id=${encodeURIComponent(META_PIXEL_ID)}&ev=PageView&noscript=1`}
-            />
+            <img height="1" width="1" style={{ display: "none" }} alt="" src={`https://www.facebook.com/tr?id=${encodeURIComponent(META_PIXEL_ID)}&ev=PageView&noscript=1`} />
           </noscript>
         </>
       ) : null}

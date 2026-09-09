@@ -4,6 +4,8 @@ import { orders, products, productDetails, aiActivityLogs } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { openAIJson } from "@/lib/ai/agent-tools";
 import { verifyCommerceSource } from "@/lib/source-evidence";
+import { agentPrompt } from "@/lib/agents/contracts";
+import { classifySource } from "@/lib/suppliers/marketplace-policy";
 export const dynamic="force-dynamic";
 
 export async function POST(req:Request){
@@ -14,6 +16,7 @@ export async function POST(req:Request){
   const [details]=await db.select().from(productDetails).where(eq(productDetails.productId,p.id)).limit(1);
   const sourceUrl=String(details?.sourceUrl||"").trim();
   if(!sourceUrl)return NextResponse.json({error:"No verified supplier source URL is persisted for this product",status:"RECHECK_REQUIRED"},{status:409});
+  const sourcePolicy=classifySource(sourceUrl,p.supplierName||"");
 
   const expectedSupplierPrice=Number(p.supplierCostInr);const evidence=await verifyCommerceSource(sourceUrl,p.title,expectedSupplierPrice);
   const cartPrice=evidence.priceVerified&&Number(evidence.matchedPriceInr)>0?Number(evidence.matchedPriceInr):Number.NaN;
@@ -21,10 +24,10 @@ export async function POST(req:Request){
   const minMargin=Number(body.minMarginPct??35);
   const customerPaid=Number(o.customerPaidInr);
   const margin=Number.isFinite(cartPrice)&&Number.isFinite(shipping)&&customerPaid>0?(customerPaid-cartPrice-shipping)/customerPaid*100:Number.NaN;
-  const checks={sourceReachable:evidence.reachable,titleMatch:evidence.titleMatch,priceVerified:evidence.priceVerified,stockVerified:evidence.stockVerified,stockAvailable:evidence.stockAvailable===true,shippingVerified:evidence.shippingVerified,margin:Number.isFinite(margin)&&margin>=minMargin};
-  const ai=await openAIJson("You are BharatShop Order Recheck Agent. Decide whether a supplier purchase is economically and operationally safe using only the live source-page evidence provided. Never invent missing facts. If any required evidence is missing, HOLD. Return JSON {decision:'PASS'|'HOLD',reason:string,risks:string[]}.",{order:{orderNumber:o.orderNumber,customerPaidInr:o.customerPaidInr,paymentMode:o.paymentMode,paymentStatus:o.paymentStatus},product:{title:p.title,source:p.supplierName,sourceUrl},liveEvidence:{source:evidence,cartPriceInr:Number.isFinite(cartPrice)?cartPrice:null,shippingInr:Number.isFinite(shipping)?shipping:null,marginPct:Number.isFinite(margin)?+margin.toFixed(2):null,checks}});
+  const checks={sourcePolicy:sourcePolicy.fulfillmentAllowed,sourceReachable:evidence.reachable,titleMatch:evidence.titleMatch,priceVerified:evidence.priceVerified,stockVerified:evidence.stockVerified,stockAvailable:evidence.stockAvailable===true,shippingVerified:evidence.shippingVerified,margin:Number.isFinite(margin)&&margin>=minMargin};
+  const ai=await openAIJson(agentPrompt("order-recheck"),{order:{orderNumber:o.orderNumber,customerPaidInr:o.customerPaidInr,paymentMode:o.paymentMode,paymentStatus:o.paymentStatus},product:{title:p.title,source:p.supplierName,sourceUrl,sourcePolicy},liveEvidence:{source:evidence,cartPriceInr:Number.isFinite(cartPrice)?cartPrice:null,shippingInr:Number.isFinite(shipping)?shipping:null,marginPct:Number.isFinite(margin)?+margin.toFixed(2):null,checks}});
   const passed=ai.decision==="PASS"&&Object.values(checks).every(Boolean);const status=passed?"PURCHASE_PENDING":"RECHECK_REQUIRED";
-  const decision={checkedAt:new Date().toISOString(),source:p.supplierName,sourceUrl,cartPriceInr:Number.isFinite(cartPrice)?cartPrice:null,shippingInr:Number.isFinite(shipping)?shipping:null,stockAvailable:evidence.stockAvailable===true,marginPct:Number.isFinite(margin)?+margin.toFixed(2):null,minMarginPct:minMargin,checks,sourceEvidence:evidence,ai};
+  const decision={checkedAt:new Date().toISOString(),source:p.supplierName,sourceUrl,sourcePolicy,cartPriceInr:Number.isFinite(cartPrice)?cartPrice:null,shippingInr:Number.isFinite(shipping)?shipping:null,stockAvailable:evidence.stockAvailable===true,marginPct:Number.isFinite(margin)?+margin.toFixed(2):null,minMarginPct:minMargin,checks,sourceEvidence:evidence,ai,promptVersion:"agent-suite-v2"};
   const update:any={fulfillmentStatus:status,aiDecisionLog:`${o.aiDecisionLog}; order_time_recheck=${JSON.stringify(decision)}`};
   if(Number.isFinite(cartPrice))update.supplierCostInr=String(cartPrice);
   const [updated]=await db.update(orders).set(update).where(eq(orders.id,orderId)).returning();
@@ -32,4 +35,4 @@ export async function POST(req:Request){
   return NextResponse.json({status,passed,checks,economics:decision,order:updated});
  }catch(e){return NextResponse.json({error:e instanceof Error?e.message:"Invalid request"},{status:503})}
 }
-export async function GET(){const ai=Boolean(process.env.AI_BASE_URL||process.env.LOCAL_AI_BASE_URL);return NextResponse.json({agent:"Order-Recheck-Agent",status:ai?"ready":"blocked_missing_provider",humanGate:"Human approval before supplier purchase",evidencePolicy:"Persisted supplier source URL + live price/stock/shipping evidence required"})}
+export async function GET(){const ai=Boolean(process.env.AI_BASE_URL||process.env.LOCAL_AI_BASE_URL);return NextResponse.json({agent:"Order-Recheck-Agent",status:ai?"ready":"blocked_missing_provider",humanGate:"Human approval before supplier purchase",evidencePolicy:"Persisted supplier source URL + source policy + live price/stock/shipping evidence required",promptVersion:"agent-suite-v2"})}

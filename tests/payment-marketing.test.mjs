@@ -19,6 +19,7 @@ const gateway = load('src/lib/payments/gateway.ts');
 const events = load('src/lib/payments/payment-events.ts');
 const meta = load('src/lib/payments/token-plan.ts');
 const next = { NextResponse: { json: (data, options) => Response.json(data, options) } };
+const metaAnalytics = { sendMetaConversion: async () => ({ configured: false, sent: false }) };
 
 test('malformed or modified webhook signatures are rejected without throwing', () => {
   process.env.RAZORPAY_WEBHOOK_SECRET = 'test-secret';
@@ -107,7 +108,8 @@ test('Razorpay signed-but-authorized payment cannot release fulfilment', async t
   let writes = 0;
   const route = load('src/app/api/payments/razorpay/verify/route.ts', {
     'next/server': next, '@/lib/payments/gateway': gateway,
-    '@/lib/payments/order-state': { markGatewayPayment: async input => { writes++; assert.equal(input.amountInr, 100); return { matched: 1, verified: true }; } },
+    '@/lib/marketing/meta': metaAnalytics,
+    '@/lib/payments/order-state': { markGatewayPayment: async input => { writes++; assert.equal(input.amountInr, 100); return { matched: 1, verified: true, orderRefs: ['BS-TEST'], codBalanceInr: 399 }; } },
   });
   const signature = crypto.createHmac('sha256', 'test-secret').update('order_test|pay_test').digest('hex');
   const request = () => new Request('http://localhost/api/payments/razorpay/verify', { method: 'POST', body: JSON.stringify({ razorpay_order_id: 'order_test', razorpay_payment_id: 'pay_test', razorpay_signature: signature }) });
@@ -123,7 +125,9 @@ test('Cashfree status does not claim success for an unmatched or refunded order'
   process.env.CASHFREE_CLIENT_ID = 'test'; process.env.CASHFREE_CLIENT_SECRET = 'test';
   for (const state of [{ matched: 0, verified: false }, { matched: 1, verified: false }]) {
     const route = load('src/app/api/payments/cashfree/status/route.ts', {
-      'next/server': next, '@/lib/payments/gateway': { fetchCashfreeOrder: async () => ({ order_status: 'PAID', order_amount: 100, order_currency: 'INR' }) },
+      'next/server': next,
+      '@/lib/marketing/meta': metaAnalytics,
+      '@/lib/payments/gateway': { cashfreeCredentials: () => ({ clientId: 'test', clientSecret: 'test' }), fetchCashfreeOrder: async () => ({ order_status: 'PAID', order_amount: 100, order_currency: 'INR' }) },
       '@/lib/payments/order-state': { markGatewayPayment: async () => state },
     });
     const response = await route.GET(new Request('http://localhost/api/payments/cashfree/status?gateway_order_id=test'));
