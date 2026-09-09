@@ -42,6 +42,16 @@ test("CEO uses a tiny Gemma decision protocol suitable for free CPU", () => {
   assert.doesNotMatch(src, /humanFallback/);
 });
 
+test("CEO parser accepts compact approval tool variants without bypassing Gemma", () => {
+  const src = read("src/app/api/ceo-chat/route.ts");
+  assert.match(src, /function normalizeModelTool/);
+  assert.match(src, /JSON\.parse\(cleaned\)/);
+  assert.match(src, /p: "create_approval"/);
+  assert.match(src, /createapproval: "create_approval"/);
+  assert.match(src, /requestapproval: "create_approval"/);
+  assert.match(src, /TOOL\\s\*:\\s\*\(\[\^\\n\]\+\)/);
+});
+
 test("approval arguments are extracted only after Gemma chooses the approval tool", () => {
   const src = read("src/app/api/ceo-chat/route.ts");
   const plannerPos = src.indexOf("const decision = await planWithGemma");
