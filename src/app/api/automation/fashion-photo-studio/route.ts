@@ -29,6 +29,26 @@ function jsonObject(value: unknown): Record<string, any> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, any>) : {};
 }
 
+function publicOrigin(req: Request) {
+  const candidates = [
+    process.env.PUBLIC_APP_URL,
+    process.env.NEXT_PUBLIC_SITE_URL,
+    process.env.RENDER_EXTERNAL_URL,
+    new URL(req.url).origin,
+    "https://bharatshop-9w4a.onrender.com",
+  ];
+  for (const value of candidates) {
+    try {
+      if (!value) continue;
+      const url = new URL(value);
+      if (url.protocol !== "https:") continue;
+      if (/^(?:0\.0\.0\.0|127(?:\.\d{1,3}){3}|localhost|\[::1\])$/i.test(url.hostname)) continue;
+      return url.origin;
+    } catch {}
+  }
+  return "https://bharatshop-9w4a.onrender.com";
+}
+
 function editorialPrompt(row: any, specs: Record<string, any>, view: number) {
   const title = String(row.title || "BharatDrip streetwear");
   const garment = String(specs.qikinkProductName || "oversized t-shirt");
@@ -86,12 +106,14 @@ export async function POST(req: Request) {
      ORDER BY p.updated_at DESC,p.id DESC
      LIMIT 24`
   );
-  const origin = new URL(req.url).origin.replace(/\/$/, "");
+  const origin = publicOrigin(req);
   const results: any[] = [];
   let generated = 0;
-  for (const row of rows.rows) {
-    const specs = jsonObject(row.specifications_json);
-    for (const view of [0, 2]) {
+
+  // Primary storefront coverage first: every product gets a front model shot before secondary back views consume free GPU quota.
+  for (const view of [0, 2]) {
+    for (const row of rows.rows) {
+      const specs = jsonObject(row.specifications_json);
       const existing = await pool.query(`SELECT provider FROM fashion_media_cache WHERE product_id=$1 AND view=$2 LIMIT 1`, [row.id, view]);
       if (existing.rows[0]) {
         const publicUrl = await attachPublicPhoto(Number(row.id), view, String(row.title), specs, origin);
@@ -113,17 +135,18 @@ export async function POST(req: Request) {
         results.push({ productId: Number(row.id), title: row.title, view, status: "GENERATED", publicUrl, provider: image.provider, bytes: image.bytes.length });
       } catch (error) {
         results.push({ productId: Number(row.id), title: row.title, view, status: "DEFERRED_FREE_GPU", error: error instanceof Error ? error.message : String(error) });
-        break;
       }
     }
   }
+
   const cachedRewired = results.filter((x) => x.status === "CACHED_REWIRED").length;
+  const frontReady = new Set(results.filter((x) => x.view === 0 && (x.status === "GENERATED" || x.status === "CACHED_REWIRED")).map((x) => x.productId)).size;
   await pool.query(
     `INSERT INTO ai_activity_logs (user_id,agent_name,action_type,message,metadata_json,status)
      VALUES (1,'BharatDrip Fashion Photo Studio','EDITORIAL_MODEL_SHOTS',$1,$2,$3)`,
-    [generated || cachedRewired ? `Prepared ${generated + cachedRewired} BharatDrip model shot link(s); ${generated} newly generated.` : "Free GPU unavailable; kept production-safe mockup fallbacks.", JSON.stringify({ generated, cachedRewired, requestedProducts: limit, results }), generated || cachedRewired ? "SUCCESS" : "DEGRADED"]
+    [generated || cachedRewired ? `Prepared ${generated + cachedRewired} BharatDrip model shot link(s); ${frontReady} product card(s) have front model photography.` : "Free GPU unavailable; kept production-safe mockup fallbacks.", JSON.stringify({ generated, cachedRewired, frontReady, requestedProducts: limit, results }), generated || cachedRewired ? "SUCCESS" : "DEGRADED"]
   );
-  return NextResponse.json({ success: true, provider: "free-first-hf-zerogpu", generated, cachedRewired, requestedProducts: limit, fallback: "BharatShop/Qikink-safe product mockups", results });
+  return NextResponse.json({ success: true, provider: "free-first-hf-zerogpu", generated, cachedRewired, frontReady, requestedProducts: limit, fallback: "BharatShop/Qikink-safe product mockups", results });
 }
 
 export async function GET(req: Request) {
