@@ -1,7 +1,8 @@
 "use client";
 
 import Script from "next/script";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 
 declare global {
   interface Window {
@@ -15,7 +16,8 @@ declare global {
 
 const GA_ID = process.env.NEXT_PUBLIC_GA_ID?.trim() || "";
 const GOOGLE_ADS_ID = process.env.NEXT_PUBLIC_GOOGLE_ADS_ID?.trim() || "";
-const META_PIXEL_ID = process.env.NEXT_PUBLIC_META_PIXEL_ID?.trim() || "";
+const rawPixelId = process.env.NEXT_PUBLIC_META_PIXEL_ID?.trim() || "";
+const META_PIXEL_ID = /^\d+$/.test(rawPixelId) ? rawPixelId : "";
 const GOOGLE_TAG_ID = GA_ID || GOOGLE_ADS_ID;
 
 const metaEventMap: Record<string, string> = {
@@ -35,6 +37,10 @@ function eventId() {
 function emit(name: string, params: Record<string, unknown> = {}) {
   if (typeof window === "undefined") return;
   window.gtag?.("event", name, params);
+  emitMeta(name, params);
+}
+
+function emitMeta(name: string, params: Record<string, unknown> = {}) {
   const metaName = metaEventMap[name];
   if (!metaName || !META_PIXEL_ID) return;
   const id = eventId();
@@ -50,9 +56,16 @@ function emit(name: string, params: Record<string, unknown> = {}) {
 }
 
 export default function MarketingPixels() {
+  const pathname = usePathname();
+  const [metaReady, setMetaReady] = useState(false);
+  const storefront = pathname === "/" || pathname.startsWith("/store");
   useEffect(() => {
+    if (!metaReady || !storefront) return;
+    emitMeta("page_view", { page_location: window.location.href, page_title: document.title });
+  }, [metaReady, pathname, storefront]);
+  useEffect(() => {
+    if (!storefront) return;
     window.bharatTrack = emit;
-    emit("page_view", { page_location: window.location.href, page_title: document.title });
 
     const onClick = (event: MouseEvent) => {
       const target = event.target as HTMLElement | null;
@@ -83,7 +96,9 @@ export default function MarketingPixels() {
       document.removeEventListener("submit", onSubmit, true);
       delete window.bharatTrack;
     };
-  }, []);
+  }, [storefront]);
+
+  if (!storefront) return null;
 
   return (
     <>
@@ -105,7 +120,7 @@ export default function MarketingPixels() {
 
       {META_PIXEL_ID ? (
         <>
-          <Script id="bharatshop-meta-pixel" strategy="afterInteractive">
+          <Script id="bharatshop-meta-pixel" strategy="afterInteractive" onReady={() => setMetaReady(true)}>
             {`
               !function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?
               n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;

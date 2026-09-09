@@ -259,6 +259,7 @@ export default function DashboardV2() {
         </div>
         <div className="flex flex-wrap gap-2">
           <button onClick={() => void load()} disabled={refreshing} className={btn}><span className="flex items-center gap-2"><RefreshCw size={15} className={refreshing ? "animate-spin" : ""}/>{refreshing ? "Refreshing" : "Refresh live data"}</span></button>
+          <a href="/dashboard/meta" className="rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-bold">Meta setup</a>
           <a href="/" target="_blank" rel="noreferrer" className="rounded-xl bg-orange-500 px-4 py-2.5 text-sm font-black text-slate-950 flex items-center gap-2"><ShoppingBag size={16}/>Open Storefront</a>
         </div>
       </header>
