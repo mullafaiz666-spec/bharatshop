@@ -1,4 +1,3 @@
-# BharatShop free-stack catalog pipeline.
 name: BharatShop Catalog Maintenance
 
 on:
@@ -11,6 +10,10 @@ on:
       - 'src/app/api/automation/deodap-bootstrap/route.ts'
       - 'src/app/api/automation/ceo-cycle/route.ts'
       - 'src/app/api/agents/listing/route.ts'
+      - 'src/app/api/fashion-designer/**'
+      - 'src/app/api/fashion-art/**'
+      - 'src/app/api/storefront/products/route.ts'
+      - 'src/lib/suppliers/qikink-rate-card.ts'
       - '.github/workflows/catalog-maintenance.yml'
 
 concurrency:
@@ -23,15 +26,15 @@ env:
 jobs:
   maintain-catalog:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
 
       - name: Wait for current Render revision
         run: |
           set -euo pipefail
-          for i in $(seq 1 36); do
-            code=$(curl -sS -o /tmp/health.json -w '%{http_code}' --max-time 25 "$BHARATSHOP_URL/api/health" || true)
+          for i in $(seq 1 42); do
+            code=$(curl -sS -o /tmp/health.json -w '%{http_code}' --max-time 20 "$BHARATSHOP_URL/api/health" || true)
             revision=$(node -e "try{const d=require('/tmp/health.json');process.stdout.write(String(d.revision||''))}catch{}")
             echo "health=$code revision=$revision expected=$GITHUB_SHA"
             if [ "$code" = "200" ] && [ "$revision" = "$GITHUB_SHA" ]; then exit 0; fi
@@ -39,53 +42,71 @@ jobs:
           done
           exit 1
 
-      - name: Import verified DeoDap supplier products
+      - name: Expand verified DeoDap catalog
         env:
-          BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
+          TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
         run: |
           set -euo pipefail
-          test -n "$BHARATSHOP_AUTOMATION_TOKEN"
+          test -n "$TOKEN"
           curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 --retry 2 --retry-delay 10 \
             -X POST "$BHARATSHOP_URL/api/automation/deodap-bootstrap" \
-            -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" \
-            -H "x-automation-token: $BHARATSHOP_AUTOMATION_TOKEN" \
-            -H "Content-Type: application/json" \
-            --data '{"limit":5}' | tee deodap-bootstrap.json
+            -H "Authorization: Bearer $TOKEN" -H "x-automation-token: $TOKEN" -H "Content-Type: application/json" \
+            --data '{"limit":40,"maxPages":16}' | tee deodap-bootstrap.json
 
-      - name: Run CEO verification and publication immediately
+      - name: Create or refresh Qikink fashion drop
         env:
-          BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
+          TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
         run: |
           set -euo pipefail
-          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 --retry 2 --retry-delay 10 \
-            -X POST "$BHARATSHOP_URL/api/automation/ceo-cycle?skipResearch=1" \
-            -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" \
-            -H "x-automation-token: $BHARATSHOP_AUTOMATION_TOKEN" \
-            -H "Content-Type: application/json" \
-            --data '{}' | tee ceo-cycle.json
-
-      - name: Require a real customer-visible catalog
-        run: |
-          set -euo pipefail
-          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 120 --retry 3 --retry-delay 10 "$BHARATSHOP_URL/api/storefront/products?limit=96" | tee storefront.json
+          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 \
+            -X POST "$BHARATSHOP_URL/api/fashion-designer" \
+            -H "Authorization: Bearer $TOKEN" -H "x-automation-token: $TOKEN" -H "Content-Type: application/json" \
+            --data '{"count":12}' | tee fashion-designer.json
           node - <<'NODE'
-          const fs=require('fs');
-          const d=JSON.parse(fs.readFileSync('storefront.json','utf8'));
-          if(!Array.isArray(d.products)) throw new Error('Storefront products contract is invalid');
-          if(d.products.length < 1) throw new Error('Storefront is operationally empty: zero publishable products');
-          const unsafe=d.products.filter(p=>!Array.isArray(p.imageUrls)||p.imageUrls.length<4||p.imageUrls.some(u=>!/^https:\/\//i.test(String(u||'')))||Number(p.stockCount)<=0||Number(p.sellingPriceInr)<=0);
-          if(unsafe.length) throw new Error(`Published storefront contains ${unsafe.length} unsafe product(s)`);
-          console.log(JSON.stringify({published:d.products.length,total:d.total,unsafe:unsafe.length},null,2));
+          const d=require('./fashion-designer.json');
+          if(!d.success || Number(d.generated)<3) throw new Error(`Fashion generation insufficient: ${JSON.stringify(d)}`);
+          console.log(JSON.stringify({fashionGenerated:d.generated,supplier:d.productionSupplier},null,2));
           NODE
 
-      - name: Optional free-search discovery after storefront is operational
+      - name: Publish queued products through CEO round 1
+        env:
+          TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
+        run: |
+          set -euo pipefail
+          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 \
+            -X POST "$BHARATSHOP_URL/api/automation/ceo-cycle?skipResearch=1" \
+            -H "Authorization: Bearer $TOKEN" -H "x-automation-token: $TOKEN" -H "Content-Type: application/json" --data '{}' | tee ceo-cycle-1.json
+
+      - name: Publish queued products through CEO round 2
+        env:
+          TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
+        run: |
+          set -euo pipefail
+          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 \
+            -X POST "$BHARATSHOP_URL/api/automation/ceo-cycle?skipResearch=1" \
+            -H "Authorization: Bearer $TOKEN" -H "x-automation-token: $TOKEN" -H "Content-Type: application/json" --data '{}' | tee ceo-cycle-2.json
+
+      - name: Require a substantial safe live catalog
+        run: |
+          set -euo pipefail
+          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 120 --retry 3 --retry-delay 10 "$BHARATSHOP_URL/api/storefront/products?limit=192" | tee storefront.json
+          node - <<'NODE'
+          const d=require('./storefront.json');
+          if(!Array.isArray(d.products)) throw new Error('Storefront products contract is invalid');
+          const unsafe=d.products.filter(p=>!Array.isArray(p.imageUrls)||p.imageUrls.length<4||p.imageUrls.some(u=>!/^https:\/\//i.test(String(u||'')))||Number(p.sellingPriceInr)<=0||(!p.madeToOrder&&Number(p.stockCount)<=0));
+          const fashion=d.products.filter(p=>p.madeToOrder&&String(p.productionSupplier).toLowerCase()==='qikink');
+          if(d.products.length<12) throw new Error(`Storefront still too small: ${d.products.length} published`);
+          if(fashion.length<3) throw new Error(`Qikink fashion is not operational: ${fashion.length} live`);
+          if(unsafe.length) throw new Error(`Published storefront contains ${unsafe.length} unsafe product(s)`);
+          console.log(JSON.stringify({published:d.products.length,qikinkFashion:fashion.length,unsafe:unsafe.length},null,2));
+          NODE
+
+      - name: Optional free-search discovery after core catalog is operational
         continue-on-error: true
         env:
-          BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
+          TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
         run: |
           curl --silent --show-error --connect-timeout 10 --max-time 90 \
             -X POST "$BHARATSHOP_URL/api/automation/research-products" \
-            -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" \
-            -H "x-automation-token: $BHARATSHOP_AUTOMATION_TOKEN" \
-            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $TOKEN" -H "x-automation-token: $TOKEN" -H "Content-Type: application/json" \
             --data '{"limit":1}' | tee research-products.json

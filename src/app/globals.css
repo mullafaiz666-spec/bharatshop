@@ -51,6 +51,47 @@ h1,h2,h3,h4,.font-heading { font-family: var(--font-heading); }
 @keyframes bs-float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
 .bs-float { animation: bs-float 5s ease-in-out infinite; }
 
+/* Product detail gallery: desktop keeps the thumbnail rail; phones get the
+   main image first and a horizontal thumbnail strip underneath. */
+@media (max-width: 767px) {
+  .grid.grid-cols-\[64px_1fr\] {
+    display: flex !important;
+    flex-direction: column-reverse !important;
+    gap: 12px !important;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+  .grid.grid-cols-\[64px_1fr\] > div:first-child {
+    display: flex !important;
+    flex-direction: row !important;
+    gap: 10px !important;
+    width: 100% !important;
+    max-height: none !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    padding: 2px 2px 8px !important;
+    scroll-snap-type: x proximity;
+  }
+  .grid.grid-cols-\[64px_1fr\] > div:first-child > * {
+    flex: 0 0 68px !important;
+    width: 68px !important;
+    height: 68px !important;
+    margin-top: 0 !important;
+    scroll-snap-align: start;
+  }
+  .grid.grid-cols-\[64px_1fr\] > div:first-child > * + * { margin-top: 0 !important; }
+  .grid.grid-cols-\[64px_1fr\] > div:nth-child(2) {
+    width: 100% !important;
+    min-height: 300px !important;
+    max-height: 54vh !important;
+    aspect-ratio: 4 / 3 !important;
+  }
+  .grid.grid-cols-\[64px_1fr\] > div:nth-child(2) > img {
+    padding: 8px !important;
+    object-fit: contain !important;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,*::before,*::after { animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; scroll-behavior:auto !important; }
 }

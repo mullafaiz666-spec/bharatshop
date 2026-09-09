@@ -12,33 +12,40 @@ concurrency:
 jobs:
   acceptance:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     env:
       BASE_URL: https://bharatshop-9w4a.onrender.com
       BHARATSHOP_URL: https://bharatshop-9w4a.onrender.com
       BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
-      # Intentionally NOT provided to this workflow. Human approval must never
-      # be converted into an automatic approval by CI.
+      # BHARATSHOP_OPERATOR_APPROVAL_TOKEN is intentionally not supplied.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+
       - name: Wait for exact Render deployment
         run: |
           set -euo pipefail
-          # Shallow health stays cheap; the revision field prevents CI from
-          # accepting the previous live instance while Render is still rolling
-          # out the commit that triggered this workflow.
-          for i in $(seq 1 36); do
+          for i in $(seq 1 42); do
             code=$(curl -sS -o /tmp/health.json -w '%{http_code}' --max-time 20 "$BHARATSHOP_URL/api/health" || true)
             revision=$(node -e "try{const d=require('/tmp/health.json');process.stdout.write(String(d.revision||''))}catch{}")
             echo "shallow health HTTP=$code revision=$revision expected=$GITHUB_SHA"
-            cat /tmp/health.json || true
             if [ "$code" = "200" ] && [ "$revision" = "$GITHUB_SHA" ]; then exit 0; fi
             sleep 10
           done
           echo "Render did not expose the exact commit $GITHUB_SHA within the acceptance wait window"
           exit 1
+
+      - name: Prepare operational live catalog
+        run: |
+          set -euo pipefail
+          test -n "$BHARATSHOP_AUTOMATION_TOKEN"
+          AUTH=(-H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" -H "x-automation-token: $BHARATSHOP_AUTOMATION_TOKEN" -H "Content-Type: application/json")
+          curl --silent --show-error --fail-with-body --max-time 300 -X POST "$BHARATSHOP_URL/api/automation/deodap-bootstrap" "${AUTH[@]}" --data '{"limit":30,"maxPages":16}' | tee /tmp/deodap.json
+          curl --silent --show-error --fail-with-body --max-time 300 -X POST "$BHARATSHOP_URL/api/fashion-designer" "${AUTH[@]}" --data '{"count":12}' | tee /tmp/fashion.json
+          curl --silent --show-error --fail-with-body --max-time 300 -X POST "$BHARATSHOP_URL/api/automation/ceo-cycle?skipResearch=1" "${AUTH[@]}" --data '{}' | tee /tmp/ceo1.json
+          curl --silent --show-error --fail-with-body --max-time 300 -X POST "$BHARATSHOP_URL/api/automation/ceo-cycle?skipResearch=1" "${AUTH[@]}" --data '{}' | tee /tmp/ceo2.json
+
       - name: Run strict live production acceptance
         run: node scripts/production-acceptance-v3.mjs
