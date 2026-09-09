@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
 import { pool } from "@/db";
 import { generateEditorialImage } from "@/lib/fashion/editorial-image";
-import { generateLocalEditorialRaster } from "@/lib/fashion/local-editorial-raster";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-const STYLE_VERSION = "street-editorial-v2";
+const STYLE_VERSION = "drip-realworld-v3";
 const LOCAL_PROVIDER = "bharatshop-local-raster";
 
 function authorized(req: Request) {
@@ -34,13 +33,7 @@ function jsonObject(value: unknown): Record<string, any> {
 }
 
 function publicOrigin(req: Request) {
-  const candidates = [
-    process.env.PUBLIC_APP_URL,
-    process.env.NEXT_PUBLIC_SITE_URL,
-    process.env.RENDER_EXTERNAL_URL,
-    new URL(req.url).origin,
-    "https://bharatshop-9w4a.onrender.com",
-  ];
+  const candidates = [process.env.PUBLIC_APP_URL, process.env.NEXT_PUBLIC_SITE_URL, process.env.RENDER_EXTERNAL_URL, new URL(req.url).origin, "https://bharatshop-9w4a.onrender.com"];
   for (const value of candidates) {
     try {
       if (!value) continue;
@@ -60,49 +53,48 @@ function editorialPrompt(row: any, specs: Record<string, any>, view: number) {
   const palette = Array.isArray(specs.palette) ? specs.palette.join(", ") : "black, white, electric accent";
   const back = view === 2;
   const scenes = [
-    "gritty Indian metro underpass with concrete texture, layered posters with no readable brands, cinematic depth and a few practical lights",
-    "city rooftop parking deck at late afternoon with railings, distant skyline and warm directional sunlight",
-    "urban lane with metal shutters, textured walls and colorful ambient light, no visible commercial logos",
-    "independent streetwear boutique interior with blurred garment racks, polished concrete and practical ceiling light",
-    "night street corner with wet pavement reflections, subtle neon ambience and documentary-style city depth",
+    "real Indian streetwear shop or thrift-store frontage with garment racks and textured shutters in the background",
+    "dense urban lane with concrete walls, layered legal poster textures, scooters and natural street depth but no readable third-party branding",
+    "city sidewalk outside an independent fashion store, candid pedestrian depth, warm late-afternoon light",
+    "industrial parking deck with raw concrete, railings and distant city buildings",
+    "night market street with practical shop lights, wet-road reflections and realistic documentary ambience",
   ];
-  const sceneIndex = Math.abs((Number(row.id) || 0) * 7 + view * 13) % scenes.length;
-  const scene = scenes[sceneIndex];
+  const scene = scenes[Math.abs((Number(row.id) || 0) * 11 + view * 17) % scenes.length];
   const pose = back
-    ? "dynamic three-quarter rear full-body view, torso slightly turned, one hand relaxed near pocket, model glancing over shoulder, back graphic clearly visible"
-    : "low-angle front three-quarter full-body hero shot, one foot forward as if mid-step, relaxed shoulders, confident direct gaze, garment chest and oversized silhouette clearly visible";
+    ? "full-body three-quarter rear fashion pose, shoulders relaxed, one foot offset, back print completely readable as artwork placement, realistic anatomy"
+    : "full-body or knees-up candid street-fashion pose, slightly low camera angle, relaxed confident stance, garment silhouette and front artwork clearly visible, realistic anatomy";
   return [
     `BharatDrip style=${STYLE_VERSION}.`,
-    "Photorealistic premium Indian Gen Z streetwear campaign photography with strong personality, not a plain catalog portrait.",
-    "Fictional adult fashion model age 20-28, contemporary Indian look, textured styled hair, natural skin texture, confident expressive face and effortless street attitude.",
-    `${pose}.`,
-    `Wearing a ${garment} with an intentional oversized drop-shoulder streetwear fit, styled with washed baggy denim or parachute cargos, stacked hems and clean chunky sneakers.`,
-    "Add one or two subtle styling details only: silver chain, rings, beanie, cap, crossbody bag or narrow sunglasses; no visible third-party branding.",
-    `BharatDrip product concept: ${title}. Original artwork direction: ${brief}.`,
-    `Palette: ${palette}.`,
-    back
-      ? "The large original artwork is concentrated on the back panel and remains the visual focus of the garment."
-      : "Keep the front artwork intentional and graphic-led; preserve a strong fashion silhouette and do not turn the shirt into a generic blank.",
-    `Scene: ${scene}.`,
-    "Use punchy on-camera flash mixed with ambient city light, crisp contrast, deep blacks, realistic highlight roll-off, subtle 35mm film grain and saturated-but-believable color.",
-    "Editorial framing should feel candid and current: handheld 35mm fashion look, slight low angle, subject filling most of a vertical 4:5 frame, visible environment depth and clean garment readability.",
-    "Avoid dull grey cyclorama, passport-photo posing, mannequin stiffness, washed-out lighting, flat beige backgrounds and generic corporate ecommerce styling.",
-    "No third-party logos, no copied brand marks, no copyrighted anime characters, no celebrity likeness, no gibberish readable text, no watermark, no extra limbs and no distorted hands.",
-    "The mood is bold Y2K-meets-modern streetwear: oversized proportions, graphic personality, utility bottoms and urban styling, while all artwork and characters remain original to BharatDrip.",
+    "Create a REALISTIC fashion photograph, not an illustration, not vector art, not pixel art, not a game character, not a mannequin and not a 3D render.",
+    "Visual direction is contemporary real-world drip/streetwear: oversized graphic tees and hoodies, wide baggy washed denim, parachute cargos or relaxed joggers, chunky clean sneakers, subtle chains or caps, and authentic urban styling.",
+    "Fictional adult Indian model age 20-28 with natural skin texture, believable hair, realistic hands, realistic body proportions and an editorial but non-celebrity appearance.",
+    pose + ".",
+    `The hero garment is a ${garment} with a strong oversized drop-shoulder silhouette and realistic heavyweight cotton drape.`,
+    `BharatDrip product: ${title}. Original design direction: ${brief}. Palette: ${palette}.`,
+    back ? "Make the original BharatDrip back artwork the main garment focal point." : "Keep the original BharatDrip front artwork crisp and visible without inventing third-party logos or licensed characters.",
+    `Location: ${scene}.`,
+    "Camera treatment: high-quality smartphone/DSLR street-fashion photography, 35mm equivalent lens, realistic depth of field, detailed fabric texture, natural shadow direction, punchy but believable contrast, subtle film grain, no artificial plastic skin.",
+    "Composition should resemble a strong social-commerce streetwear campaign: subject occupies most of a vertical 4:5 frame, real environment remains visible, outfit styling feels current and wearable, image should look like a genuine fashion shoot rather than an ecommerce cutout.",
+    "STRICT NEGATIVE DIRECTION: no flat cartoon person, no blocky human, no vector illustration, no pixel-art city, no anime character, no mannequin, no blank generic tee, no duplicated limbs, no malformed fingers, no watermark, no readable third-party brand logo, no copied copyrighted graphic and no celebrity likeness.",
+    "Use the supplied streetwear references only as high-level style direction for silhouette, baggy proportions, real-human photography and urban mood; do not reproduce any specific reference image, person, logo or garment design.",
   ].join(" ");
 }
 
 async function attachPublicPhoto(productId: number, view: number, title: string, specs: Record<string, any>, origin: string, provider: string) {
-  const publicUrl = `${origin}/api/fashion-photo/${productId}/${view}?style=${STYLE_VERSION}`;
   const local = provider === LOCAL_PROVIDER;
-  const model = local ? "bharatshop-local-raster-v1" : "FLUX.1-schnell";
+  const publicUrl = local
+    ? `${origin}/api/fashion-art/${productId}/${view}?style=${STYLE_VERSION}&fallback=product-mockup`
+    : `${origin}/api/fashion-photo/${productId}/${view}?style=${STYLE_VERSION}`;
+  const model = local ? "bharatshop-product-mockup-v2" : "free-photoreal-generator";
   const metadata = JSON.stringify({
-    fictionalModel: true,
-    editorialPreview: true,
+    fictionalModel: !local,
+    editorialPreview: !local,
     styleVersion: STYLE_VERSION,
+    referenceDirection: "real-world-drip-streetwear",
     productionTruth: "Qikink garment/design placement",
-    generatedRasterFallback: local,
-    representation: local ? "stylized-illustrated-editorial" : "ai-photoreal-editorial",
+    generatedRasterFallback: false,
+    photorealUpgradePending: local,
+    representation: local ? "original-product-design-mockup" : "ai-photoreal-editorial",
   });
   const updated = await pool.query(
     `UPDATE product_images
@@ -115,7 +107,7 @@ async function attachPublicPhoto(productId: number, view: number, title: string,
     await pool.query(
       `INSERT INTO product_images (product_id,image_url,source_url,sort_order,alt_text,verification_status,verification_confidence,verification_model,verification_provider,verification_metadata,verified_at)
        VALUES ($1,$2,$3,$4,$5,'AI_GENERATED_EDITORIAL',1,$6,$7,$8,NOW())`,
-      [productId, publicUrl, sourceUrl, view, `${title} ${view === 2 ? "back" : "front"} generated urban editorial`, model, provider, metadata]
+      [productId, publicUrl, sourceUrl, view, `${title} ${view === 2 ? "back" : "front"} BharatDrip product view`, model, provider, metadata]
     );
   }
   return publicUrl;
@@ -134,22 +126,24 @@ export async function POST(req: Request) {
   if (!authorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   await ensureTable();
   const body = await req.json().catch(() => ({}));
-  const externalAttemptLimit = Math.max(0, Math.min(2, Number(body.externalAttemptLimit ?? 2)));
+  const externalAttemptLimit = Math.max(0, Math.min(6, Number(body.externalAttemptLimit ?? 5)));
   const rows = await pool.query(
-    `SELECT p.id,p.title,p.brand,p.category,d.specifications_json
+    `SELECT p.id,p.title,p.brand,p.category,d.specifications_json,COALESCE(c.provider,'') AS front_provider
      FROM products p
      JOIN product_details d ON d.product_id=p.id
+     LEFT JOIN fashion_media_cache c ON c.product_id=p.id AND c.view=0
      WHERE p.status='Published'
        AND p.brand='BharatDrip'
        AND COALESCE(d.specifications_json->>'designLine','')='DESIGNER'
-     ORDER BY p.updated_at DESC,p.id DESC
-     LIMIT 24`
+     ORDER BY CASE WHEN COALESCE(c.provider,'')=$1 THEN 0 ELSE 1 END,p.updated_at DESC,p.id DESC
+     LIMIT 24`,
+    [LOCAL_PROVIDER]
   );
   const origin = publicOrigin(req);
   const results: any[] = [];
   let generated = 0;
   let externalGenerated = 0;
-  let localGenerated = 0;
+  let mockupFallbacks = 0;
   let attempted = 0;
   const deadline = Date.now() + 240_000;
 
@@ -160,79 +154,62 @@ export async function POST(req: Request) {
       const existing = await pool.query(`SELECT provider,prompt FROM fashion_media_cache WHERE product_id=$1 AND view=$2 LIMIT 1`, [row.id, view]);
       const existingProvider = String(existing.rows[0]?.provider || "");
       const styleMatches = Boolean(existing.rows[0]) && String(existing.rows[0]?.prompt || "").includes(`style=${STYLE_VERSION}`);
-      const shouldTryExternalUpgrade = styleMatches && existingProvider === LOCAL_PROVIDER && externalAttemptLimit > 0 && attempted < externalAttemptLimit && Date.now() + 50_000 < deadline;
-      const currentStyle = styleMatches && !shouldTryExternalUpgrade;
-      if (currentStyle) {
-        const provider = existingProvider || LOCAL_PROVIDER;
-        const publicUrl = await attachPublicPhoto(Number(row.id), view, String(row.title), specs, origin, provider);
-        results.push({ productId: Number(row.id), title: row.title, view, status: "CACHED_REWIRED", publicUrl, provider, styleVersion: STYLE_VERSION });
+      const alreadyPhotoreal = styleMatches && existingProvider && existingProvider !== LOCAL_PROVIDER;
+      if (alreadyPhotoreal) {
+        const publicUrl = await attachPublicPhoto(Number(row.id), view, String(row.title), specs, origin, existingProvider);
+        results.push({ productId: Number(row.id), title: row.title, view, status: "PHOTO_CACHED", publicUrl, provider: existingProvider, styleVersion: STYLE_VERSION });
         continue;
       }
 
       let image: { mimeType: string; bytes: Buffer; provider: string; sourceUrl: string } | null = null;
       let externalError = "";
-      if (attempted < externalAttemptLimit && Date.now() + 50_000 < deadline) {
+      if (attempted < externalAttemptLimit && Date.now() + 38_000 < deadline) {
         attempted++;
         try {
-          image = await generateEditorialImage(prompt, { width: 768, height: 1024, timeoutMs: 45_000 });
+          image = await generateEditorialImage(prompt, { width: 768, height: 1024, timeoutMs: 35_000 });
           externalGenerated++;
         } catch (error) {
           externalError = error instanceof Error ? error.message : String(error);
         }
       }
 
-      let status = "GENERATED";
-      if (!image) {
-        const local = generateLocalEditorialRaster({
-          productId: Number(row.id),
-          title: String(row.title),
-          view,
-          palette: Array.isArray(specs.palette) ? specs.palette : [],
-          width: 480,
-          height: 600,
-        });
-        if (local.bytes.length <= 10_000) throw new Error(`Local editorial raster unexpectedly small for product ${row.id}: ${local.bytes.length} bytes`);
-        image = local;
-        localGenerated++;
-        status = "LOCAL_RASTER_FALLBACK";
+      if (image) {
+        await storeMedia({ productId: Number(row.id), view, mimeType: image.mimeType, bytes: image.bytes, provider: image.provider, prompt, sourceUrl: image.sourceUrl });
+        const publicUrl = await attachPublicPhoto(Number(row.id), view, String(row.title), specs, origin, image.provider);
+        generated++;
+        results.push({ productId: Number(row.id), title: row.title, view, status: "PHOTOREAL_GENERATED", publicUrl, provider: image.provider, bytes: image.bytes.length, styleVersion: STYLE_VERSION });
+      } else {
+        const publicUrl = await attachPublicPhoto(Number(row.id), view, String(row.title), specs, origin, LOCAL_PROVIDER);
+        mockupFallbacks++;
+        results.push({ productId: Number(row.id), title: row.title, view, status: "PRODUCT_MOCKUP_FALLBACK", publicUrl, provider: LOCAL_PROVIDER, styleVersion: STYLE_VERSION, photorealUpgradePending: true, ...(externalError ? { externalError } : {}) });
       }
-
-      await storeMedia({ productId: Number(row.id), view, mimeType: image.mimeType, bytes: image.bytes, provider: image.provider, prompt, sourceUrl: image.sourceUrl });
-      const publicUrl = await attachPublicPhoto(Number(row.id), view, String(row.title), specs, origin, image.provider);
-      generated++;
-      results.push({
-        productId: Number(row.id), title: row.title, view, status, publicUrl, provider: image.provider,
-        bytes: image.bytes.length, styleVersion: STYLE_VERSION, ...(externalError ? { externalError } : {}),
-      });
     }
   }
 
-  const cachedRewired = results.filter((x) => x.status === "CACHED_REWIRED").length;
-  const frontReady = new Set(results.filter((x) => x.view === 0 && ["GENERATED", "LOCAL_RASTER_FALLBACK", "CACHED_REWIRED"].includes(x.status)).map((x) => x.productId)).size;
+  const photorealFrontReady = new Set(results.filter((x) => x.view === 0 && ["PHOTOREAL_GENERATED", "PHOTO_CACHED"].includes(x.status)).map((x) => x.productId)).size;
   const totalProducts = rows.rows.length;
   await pool.query(
     `INSERT INTO ai_activity_logs (user_id,agent_name,action_type,message,metadata_json,status)
-     VALUES (1,'BharatDrip Fashion Photo Studio','EDITORIAL_MODEL_SHOTS',$1,$2,$3)`,
+     VALUES (1,'BharatDrip Fashion Photo Studio','REALWORLD_STREETWEAR_REFRESH',$1,$2,$3)`,
     [
-      `Prepared ${generated + cachedRewired} BharatDrip ${STYLE_VERSION} editorial raster link(s); ${frontReady}/${totalProducts} product card(s) have current-style front media.`,
-      JSON.stringify({ styleVersion: STYLE_VERSION, generated, externalGenerated, localGenerated, cachedRewired, frontReady, totalProducts, results }),
-      frontReady === totalProducts && totalProducts > 0 ? "SUCCESS" : "WARNING",
+      `BharatDrip ${STYLE_VERSION}: ${photorealFrontReady}/${totalProducts} front cards have real-world photoreal editorial media; remaining cards use truthful product mockups and stay queued for free-generator upgrade.`,
+      JSON.stringify({ styleVersion: STYLE_VERSION, externalGenerated, generated, mockupFallbacks, attempted, photorealFrontReady, totalProducts, results }),
+      photorealFrontReady === totalProducts && totalProducts > 0 ? "SUCCESS" : "WARNING",
     ]
   );
   return NextResponse.json({
-    success: totalProducts > 0 && frontReady === totalProducts,
-    status: totalProducts > 0 && frontReady === totalProducts ? "READY" : "PARTIAL",
+    success: totalProducts > 0,
+    status: photorealFrontReady === totalProducts && totalProducts > 0 ? "PHOTOREAL_READY" : "UPGRADE_IN_PROGRESS",
     attempted,
-    provider: "free-external-with-local-raster-fallback",
+    provider: "free-photoreal-with-product-mockup-fallback",
     styleVersion: STYLE_VERSION,
+    referenceDirection: "real human streetwear / oversized drip / baggy denim-cargo / urban fashion photography",
     generated,
     externalGenerated,
-    localGenerated,
-    cachedRewired,
-    frontReady,
+    mockupFallbacks,
+    photorealFrontReady,
     totalProducts,
-    waitingRefresh: Math.max(0, totalProducts - frontReady),
-    fallback: "Original BharatShop local stylized raster editorial; Qikink garment/design mapping remains production truth",
+    waitingPhotorealUpgrade: Math.max(0, totalProducts - photorealFrontReady),
     results,
   });
 }
@@ -240,13 +217,14 @@ export async function POST(req: Request) {
 export async function GET(req: Request) {
   if (!authorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   await ensureTable();
-  const count = await pool.query(`SELECT COUNT(*)::int AS count,COUNT(DISTINCT product_id)::int AS products FROM fashion_media_cache`);
+  const count = await pool.query(`SELECT COUNT(*)::int AS count,COUNT(DISTINCT product_id)::int AS products,COUNT(*) FILTER (WHERE provider<>$1)::int AS photoreal FROM fashion_media_cache`, [LOCAL_PROVIDER]);
   return NextResponse.json({
     status: "READY",
-    provider: "free-external-with-local-raster-fallback",
+    provider: "free-photoreal-with-product-mockup-fallback",
     styleVersion: STYLE_VERSION,
     cachedShots: Number(count.rows[0]?.count || 0),
     cachedProducts: Number(count.rows[0]?.products || 0),
-    productionMockups: "Qikink free mockup generator remains production truth",
+    photorealCachedShots: Number(count.rows[0]?.photoreal || 0),
+    productionMockups: "Qikink garment/design mapping remains production truth",
   });
 }
