@@ -8,6 +8,13 @@ export type GeneratedEditorial = {
   prompt: string;
 };
 
+type SubmitCandidate = {
+  submitUrl: string;
+  resultBaseUrl: string;
+  mode: "named" | "data";
+  paramNames: string[];
+};
+
 function withTimeout(ms: number) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
@@ -37,13 +44,31 @@ function parseCompleteEvent(text: string): any[] {
   throw new Error("ZeroGPU returned no complete image event");
 }
 
-async function discoverSubmitUrls(base: string): Promise<string[]> {
-  const urls = new Set<string>([
-    `${base}/gradio_api/call/infer`,
-    `${base}/call/infer`,
-  ]);
+function normalizeEndpointName(raw: string) {
+  return String(raw || "").replace(/^\/+|\/+$/g, "");
+}
 
-  const timer = withTimeout(10_000);
+function paramNamesFromSchema(pathItem: any): string[] {
+  const schema = pathItem?.post?.requestBody?.content?.["application/json"]?.schema;
+  const props = schema?.properties && typeof schema.properties === "object" ? Object.keys(schema.properties) : [];
+  return props.filter((name) => !["event_id", "session_hash"].includes(name));
+}
+
+function candidateKey(candidate: SubmitCandidate) {
+  return `${candidate.submitUrl}|${candidate.mode}|${candidate.paramNames.join(",")}`;
+}
+
+async function discoverSubmitCandidates(base: string): Promise<SubmitCandidate[]> {
+  const candidates: SubmitCandidate[] = [];
+  const seen = new Set<string>();
+  const add = (candidate: SubmitCandidate) => {
+    const key = candidateKey(candidate);
+    if (seen.has(key)) return;
+    seen.add(key);
+    candidates.push(candidate);
+  };
+
+  const timer = withTimeout(12_000);
   try {
     const response = await fetch(`${base}/gradio_api/openapi.json`, {
       headers: { Accept: "application/json", ...authHeaders() },
@@ -52,56 +77,115 @@ async function discoverSubmitUrls(base: string): Promise<string[]> {
     });
     if (response.ok) {
       const spec = await response.json().catch(() => ({} as any));
-      const paths = spec && typeof spec === "object" && spec.paths && typeof spec.paths === "object" ? Object.keys(spec.paths) : [];
-      for (const path of paths) {
-        if (!/\/call\//.test(path)) continue;
-        if (/\/infer\/?$/i.test(path)) {
-          urls.add(path.startsWith("/gradio_api/") ? `${base}${path}` : `${base}/gradio_api${path}`);
-        }
+      const paths = spec && typeof spec === "object" && spec.paths && typeof spec.paths === "object" ? spec.paths : {};
+      for (const [path, pathItem] of Object.entries(paths as Record<string, any>)) {
+        const match = path.match(/^\/gradio_api\/call\/v2\/([^/{]+)\/?$/i);
+        if (!match || !pathItem?.post) continue;
+        const endpoint = normalizeEndpointName(match[1]);
+        if (!endpoint) continue;
+        const names = paramNamesFromSchema(pathItem);
+        add({
+          submitUrl: `${base}${path}`,
+          resultBaseUrl: `${base}/gradio_api/call/${endpoint}`,
+          mode: names.length ? "named" : "data",
+          paramNames: names,
+        });
       }
     }
   } catch {
-    // The documented Gradio route above remains the primary candidate.
+    // Fall through to /info and compatibility candidates.
   } finally {
     timer.clear();
   }
 
-  return [...urls];
+  const infoTimer = withTimeout(12_000);
+  try {
+    const response = await fetch(`${base}/gradio_api/info`, {
+      headers: { Accept: "application/json", ...authHeaders() },
+      signal: infoTimer.signal,
+      cache: "no-store",
+    });
+    if (response.ok) {
+      const info = await response.json().catch(() => ({} as any));
+      const collections = [info?.named_endpoints, info?.unnamed_endpoints];
+      for (const collection of collections) {
+        if (!collection || typeof collection !== "object") continue;
+        for (const [rawName, definition] of Object.entries(collection as Record<string, any>)) {
+          const endpoint = normalizeEndpointName(rawName);
+          if (!endpoint) continue;
+          const params = Array.isArray(definition?.parameters) ? definition.parameters : [];
+          const names = params.map((p: any) => String(p?.parameter_name || p?.name || "").trim()).filter(Boolean);
+          add({
+            submitUrl: `${base}/gradio_api/call/v2/${endpoint}`,
+            resultBaseUrl: `${base}/gradio_api/call/${endpoint}`,
+            mode: names.length ? "named" : "data",
+            paramNames: names,
+          });
+          add({
+            submitUrl: `${base}/gradio_api/call/${endpoint}`,
+            resultBaseUrl: `${base}/gradio_api/call/${endpoint}`,
+            mode: "data",
+            paramNames: names,
+          });
+        }
+      }
+    }
+  } catch {
+    // Compatibility candidates below still cover common Gradio routes.
+  } finally {
+    infoTimer.clear();
+  }
+
+  for (const endpoint of ["infer", "predict", "0", "false"]) {
+    add({ submitUrl: `${base}/gradio_api/call/v2/${endpoint}`, resultBaseUrl: `${base}/gradio_api/call/${endpoint}`, mode: "data", paramNames: [] });
+    add({ submitUrl: `${base}/gradio_api/call/${endpoint}`, resultBaseUrl: `${base}/gradio_api/call/${endpoint}`, mode: "data", paramNames: [] });
+  }
+
+  return candidates;
 }
 
-async function submitGeneration(base: string, data: unknown[], timeoutMs: number): Promise<{ eventId: string; submitUrl: string }> {
-  const candidates = await discoverSubmitUrls(base);
+function requestBody(candidate: SubmitCandidate, data: unknown[]) {
+  if (candidate.mode !== "named" || !candidate.paramNames.length) return { data };
+  const body: Record<string, unknown> = {};
+  candidate.paramNames.forEach((name, index) => {
+    if (index < data.length) body[name] = data[index];
+  });
+  return body;
+}
+
+async function submitGeneration(base: string, data: unknown[], timeoutMs: number): Promise<{ eventId: string; resultBaseUrl: string }> {
+  const candidates = await discoverSubmitCandidates(base);
   const failures: string[] = [];
 
-  for (const submitUrl of candidates) {
+  for (const candidate of candidates) {
     const timer = withTimeout(Math.min(30_000, timeoutMs));
     try {
-      const response = await fetch(submitUrl, {
+      const response = await fetch(candidate.submitUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify({ data }),
+        body: JSON.stringify(requestBody(candidate, data)),
         signal: timer.signal,
         cache: "no-store",
       });
       if (!response.ok) {
-        failures.push(`${submitUrl}=>${response.status}`);
+        failures.push(`${candidate.submitUrl}=>${response.status}`);
         continue;
       }
       const submitted = await response.json().catch(() => ({}));
       const eventId = String((submitted as any)?.event_id || "");
       if (!eventId) {
-        failures.push(`${submitUrl}=>no_event_id`);
+        failures.push(`${candidate.submitUrl}=>no_event_id`);
         continue;
       }
-      return { eventId, submitUrl };
+      return { eventId, resultBaseUrl: candidate.resultBaseUrl };
     } catch (error) {
-      failures.push(`${submitUrl}=>${error instanceof Error ? error.message : String(error)}`);
+      failures.push(`${candidate.submitUrl}=>${error instanceof Error ? error.message : String(error)}`);
     } finally {
       timer.clear();
     }
   }
 
-  throw new Error(`ZeroGPU submit failed (${failures.join(", ")})`);
+  throw new Error(`ZeroGPU submit failed (${failures.slice(0, 12).join(", ")})`);
 }
 
 function collectImageRefs(value: unknown): string[] {
@@ -190,9 +274,9 @@ export async function generateEditorialImage(prompt: string, options?: { width?:
   const height = Math.max(640, Math.min(1280, Number(options?.height || 1024)));
   const timeoutMs = Math.max(30_000, Math.min(180_000, Number(options?.timeoutMs || 110_000)));
   const seed = Number.isFinite(options?.seed) ? Number(options?.seed) : Math.floor(Math.random() * 2_000_000_000);
-  const { eventId, submitUrl } = await submitGeneration(base, [prompt, seed, false, width, height, 4], timeoutMs);
+  const { eventId, resultBaseUrl } = await submitGeneration(base, [prompt, seed, false, width, height, 4], timeoutMs);
 
-  const resultUrl = `${submitUrl}/${encodeURIComponent(eventId)}`;
+  const resultUrl = `${resultBaseUrl}/${encodeURIComponent(eventId)}`;
   const resultTimer = withTimeout(timeoutMs);
   let result: Response;
   try {
