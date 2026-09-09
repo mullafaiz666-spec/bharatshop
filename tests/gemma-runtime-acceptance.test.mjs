@@ -26,3 +26,26 @@ test("production acceptance verifies current storefront media and real Gemma inf
   assert.doesNotMatch(src, /BharatDrip model media live/);
   assert.doesNotMatch(src, /fashion-designer/);
 });
+
+test("CEO uses a compact Gemma decision protocol suitable for free CPU", () => {
+  const src = read("src/app/api/ceo-chat/route.ts");
+  assert.match(src, /TOOL:<tool_name>/);
+  assert.match(src, /ANSWER:<max 28 words>/);
+  assert.match(src, /maxTokens: 36/);
+  assert.match(src, /evidenceDigest/);
+  assert.match(src, /gemma-compact-plan-act/);
+  assert.match(src, /modelStatus: "live"/);
+  assert.doesNotMatch(src, /maxTokens: 240/);
+  assert.doesNotMatch(src, /maxTokens: 280/);
+  assert.doesNotMatch(src, /humanFallback/);
+});
+
+test("approval arguments are extracted only after Gemma chooses the approval tool", () => {
+  const src = read("src/app/api/ceo-chat/route.ts");
+  const plannerPos = src.indexOf("const decision = await planWithGemma");
+  const normalizePos = src.indexOf("const args = normalizeToolArgs", plannerPos);
+  assert.ok(plannerPos >= 0);
+  assert.ok(normalizePos > plannerPos);
+  assert.match(src, /tool === "create_approval"/);
+  assert.match(src, /parseApprovalIntent\(question\)/);
+});
