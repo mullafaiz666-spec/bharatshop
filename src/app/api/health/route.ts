@@ -1,7 +1,6 @@
 import { db } from "@/db";
 import { sql } from "drizzle-orm";
 import { aiModels, checkAI } from "@/lib/ai/provider";
-import { searxngImageSearch } from "@/lib/searxng";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +14,7 @@ async function checkSearXNG(deep: boolean) {
     const service = await fetch(`${base}/`, {
       cache: "no-store",
       redirect: "manual",
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(12_000),
       headers: { "User-Agent": "BharatShop-Health/1.0" },
     });
     const serviceReady = service.ok || (service.status >= 300 && service.status < 400) || service.status === 429;
@@ -23,15 +22,32 @@ async function checkSearXNG(deep: boolean) {
       return { configured: true, ready: false, exercised: true, serviceStatus: service.status, reason: "service_rejected" };
     }
 
+    // Exercise the JSON search endpoint once, without the normal production
+    // fallback/retry queue. Upstream engines can throttle shared Render IPs;
+    // that is reported as degraded while the self-hosted SearXNG service itself
+    // remains ready. This keeps deep health bounded and truthful.
     try {
-      const results = await searxngImageSearch("laptop product image", { limit: 1, timeoutMs: 10_000 });
+      const searchUrl = new URL(`${base}/search`);
+      searchUrl.searchParams.set("q", "laptop product image");
+      searchUrl.searchParams.set("categories", "images");
+      searchUrl.searchParams.set("format", "json");
+      searchUrl.searchParams.set("language", "en");
+      searchUrl.searchParams.set("pageno", "1");
+      searchUrl.searchParams.set("engines", "brave.images");
+      const search = await fetch(searchUrl, {
+        cache: "no-store",
+        signal: AbortSignal.timeout(12_000),
+        headers: { Accept: "application/json", "User-Agent": "BharatShop-Health/1.0" },
+      });
+      const upstreamReady = search.ok;
       return {
         configured: true,
         ready: true,
         exercised: true,
         serviceStatus: service.status,
-        degraded: service.status === 429 || results.length === 0,
-        upstreamSearch: { ready: results.length > 0, resultCount: results.length },
+        degraded: service.status === 429 || !upstreamReady,
+        upstreamSearch: { ready: upstreamReady, status: search.status },
+        reason: upstreamReady ? "service_and_search_reachable" : "service_reachable_upstream_throttled",
       };
     } catch (error) {
       return {
@@ -40,12 +56,8 @@ async function checkSearXNG(deep: boolean) {
         exercised: true,
         serviceStatus: service.status,
         degraded: true,
-        reason: service.status === 429 ? "service_reachable_upstream_throttled" : "upstream_search_unavailable",
-        upstreamSearch: {
-          ready: false,
-          reason: "upstream_search_unavailable",
-          error: error instanceof Error ? error.message : String(error),
-        },
+        reason: "service_reachable_upstream_search_timed_out",
+        upstreamSearch: { ready: false, error: error instanceof Error ? error.message : String(error) },
       };
     }
   } catch (error) {
