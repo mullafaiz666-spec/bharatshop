@@ -11,7 +11,9 @@ const APPROVED_SOURCE_PROVIDERS=new Set(["local-ai","local-evidence"]);
 const APPROVED_EDITORIAL_PROVIDERS=new Set(["hf-zerogpu","hf-zerogpu-custom","hf-zerogpu-flux1-schnell","hf-zerogpu-zimage-turbo"]);
 const MTO_FASHION_BRANDS=new Set(["bharatshop studio","bharatdrip"]);
 const FASHION_EDITORIAL_STYLE="drip-realworld-v4";
-const MIN_IMAGES=4,MIN_CONFIDENCE=.75;
+const MIN_STANDARD_IMAGES=Math.max(1,Number(process.env.MIN_STANDARD_PRODUCT_IMAGES||1));
+const MIN_FASHION_IMAGES=Math.max(4,Number(process.env.MIN_FASHION_PRODUCT_IMAGES||4));
+const MIN_CONFIDENCE=.75;
 export const dynamic="force-dynamic";
 
 const specsOf=(d:any)=>d?.specificationsJson&&typeof d.specificationsJson==="object"&&!Array.isArray(d.specificationsJson)?d.specificationsJson as Record<string,any>:{};
@@ -45,7 +47,7 @@ export async function GET(req:Request){
 
   const publishable=all.filter(p=>{
     const gallery=galleryMap.get(p.id)||[],d=detailMap.get(p.id),mto=madeToOrder(d),validPricing=Number(p.sellingPriceInr)>0&&Number(p.mrpInr)>=Number(p.sellingPriceInr),availabilityValid=mto||Number(p.stockCount)>0;
-    const mediaReady=gallery.length>=MIN_IMAGES&&(!mto||gallery.some(x=>x.editorial));
+    const mediaReady=mto?gallery.length>=MIN_FASHION_IMAGES&&gallery.some(x=>x.editorial):gallery.length>=MIN_STANDARD_IMAGES;
     return p.status==="Published"&&Boolean(p.title)&&validPricing&&availabilityValid&&mediaReady;
   });
   let filtered=publishable;
@@ -67,5 +69,5 @@ export async function GET(req:Request){
     return{id:p.id,sku:`BS-${p.id}`,title:customerText(p.title)||p.title,category:customerText(p.category)||p.category,brand:publicBrand,storefrontLabel:publicBrand,imageUrl:imageUrls[0]||"",imageUrls,imageLabels,productVideos,sellingPriceInr:p.sellingPriceInr,mrpInr:p.mrpInr,stockCount:Number(p.stockCount)||0,madeToOrder:mto,availabilityMode:mto?"MADE_TO_ORDER":"IN_STOCK",sizeOptions,editorialStyleState,aiMarketingCopy:customerText(p.aiMarketingCopy),details:d?{description:customerText(d.description),includedItems:customerText(d.includedItems),dimensions:customerText(d.dimensions),weight:customerText(d.weight),material:customerText(d.material),colorOptions:customerText(d.colorOptions),warranty:customerText(d.warranty),countryOfOrigin:customerText(d.countryOfOrigin),careInstructions:customerText(d.careInstructions)}:null};
   });
   const catCounts:Record<string,number>={};publishable.forEach(p=>{const c=customerText(p.category)||"Other";catCounts[c]=(catCounts[c]||0)+1;});
-  return NextResponse.json({products:customerProducts,total,page,totalPages:Math.max(1,Math.ceil(total/limit)),categoryCount:catCounts,privacy:"customer-safe-v5",availabilityPolicy:"Made-to-order fashion is customer-visible only after a verified photoreal editorial image exists.",fashionEditorialStyle:FASHION_EDITORIAL_STYLE},{headers:{"Cache-Control":"no-store"}});
+  return NextResponse.json({products:customerProducts,total,page,totalPages:Math.max(1,Math.ceil(total/limit)),categoryCount:catCounts,privacy:"customer-safe-v6",availabilityPolicy:"Standard sourced products need verified primary media; made-to-order fashion remains visible only after its stricter photoreal editorial set is ready.",fashionEditorialStyle:FASHION_EDITORIAL_STYLE},{headers:{"Cache-Control":"no-store"}});
 }
