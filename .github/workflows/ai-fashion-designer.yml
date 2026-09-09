@@ -15,8 +15,11 @@ on:
       - "src/app/api/fashion-designer/**"
       - "src/app/api/fashion-art/**"
       - "src/app/api/automation/ceo-cycle/**"
+      - "src/app/api/automation/fashion-photo-studio/**"
+      - "src/app/api/fashion-photo/**"
       - "src/app/api/agents/listing/**"
       - "src/app/api/storefront/products/**"
+      - "src/lib/fashion/local-editorial-raster.ts"
       - "src/lib/public-origin.ts"
       - "src/lib/suppliers/qikink-rate-card.ts"
       - ".github/workflows/ai-fashion-designer.yml"
@@ -105,6 +108,24 @@ jobs:
           if(generatedDrip.length<3) failures.push(`only ${generatedDrip.length} viable BharatDrip designs generated`);
           if(failures.length) throw new Error(`BharatDrip CEO publication gate failed: ${failures.join('; ')}`);
           console.log(JSON.stringify({verifiedGeneratedBharatDrip:generatedDrip.length,newlyApproved,alreadyPublished,ceoInspected:Number(cycle.ceo?.inspected||0)},null,2));
+          NODE
+
+      - name: Prepare zero-cost BharatDrip editorial media
+        env:
+          TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$TOKEN"
+          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 \
+            -X POST "$BHARATSHOP_URL/api/automation/fashion-photo-studio" \
+            -H "Authorization: Bearer $TOKEN" -H "x-automation-token: $TOKEN" -H "Content-Type: application/json" \
+            --data '{"externalAttemptLimit":0}' | tee fashion-editorial-media.json
+          node - <<'NODE'
+          const d=require('./fashion-editorial-media.json');
+          if(!d.success) throw new Error(`Zero-cost editorial media preparation failed: ${JSON.stringify(d)}`);
+          if(Number(d.frontReady)<3) throw new Error(`Only ${d.frontReady} BharatDrip front editorial assets are ready`);
+          if(Number(d.waitingRefresh)!==0) throw new Error(`${d.waitingRefresh} BharatDrip products are still waiting for editorial media`);
+          console.log(JSON.stringify({provider:d.provider,frontReady:d.frontReady,localGenerated:d.localGenerated,externalGenerated:d.externalGenerated,cachedRewired:d.cachedRewired},null,2));
           NODE
 
       - name: Verify BharatDrip is customer-visible
