@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { products, productDetails } from "@/db/schema";
-import { asc, eq, or } from "drizzle-orm";
+import { desc, eq, or } from "drizzle-orm";
 import { serpSearch, openAIJson } from "@/lib/ai/agent-tools";
 
 export const dynamic = "force-dynamic";
@@ -33,7 +33,7 @@ export async function POST(req: Request) {
     const limit = Math.max(1, Math.min(8, Number(body.limit || 3)));
     const rows = await db.select().from(products)
       .where(or(eq(products.status, "STAGED"), eq(products.status, "CEO_PENDING")))
-      .orderBy(asc(products.id));
+      .orderBy(desc(products.id));
 
     const selected: Array<{ product: typeof products.$inferSelect; details: typeof productDetails.$inferSelect }> = [];
     for (const product of rows) {
@@ -126,6 +126,7 @@ export async function POST(req: Request) {
       errors,
       results,
       provider: "SearXNG+local-Gemma",
+      selectionPolicy: "newest source-verified products first",
       policy: "Discovery/source metadata alone never counts as enrichment. Only evidence-backed customer facts mark a product enriched; SOURCE_VERIFIED supplier evidence is preserved.",
     }, { status: errors ? 207 : 200 });
   } catch (error) {
@@ -141,5 +142,6 @@ export async function GET() {
     provider: "SearXNG+local-Gemma",
     paidProvidersRequired: false,
     prerequisite: "SOURCE_VERIFIED",
+    selectionPolicy: "newest-first",
   });
 }
