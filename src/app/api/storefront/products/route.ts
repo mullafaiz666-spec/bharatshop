@@ -7,9 +7,9 @@ const BAD_IMAGE=/(?:unsplash\.com|source\.unsplash\.com|via\.placeholder\.com|pl
 const LOCAL_HOST=/^(?:0\.0\.0\.0|127(?:\.\d{1,3}){3}|localhost|\[::1\])$/i;
 const INTERNAL_VENDOR=/(?:qikink|deodap|supplier|source url|wholesale|dropship|margin|net profit|commission|rate card|procurement|fulfil(?:l)?ment partner|production partner)/i;
 const APPROVED_SOURCE_MEDIA=new Set(["AI_VISION_VERIFIED","LOCAL_EVIDENCE_VERIFIED"]),APPROVED_SOURCE_PROVIDERS=new Set(["local-ai","local-evidence"]);
-const APPROVED_EDITORIAL_PROVIDERS=new Set(["hf-zerogpu","bharatshop-local-raster"]);
+const APPROVED_EDITORIAL_PROVIDERS=new Set(["hf-zerogpu","hf-zerogpu-custom","hf-zerogpu-flux1-schnell","hf-zerogpu-zimage-turbo","bharatshop-local-raster"]);
 const MTO_FASHION_BRANDS=new Set(["bharatshop studio","bharatdrip"]);
-const BHARATDRIP_EDITORIAL_STYLE="street-editorial-v2";
+const BHARATDRIP_EDITORIAL_STYLE="drip-realworld-v3";
 const MIN_IMAGES=4,MIN_CONFIDENCE=.75;
 export const dynamic="force-dynamic";
 const specsOf=(d:any)=>d?.specificationsJson&&typeof d.specificationsJson==="object"&&!Array.isArray(d.specificationsJson)?d.specificationsJson as Record<string,any>:{};
