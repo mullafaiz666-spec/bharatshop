@@ -143,8 +143,8 @@ export async function serpSearch(query: string, engine: "google" | "google_shopp
 
 // Legacy names retained so existing agents do not need a broad rewrite. These
 // now use BharatShop's configured local Gemma provider instead of paid OpenAI.
-export async function openAIJson(instructions: string, input: unknown): Promise<Json> {
-  return runStructured<Json>(instructions, typeof input === "string" ? input : JSON.stringify(input));
+export async function openAIJson(instructions: string, input: unknown, options: { timeoutMs?: number; maxTokens?: number } = {}): Promise<Json> {
+  return runStructured<Json>(instructions, typeof input === "string" ? input : JSON.stringify(input), options);
 }
 
 export async function openAIText(instructions: string, input: unknown): Promise<string> {
