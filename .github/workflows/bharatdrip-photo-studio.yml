@@ -20,6 +20,7 @@ concurrency:
 
 env:
   BHARATSHOP_URL: https://bharatshop-9w4a.onrender.com
+  BHARATDRIP_EDITORIAL_STYLE: street-editorial-v2
 
 jobs:
   model-photography:
@@ -40,7 +41,7 @@ jobs:
           done
           exit 1
 
-      - name: Generate or reattach real BharatDrip model photography
+      - name: Generate or reattach current BharatDrip urban model photography
         env:
           TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
         run: |
@@ -53,23 +54,26 @@ jobs:
           node - <<'NODE'
           const d=require('./fashion-photo-studio.json');
           if(!d.success) throw new Error(`Photo studio failed: ${JSON.stringify(d)}`);
-          console.log(JSON.stringify({provider:d.provider,generated:d.generated,cachedRewired:d.cachedRewired,frontReady:d.frontReady,results:d.results},null,2));
+          if(d.styleVersion!==process.env.BHARATDRIP_EDITORIAL_STYLE) throw new Error(`Unexpected style version: ${d.styleVersion}`);
+          console.log(JSON.stringify({provider:d.provider,styleVersion:d.styleVersion,generated:d.generated,cachedRewired:d.cachedRewired,frontReady:d.frontReady,waitingRefresh:d.waitingRefresh,results:d.results},null,2));
           NODE
 
-      - name: Verify every visible BharatDrip card prioritizes model photography
+      - name: Verify every visible BharatDrip card uses current urban model photography
         run: |
           set -euo pipefail
           curl --silent --show-error --fail-with-body --max-time 90 "$BHARATSHOP_URL/api/storefront/products?category=BharatDrip%20Streetwear&limit=24" | tee bharatdrip-storefront.json
           node - <<'NODE'
           const d=require('./bharatdrip-storefront.json');
           const products=Array.isArray(d.products)?d.products:[];
-          if(products.length<1) throw new Error('No model-ready BharatDrip products are visible');
-          const fallback=products.filter(p=>!String(p.imageUrl||'').includes('/api/fashion-photo/'));
-          if(fallback.length) throw new Error(`Visible BharatDrip cards still using fallback art: ${JSON.stringify(fallback.map(p=>({id:p.id,title:p.title,imageUrl:p.imageUrl})))}`);
-          console.log(JSON.stringify({bharatDripProducts:products.length,modelledProducts:products.length,sample:products.map(p=>({id:p.id,title:p.title,imageUrl:p.imageUrl}))},null,2));
+          const expected=process.env.BHARATDRIP_EDITORIAL_STYLE;
+          if(d.bharatDripEditorialStyle!==expected) throw new Error(`Storefront style gate mismatch: ${d.bharatDripEditorialStyle}`);
+          if(products.length<1) throw new Error('No current-style BharatDrip products are visible');
+          const stale=products.filter(p=>!String(p.imageUrl||'').includes('/api/fashion-photo/')||!String(p.imageUrl||'').includes(`style=${expected}`));
+          if(stale.length) throw new Error(`Visible BharatDrip cards still using stale/fallback photography: ${JSON.stringify(stale.map(p=>({id:p.id,title:p.title,imageUrl:p.imageUrl})))}`);
+          console.log(JSON.stringify({bharatDripProducts:products.length,currentStyleProducts:products.length,style:expected,sample:products.map(p=>({id:p.id,title:p.title,imageUrl:p.imageUrl}))},null,2));
           NODE
 
-      - name: Verify every live primary model image is raster media
+      - name: Verify every live primary model image is fresh raster media
         run: |
           set -euo pipefail
           node -e "const d=require('./bharatdrip-storefront.json'); for(const p of d.products||[]) console.log(p.imageUrl);" > /tmp/model-urls.txt
@@ -79,9 +83,12 @@ jobs:
             curl -sS -D /tmp/model-headers.txt -o /tmp/model-image --fail --max-time 90 "$image"
             type=$(awk 'BEGIN{IGNORECASE=1}/^content-type:/{print $2}' /tmp/model-headers.txt | tr -d '\r' | tail -1)
             bytes=$(wc -c < /tmp/model-image | tr -d ' ')
-            echo "model image=$image type=$type bytes=$bytes"
+            style=$(awk 'BEGIN{IGNORECASE=1}/^x-fashion-style:/{print $2}' /tmp/model-headers.txt | tr -d '\r' | tail -1)
+            cache=$(awk 'BEGIN{IGNORECASE=1}/^cache-control:/{sub(/^cache-control:[[:space:]]*/,"");print}' /tmp/model-headers.txt | tr -d '\r' | tail -1)
+            echo "model image=$image type=$type bytes=$bytes style=$style cache=$cache"
             case "$type" in image/png|image/jpeg|image/webp) ;; *) echo "Expected raster image, got $type"; exit 1;; esac
             test "$bytes" -gt 10000
+            test "$style" = "$BHARATDRIP_EDITORIAL_STYLE"
             count=$((count+1))
           done < /tmp/model-urls.txt
           test "$count" -ge 1
