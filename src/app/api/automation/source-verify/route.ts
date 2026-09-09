@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { products } from "@/db/schema";
-import { asc, eq, or } from "drizzle-orm";
+import { desc, eq, or } from "drizzle-orm";
 import { catalogEconomicsPolicy } from "@/lib/catalog/economics-policy";
 
 export const dynamic="force-dynamic";
@@ -13,8 +13,10 @@ function auth(req:Request){const expected=token();const supplied=req.headers.get
 export async function POST(req:Request){
  try{
   if(!auth(req))return NextResponse.json({error:"Unauthorized"},{status:401});
-  const body=await req.json().catch(()=>({}));const limit=Math.max(1,Math.min(5,Number(body.limit||2)));
-  const rows=await db.select().from(products).where(or(eq(products.status,"STAGED"),eq(products.status,"CEO_PENDING"))).orderBy(asc(products.id));
+  const body=await req.json().catch(()=>({}));const limit=Math.max(1,Math.min(8,Number(body.limit||3)));
+  // Fresh discoveries are inserted with the highest IDs. Processing newest first prevents
+  // a large legacy STAGED backlog from starving newly researched phones/laptops/fashion.
+  const rows=await db.select().from(products).where(or(eq(products.status,"STAGED"),eq(products.status,"CEO_PENDING"))).orderBy(desc(products.id));
   const selected=rows.slice(0,limit);const origin=new URL(req.url).origin;const results:any[]=[];
   for(const product of selected){
    try{
@@ -27,8 +29,8 @@ export async function POST(req:Request){
    }catch(error){results.push({productId:product.id,category:product.category,ok:false,status:"ERROR",error:error instanceof Error?error.message:String(error)});}
   }
   const errors=results.filter(x=>x.status==="ERROR"||Number(x.httpStatus)>=500).length;
-  return NextResponse.json({status:errors?"PARTIAL":"COMPLETED",processed:selected.length,verified:results.filter(x=>x.persisted).length,unqualified:results.filter(x=>x.status==="NO_QUALIFIED_PRODUCT").length,errors,results,policy:"Only live source-page evidence can be persisted as SOURCE_VERIFIED. Category-aware minimum margin/profit prevents high-ticket electronics from being rejected by fashion-style margin rules."},{status:errors?207:200});
+  return NextResponse.json({status:errors?"PARTIAL":"COMPLETED",processed:selected.length,verified:results.filter(x=>x.persisted).length,unqualified:results.filter(x=>x.status==="NO_QUALIFIED_PRODUCT").length,errors,results,selectionPolicy:"newest staged products first",policy:"Only live source-page evidence can be persisted as SOURCE_VERIFIED. Category-aware minimum margin/profit prevents high-ticket electronics from being rejected by fashion-style margin rules."},{status:errors?207:200});
  }catch(error){return NextResponse.json({error:error instanceof Error?error.message:"Source verification batch failed"},{status:500});}
 }
 
-export async function GET(){return NextResponse.json({worker:"source-verification",status:process.env.SEARXNG_URL&&(process.env.AI_BASE_URL||process.env.LOCAL_AI_BASE_URL)?"ready":"blocked_missing_provider",maxBatch:5,economicsPolicy:"category-aware"});}
+export async function GET(){return NextResponse.json({worker:"source-verification",status:process.env.SEARXNG_URL&&(process.env.AI_BASE_URL||process.env.LOCAL_AI_BASE_URL)?"ready":"blocked_missing_provider",maxBatch:8,selectionPolicy:"newest-first",economicsPolicy:"category-aware"});}
