@@ -2,7 +2,7 @@ type Channel = { key: string; label: string; configured: boolean; connected: boo
   status: "NOT_CONFIGURED" | "NOT_TESTED" | "VERIFIED" | "BROKEN"; missing: string[]; error?: string };
 
 function present(name:string){return Boolean(process.env[name]?.trim());}
-function pixelId(){return (process.env.META_PIXEL_ID||process.env.NEXT_PUBLIC_META_PIXEL_ID||"").trim();}
+function datasetId(){return (process.env.META_DATASET_ID||process.env.META_PIXEL_ID||process.env.NEXT_PUBLIC_META_PIXEL_ID||"").trim();}
 function capiToken(){return (process.env.META_CONVERSIONS_API_TOKEN||process.env.META_ACCESS_TOKEN||"").trim();}
 
 export function marketingConnections(): Channel[] {
@@ -11,7 +11,7 @@ export function marketingConnections(): Channel[] {
     { key:"meta", label:"Meta Ads (Facebook / Instagram)", missing:["META_ACCESS_TOKEN","META_AD_ACCOUNT_ID"].filter(n=>!present(n)) },
     { key:"facebook", label:"Facebook Page", missing:["META_ACCESS_TOKEN","META_PAGE_ID"].filter(n=>!present(n)) },
     { key:"instagram", label:"Instagram Business", missing:["META_ACCESS_TOKEN","META_INSTAGRAM_ACCOUNT_ID","META_PAGE_ID"].filter(n=>!present(n)) },
-    { key:"meta-capi", label:"Meta Pixel + Conversions API", missing:[...(pixelId()?[]:["META_PIXEL_ID or NEXT_PUBLIC_META_PIXEL_ID"]),...(capiToken()?[]:["META_CONVERSIONS_API_TOKEN or META_ACCESS_TOKEN"])] },
+    { key:"meta-capi", label:"Meta Pixel/Dataset + Conversions API", missing:[...(datasetId()?[]:["META_DATASET_ID or META_PIXEL_ID or NEXT_PUBLIC_META_PIXEL_ID"]),...(capiToken()?[]:["META_CONVERSIONS_API_TOKEN or META_ACCESS_TOKEN"])] },
   ];
   return configs.map(c=>({key:c.key,label:c.label,configured:!c.missing.length,connected:false,status:c.missing.length?"NOT_CONFIGURED":"NOT_TESTED",missing:c.missing}));
 }
@@ -61,9 +61,9 @@ export async function verifyMarketingConnections() {
           const result=await checkedJson(`https://graph.facebook.com/${version}/${pageId}?fields=instagram_business_account{id,username}`,{headers});
           if(String(result?.instagram_business_account?.id)!==id)throw new Error("Instagram Business account is not linked to the configured Facebook Page");
         } else if (channel.key === "meta-capi") {
-          const id=pixelId();if(!/^\d+$/.test(id))throw new Error("Invalid Meta Pixel/Dataset ID");
+          const id=datasetId();if(!/^\d+$/.test(id))throw new Error("Invalid Meta Dataset/Pixel ID");
           const result=await checkedJson(`https://graph.facebook.com/${version}/${id}?fields=id,name`,{headers});
-          if(String(result.id)!==id)throw new Error("Meta returned a different Pixel/Dataset");
+          if(String(result.id)!==id)throw new Error("Meta returned a different Dataset/Pixel");
         }
       }
       return { ...channel, connected: true, status: "VERIFIED" as const };
