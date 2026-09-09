@@ -49,10 +49,27 @@ async function internalCall(origin: string, spec: ActionSpec) {
   return { ok: response.ok, httpStatus: response.status, data };
 }
 
+function serviceStatus(value: any) {
+  if (value?.error) return "ERROR";
+  if (typeof value?.productionReady === "boolean") {
+    if (value.productionReady) return "READY";
+    return value.anyConfigured ? "PARTIAL" : "BLOCKED";
+  }
+  if (typeof value?.anyConnected === "boolean") {
+    if (value.anyConnected) return "READY";
+    return value.anyConfigured ? "PARTIAL" : "BLOCKED";
+  }
+  if (value?.summary && typeof value.summary === "object" && typeof value.summary.blocked !== "undefined") {
+    const blocked = Array.isArray(value.summary.blocked) ? value.summary.blocked.length : Number(value.summary.blocked || 0);
+    return blocked > 0 ? "PARTIAL" : "READY";
+  }
+  return value?.status || "READY";
+}
+
 function compactService(value: any) {
   if (!value || typeof value !== "object") return { status: "UNKNOWN" };
   return {
-    status: value.status || (value.productionReady === true ? "READY" : value.error ? "ERROR" : "READY"),
+    status: serviceStatus(value),
     provider: value.provider,
     styleVersion: value.styleVersion,
     photorealCurrentShots: value.photorealCurrentShots,
