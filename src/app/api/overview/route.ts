@@ -53,7 +53,9 @@ export async function GET(req: Request) {
   const statusCounts:Record<string,number>={};
   for(const p of allFullProducts){const k=statusKey(p.status);statusCounts[k]=(statusCounts[k]||0)+1;}
   const publishedCount=statusCounts.PUBLISHED||0;
-  const ceoPendingCount=(statusCounts.CEO_PENDING||0)+(statusCounts.CEO_APPROVED||0);
+  const ceoPendingCount=statusCounts.CEO_PENDING||0;
+  const ceoApprovedCount=statusCounts.CEO_APPROVED||0;
+  const marketResearchPendingCount=statusCounts.MARKET_RESEARCH_PENDING||0;
   const stagedCount=(statusCounts.STAGED||0)+(statusCounts.AI_DRAFT||0);
   const rejectedCount=Object.entries(statusCounts).filter(([k])=>k.includes("REJECT")||k.includes("BLOCK")).reduce((a,[,v])=>a+v,0);
   const sourceVerifiedIds=new Set(allDetails.filter(d=>d.verificationStatus==="SOURCE_VERIFIED").map(d=>d.productId));
@@ -78,12 +80,12 @@ export async function GET(req: Request) {
     user:allUsers[0]||null,
     kpis:{
       totalRevenueInr:Number(totalRevenue.toFixed(2)),totalNetProfitInr:Number(totalNetProfit.toFixed(2)),totalSupplierCostInr:Number(totalCost.toFixed(2)),avgMarginPct,autoFulfillRatePct:autoFulfillRate,
-      activeProductsCount:publishedCount,totalProductRecordsCount:allFullProducts.length,publishedProductsCount:publishedCount,inPipelineProductsCount:inPipelineCount,sourceVerifiedProductsCount:sourceVerifiedCount,ceoPendingProductsCount:ceoPendingCount,stagedProductsCount:stagedCount,rejectedProductsCount:rejectedCount,fashionMadeToOrderCount,
+      activeProductsCount:publishedCount,totalProductRecordsCount:allFullProducts.length,publishedProductsCount:publishedCount,inPipelineProductsCount:inPipelineCount,sourceVerifiedProductsCount:sourceVerifiedCount,ceoPendingProductsCount:ceoPendingCount,ceoApprovedProductsCount:ceoApprovedCount,marketResearchPendingProductsCount:marketResearchPendingCount,stagedProductsCount:stagedCount,rejectedProductsCount:rejectedCount,fashionMadeToOrderCount,
       pendingOrdersCount:allOrders.filter(o=>["Incoming","AI Checking","RECHECK_REQUIRED","Received","QIKINK_PRODUCTION_PENDING","QIKINK_SUBMISSION_APPROVAL_REQUIRED"].includes(o.fulfillmentStatus)).length,
       storesConnected:allStores.length,cartItemsCount:allCart.length,cartTotalCostInr:Number(cartTotalCost.toFixed(2)),cartProjectedRevenueInr:Number(cartProjectedRevenue.toFixed(2)),cartProjectedProfitInr:Number(cartProjectedProfit.toFixed(2)),catalogAvgAiScore:catalogAvgScore,catalogTotalProjectedProfitInr:Math.round(catalogTotalProfit),total24hSalesAcrossCatalog:total24hSales,totalCampaigns:campaigns.length,totalImpressions,totalClicks,totalConversions,totalCampaignRevenueInr:Math.round(totalCampaignRevenue),ctr:totalImpressions?Number((totalClicks/totalImpressions*100).toFixed(2)):0,
       catalogStatusCounts:statusCounts,
     },
-    sparkline14Days,stores:allStores,products:paginatedProducts,productsPagination:{page,limit,total:totalFiltered,totalPages:Math.ceil(totalFiltered/limit)},categoryDistribution:categoryDist,allCategoryDistribution:allCategoryDist,orders:allOrders,rules:allRules,cartItems:allCart,activityLogs:recentLogs,refreshLogs,campaigns:campaigns.slice(0,20),truthPolicy:"Published live is separate from total database records; no demo KPI fallbacks are used.",
+    sparkline14Days,stores:allStores,products:paginatedProducts,productsPagination:{page,limit,total:totalFiltered,totalPages:Math.ceil(totalFiltered/limit)},categoryDistribution:categoryDist,allCategoryDistribution:allCategoryDist,orders:allOrders,rules:allRules,cartItems:allCart,activityLogs:recentLogs,refreshLogs,campaigns:campaigns.slice(0,20),truthPolicy:"CEO_PENDING means awaiting CEO review only; CEO_APPROVED and MARKET_RESEARCH_PENDING are separate listing stages.",
   });
 }
 
