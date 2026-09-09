@@ -63,10 +63,18 @@ export async function checkAI(deep = false) {
   const base = baseUrl();
   if (!base) return { configured: false, ready: false, reason: "missing", provider: aiProviderName(), models: aiModels() };
   try {
-    const res = await fetch(providerUrl("/models"), { headers: headers(), cache: "no-store", signal: AbortSignal.timeout(15000) });
+    const res = await fetch(providerUrl("/models"), { headers: headers(), cache: "no-store", signal: AbortSignal.timeout(12_000) });
     if (!res.ok) return { configured: true, ready: false, status: res.status, reason: "provider_rejected", provider: aiProviderName(), models: aiModels() };
     if (!deep) return { configured: true, ready: true, status: res.status, reason: "reachable", provider: aiProviderName(), models: aiModels() };
-    const probe = await runText([{ role: "user", content: "Reply with exactly OK." }], { maxTokens: 16 });
-    return { configured: true, ready: probe.content.trim().length > 0, status: res.status, reason: "model_ready", provider: aiProviderName(), models: aiModels() };
+    try {
+      const probe = await runText([{ role: "user", content: "Reply with exactly OK." }], { maxTokens: 16, timeoutMs: 15_000 });
+      return { configured: true, ready: probe.content.trim().length > 0, modelReady: probe.content.trim().length > 0, status: res.status, reason: "model_ready", provider: aiProviderName(), models: aiModels() };
+    } catch (error) {
+      // On Render's free tier the model may be cold while the OpenAI-compatible
+      // gateway is healthy. CEO/tool acceptance exercises real inference
+      // separately, so health reports this as degraded rather than hanging or
+      // declaring the whole application unavailable.
+      return { configured: true, ready: true, modelReady: false, degraded: true, status: res.status, reason: "provider_ready_model_probe_timed_out", error: error instanceof Error ? error.message : String(error), provider: aiProviderName(), models: aiModels() };
+    }
   } catch (e) { return { configured: true, ready: false, reason: "provider_unreachable", error: e instanceof Error ? e.message : String(e), provider: aiProviderName(), models: aiModels() }; }
 }
