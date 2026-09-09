@@ -27,14 +27,16 @@ test("production acceptance verifies current storefront media and real Gemma inf
   assert.doesNotMatch(src, /fashion-designer/);
 });
 
-test("CEO uses a compact Gemma decision protocol suitable for free CPU", () => {
+test("CEO uses a tiny Gemma decision protocol suitable for free CPU", () => {
   const src = read("src/app/api/ceo-chat/route.ts");
-  assert.match(src, /TOOL:<tool_name>/);
-  assert.match(src, /ANSWER:<max 28 words>/);
-  assert.match(src, /maxTokens: 36/);
-  assert.match(src, /evidenceDigest/);
+  assert.match(src, /TOOL:<name>/);
+  assert.match(src, /ANSWER:<max 16 words>/);
+  assert.match(src, /maxTokens: 20/);
+  assert.match(src, /tinyFacts/);
   assert.match(src, /gemma-compact-plan-act/);
   assert.match(src, /modelStatus: "live"/);
+  assert.doesNotMatch(src, /evidenceDigest/);
+  assert.doesNotMatch(src, /maxTokens: 36/);
   assert.doesNotMatch(src, /maxTokens: 240/);
   assert.doesNotMatch(src, /maxTokens: 280/);
   assert.doesNotMatch(src, /humanFallback/);
