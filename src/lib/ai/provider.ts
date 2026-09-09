@@ -21,8 +21,16 @@ function providerUrl(path: string) {
   return base.endsWith("/v1") ? `${base}${relative}` : `${base}/v1${relative}`;
 }
 
+function minimumTimeoutMs() {
+  const configured = Number(process.env.AI_MIN_TIMEOUT_MS || 0);
+  if (!Number.isFinite(configured) || configured <= 0) return 0;
+  return Math.min(180_000, Math.max(1_000, Math.floor(configured)));
+}
+
 async function request(path: string, body: unknown, timeoutMs = 120000) {
-  const res = await fetch(providerUrl(path), { method: "POST", headers: headers(), body: JSON.stringify(body), cache: "no-store", signal: AbortSignal.timeout(timeoutMs) });
+  const floor = minimumTimeoutMs();
+  const effectiveTimeoutMs = floor ? Math.max(timeoutMs, floor) : timeoutMs;
+  const res = await fetch(providerUrl(path), { method: "POST", headers: headers(), body: JSON.stringify(body), cache: "no-store", signal: AbortSignal.timeout(effectiveTimeoutMs) });
   const text = await res.text();
   let data: any = null; try { data = JSON.parse(text); } catch {}
   if (!res.ok) throw new Error(`AI provider ${res.status}: ${String(data?.error?.message || data?.message || text).slice(0,1200)}`);
@@ -70,10 +78,6 @@ export async function checkAI(deep = false) {
       const probe = await runText([{ role: "user", content: "Reply with exactly OK." }], { maxTokens: 16, timeoutMs: 15_000 });
       return { configured: true, ready: probe.content.trim().length > 0, modelReady: probe.content.trim().length > 0, status: res.status, reason: "model_ready", provider: aiProviderName(), models: aiModels() };
     } catch (error) {
-      // On Render's free tier the model may be cold while the OpenAI-compatible
-      // gateway is healthy. CEO/tool acceptance exercises real inference
-      // separately, so health reports this as degraded rather than hanging or
-      // declaring the whole application unavailable.
       return { configured: true, ready: true, modelReady: false, degraded: true, status: res.status, reason: "provider_ready_model_probe_timed_out", error: error instanceof Error ? error.message : String(error), provider: aiProviderName(), models: aiModels() };
     }
   } catch (e) { return { configured: true, ready: false, reason: "provider_unreachable", error: e instanceof Error ? e.message : String(e), provider: aiProviderName(), models: aiModels() }; }
