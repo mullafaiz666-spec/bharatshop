@@ -11,6 +11,16 @@ test("AI provider honors a configured free-tier timeout floor", () => {
   assert.match(src, /effectiveTimeoutMs/);
 });
 
+test("deep AI health reuses only a short recent successful model verification", () => {
+  const src = read("src/lib/ai/provider.ts");
+  assert.match(src, /MODEL_READY_CACHE_TTL_MS = 120_000/);
+  assert.match(src, /lastVerifiedModelReadyAt/);
+  assert.match(src, /Date\.now\(\) - lastVerifiedModelReadyAt < MODEL_READY_CACHE_TTL_MS/);
+  assert.match(src, /reason: "model_ready_recently_verified"/);
+  assert.match(src, /if \(modelReady\) lastVerifiedModelReadyAt = Date\.now\(\)/);
+  assert.match(src, /providerUrl\("\/models"\)/);
+});
+
 test("production acceptance no longer bootstraps the removed fashion system", () => {
   const workflow = read(".github/workflows/production-acceptance.yml");
   assert.doesNotMatch(workflow, /api\/fashion-designer/);
@@ -38,6 +48,7 @@ test("production acceptance verifies current storefront media and real Gemma inf
   assert.match(src, /GATE 10 Local Gemma inference/);
   assert.match(src, /modelReady/);
   assert.match(src, /ai-agent-live/);
+  assert.match(src, /modelStatus==="live"/);
   assert.doesNotMatch(src, /BharatDrip model media live/);
   assert.doesNotMatch(src, /fashion-designer/);
 });
