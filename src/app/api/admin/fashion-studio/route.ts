@@ -22,6 +22,20 @@ function paletteOf(value: unknown) {
   while (out.length < 3) out.push(["#111827", "#f97316", "#f8fafc"][out.length]);
   return out;
 }
+function placementOf(value: unknown) {
+  const row = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const clamp = (raw: unknown, min: number, max: number, fallback: number) => {
+    const n = Number(raw);
+    return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback;
+  };
+  return {
+    side: row.side === "back" ? "back" : "front",
+    x: clamp(row.x, -70, 70, 0),
+    y: clamp(row.y, -90, 90, 0),
+    scale: clamp(row.scale, 45, 145, 100),
+    rotate: clamp(row.rotate, -25, 25, 0),
+  };
+}
 function audienceCategory(audience: string, brand: string) {
   if (brand === "BharatDrip") return "BharatDrip Streetwear";
   if (audience === "women") return "Women's Fashion";
@@ -74,6 +88,8 @@ export async function POST(req: Request) {
   const garment = qikinkProductByCode(clean(body.garmentCode, 12)) || QIKINK_PRODUCTS.find(p => p.audience === audience) || QIKINK_PRODUCTS[0];
   const printMethod = PRINT_METHODS.includes(String(body.printMethod) as any) ? String(body.printMethod) : (brand === "BharatDrip" ? "Front + Back DTF" : "Pocket DTF");
   const palette = paletteOf(body.palette);
+  const placement = placementOf(body.placement);
+  const garmentColor = validHex(body.garmentColor) ? String(body.garmentColor) : palette[0];
   const mood = clean(body.mood || body.styleKeywords || "original modern Indian streetwear", 500);
   const collection = clean(body.collection || (brand === "BharatDrip" ? "BharatDrip Drop" : "BharatShop Studio Capsule"), 120);
 
@@ -171,6 +187,8 @@ export async function POST(req: Request) {
     designBrief: brief,
     designCode: code,
     palette,
+    garmentColor,
+    artworkPlacement: placement,
     audience,
     sizes: rate.sizes,
     collection,
@@ -182,6 +200,7 @@ export async function POST(req: Request) {
     minMarginPct: economicsPolicy.minMarginPct,
     minProfitInr: economicsPolicy.minProfitInr,
     ipPolicy: "ORIGINAL_ART_ONLY_NO_UNLICENSED_CHARACTERS",
+    studioVersion: "fashion-studio-v2",
     studioCreatedBy: { id: admin.id, name: admin.name, role: admin.role },
     studioCreatedAt: now.toISOString(),
   };
@@ -194,14 +213,14 @@ export async function POST(req: Request) {
   for (let view = 0; view < images.length; view++) {
     await pool.query(`
       INSERT INTO product_images (product_id,image_url,source_url,sort_order,alt_text,verification_status,verification_confidence,verification_model,verification_provider,verification_metadata,verified_at)
-      VALUES ($1,$2,$3,$4,$5,'AI_GENERATED_ORIGINAL',1,'bharatshop-studio-custom-v1','bharatshop-studio',$6,NOW())
-    `, [productId, images[view], sourceUrl, view, `${title} view ${view + 1}`, JSON.stringify({ designOrigin: brand, designLine: band.line, designCode: code, view, ipPolicy: "original-only", studio: true })]);
+      VALUES ($1,$2,$3,$4,$5,'AI_GENERATED_ORIGINAL',1,'bharatshop-studio-custom-v2','bharatshop-studio',$6,NOW())
+    `, [productId, images[view], sourceUrl, view, `${title} view ${view + 1}`, JSON.stringify({ designOrigin: brand, designLine: band.line, designCode: code, view, garmentColor, artworkPlacement: placement, ipPolicy: "original-only", studio: true, studioVersion: "fashion-studio-v2" })]);
   }
 
   await pool.query(`
     INSERT INTO ai_activity_logs (user_id,agent_name,action_type,message,metadata_json,status)
     VALUES (1,'AI Fashion Designer','STUDIO_DESIGN_QUEUED',$1,$2,'SUCCESS')
-  `, [`${title} was queued from Fashion Designer Studio after Qikink costing and economics checks.`, JSON.stringify({ productId, sku, brand, line: band.line, garmentCode: rate.productCode, printMethod, targetPriceInr: target, landedCostInr: landed, profitInr: Number(profit.toFixed(2)), marginPct: Number(margin.toFixed(2)), collection, createdBy: admin.id })]);
+  `, [`${title} was queued from Fashion Designer Studio after Qikink costing and economics checks.`, JSON.stringify({ productId, sku, brand, line: band.line, garmentCode: rate.productCode, printMethod, targetPriceInr: target, landedCostInr: landed, profitInr: Number(profit.toFixed(2)), marginPct: Number(margin.toFixed(2)), collection, garmentColor, placement, createdBy: admin.id })]);
 
   return NextResponse.json({
     status: "CEO_PENDING",
@@ -212,6 +231,7 @@ export async function POST(req: Request) {
     line: band.line,
     images,
     production: rate,
+    designState: { garmentColor, placement },
     economics: { targetPriceInr: target, landedCostInr: landed, profitInr: Number(profit.toFixed(2)), marginPct: Number(margin.toFixed(2)), policy: economicsPolicy },
     nextStage: "CEO review -> listing gate -> storefront",
   });
