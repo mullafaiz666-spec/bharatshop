@@ -6,6 +6,7 @@ import { searxngImageSearch, SearXNGRateLimitError } from "@/lib/searxng";
 const STOP = new Set(["the","with","and","for","from","pack","piece","pieces","new","best","online","india","buy","sale","free","exact","product","official","image","images","front","back","side","angle","box","packaging","contents","colour","colors","color","variants"]);
 const BAD = /(unsplash|placeholder|placehold|picsum|loremflickr|placekitten|dummyimage|via\.placeholder)/i;
 const FASHION = /(fashion|women|woman|men|man|saree|sari|kurti|kurta|dress|shirt|tshirt|t-shirt|jeans|trouser|petticoat|shapewear|lehenga|salwar|apparel|clothing|footwear|shoe|sandal|jewellery|jewelry)/i;
+const MTO_FASHION_BRANDS = new Set(["bharatshop studio", "bharatdrip"]);
 const MIN_CONFIDENCE = Number(process.env.IMAGE_VERIFY_MIN_CONFIDENCE || 0.75);
 const MIN_STANDARD_IMAGES = Math.max(1, Number(process.env.MIN_STANDARD_PRODUCT_IMAGES || 1));
 const MIN_FASHION_IMAGES = Math.max(4, Number(process.env.MIN_FASHION_PRODUCT_IMAGES || 4));
@@ -32,12 +33,16 @@ function textScore(item: Candidate, product: Product) {
   return expected.length ? hits / expected.length : 0;
 }
 
-function isFashion(product: Product) {
+function isFashionLike(product: Product) {
   return FASHION.test(`${product.category} ${product.title}`);
 }
 
+function usesStrictDesignerMediaGate(product: Product) {
+  return MTO_FASHION_BRANDS.has(String(product.brand || "").trim().toLowerCase());
+}
+
 function minimumImages(product: Product) {
-  return isFashion(product) ? MIN_FASHION_IMAGES : MIN_STANDARD_IMAGES;
+  return usesStrictDesignerMediaGate(product) ? MIN_FASHION_IMAGES : MIN_STANDARD_IMAGES;
 }
 
 function candidateDataReady(product: Product) {
@@ -138,7 +143,7 @@ async function resolveOne(productId?: number, productName?: string) {
   }
 
   const base = `${product.title} ${product.brand !== "Generic" ? product.brand : ""}`.trim();
-  const queries = isFashion(product)
+  const queries = isFashionLike(product)
     ? [`${base} product photo`, `${base} front back colour variant`]
     : [`${base} official product image`, `${base} packaging product image`];
 
