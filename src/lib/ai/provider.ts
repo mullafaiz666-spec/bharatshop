@@ -11,6 +11,9 @@ export const aiModels = () => ({
   vision: process.env.AI_VISION_MODEL || process.env.LOCAL_AI_VISION_MODEL || "local-evidence-v1",
 });
 
+const MODEL_READY_CACHE_TTL_MS = 120_000;
+let lastVerifiedModelReadyAt = 0;
+
 function headers() { const key = apiKey(); return { "Content-Type": "application/json", ...(key ? { Authorization: `Bearer ${key}` } : {}) }; }
 
 function providerUrl(path: string) {
@@ -74,9 +77,26 @@ export async function checkAI(deep = false) {
     const res = await fetch(providerUrl("/models"), { headers: headers(), cache: "no-store", signal: AbortSignal.timeout(12_000) });
     if (!res.ok) return { configured: true, ready: false, status: res.status, reason: "provider_rejected", provider: aiProviderName(), models: aiModels() };
     if (!deep) return { configured: true, ready: true, status: res.status, reason: "reachable", provider: aiProviderName(), models: aiModels() };
+
+    const recentlyVerified = lastVerifiedModelReadyAt > 0 && Date.now() - lastVerifiedModelReadyAt < MODEL_READY_CACHE_TTL_MS;
+    if (recentlyVerified) {
+      return {
+        configured: true,
+        ready: true,
+        modelReady: true,
+        status: res.status,
+        reason: "model_ready_recently_verified",
+        verifiedAt: new Date(lastVerifiedModelReadyAt).toISOString(),
+        provider: aiProviderName(),
+        models: aiModels(),
+      };
+    }
+
     try {
-      const probe = await runText([{ role: "user", content: "Reply with exactly OK." }], { maxTokens: 16, timeoutMs: 15_000 });
-      return { configured: true, ready: probe.content.trim().length > 0, modelReady: probe.content.trim().length > 0, status: res.status, reason: "model_ready", provider: aiProviderName(), models: aiModels() };
+      const probe = await runText([{ role: "user", content: "Reply with exactly OK." }], { maxTokens: 4, timeoutMs: 15_000 });
+      const modelReady = probe.content.trim().length > 0;
+      if (modelReady) lastVerifiedModelReadyAt = Date.now();
+      return { configured: true, ready: modelReady, modelReady, status: res.status, reason: modelReady ? "model_ready" : "model_empty_response", provider: aiProviderName(), models: aiModels() };
     } catch (error) {
       return { configured: true, ready: true, modelReady: false, degraded: true, status: res.status, reason: "provider_ready_model_probe_timed_out", error: error instanceof Error ? error.message : String(error), provider: aiProviderName(), models: aiModels() };
     }
