@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       count:
-        description: "Qikink fashion designs to create (3-24)"
+        description: "BharatShop Studio + BharatDrip designs to create (3-24)"
         required: false
         default: "12"
   push:
@@ -14,6 +14,9 @@ on:
     paths:
       - "src/app/api/fashion-designer/**"
       - "src/app/api/fashion-art/**"
+      - "src/app/api/automation/ceo-cycle/**"
+      - "src/app/api/agents/listing/**"
+      - "src/app/api/storefront/products/**"
       - "src/lib/suppliers/qikink-rate-card.ts"
       - ".github/workflows/ai-fashion-designer.yml"
 
@@ -42,7 +45,7 @@ jobs:
           echo "Render did not expose the exact fashion workflow revision"
           exit 1
 
-      - name: Create original Qikink fashion
+      - name: Create value and BharatDrip fashion
         env:
           TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
           DESIGN_COUNT: ${{ inputs.count || '12' }}
@@ -59,7 +62,12 @@ jobs:
           node - <<'NODE'
           const d=require('./fashion-designer-result.json');
           if(!d.success||Number(d.generated)<3) throw new Error(d.error||'fashion designer produced too few products');
-          console.log(JSON.stringify({generated:d.generated,productionSupplier:d.productionSupplier,inventoryMode:d.inventoryMode},null,2));
+          const results=d.results||[];
+          const drip=results.filter(x=>x.brand==='BharatDrip'&&x.line==='DESIGNER'&&x.status!=='REJECTED_UNCOMPETITIVE_SOURCE');
+          if(drip.length<3) throw new Error(`Only ${drip.length} BharatDrip designs passed production economics`);
+          if(drip.some(x=>Number(x.sellingPriceInr)<599||Number(x.sellingPriceInr)>999)) throw new Error('BharatDrip price escaped 599-999 band');
+          if(drip.filter(x=>Number(x.printPlacements)>=2).length<3) throw new Error('BharatDrip front/back placement costing was not applied');
+          console.log(JSON.stringify({generated:d.generated,pricingPolicy:d.pricingPolicy,bharatDripEconomicallyViable:drip.length},null,2));
           NODE
 
       - name: CEO publication pass
@@ -69,13 +77,23 @@ jobs:
           curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 \
             -X POST "$BHARATSHOP_URL/api/automation/ceo-cycle?skipResearch=1" \
             -H "Authorization: Bearer $TOKEN" -H "x-automation-token: $TOKEN" -H "Content-Type: application/json" --data '{}' | tee ceo-fashion.json
-
-      - name: Verify Qikink fashion is customer-visible
-        run: |
-          curl --silent --show-error --fail-with-body --max-time 120 "$BHARATSHOP_URL/api/storefront/products?limit=192" | tee storefront.json
           node - <<'NODE'
-          const d=require('./storefront.json');
-          const fashion=(d.products||[]).filter(p=>p.madeToOrder&&String(p.productionSupplier).toLowerCase()==='qikink');
-          if(fashion.length<3) throw new Error(`Only ${fashion.length} Qikink fashion products are live`);
-          console.log(JSON.stringify({qikinkFashionLive:fashion.length},null,2));
+          const d=require('./ceo-fashion.json');
+          const approved=(d.ceo&&d.ceo.approvedProducts)||[];
+          const drip=approved.filter(x=>String(x.designOrigin)==='BharatDrip');
+          if(drip.length<3) throw new Error(`CEO approved only ${drip.length} BharatDrip designs`);
+          if(drip.some(x=>!x.madeToOrder||Number(x.imageCount)<4)) throw new Error('BharatDrip CEO evidence gate failed');
+          console.log(JSON.stringify({ceoApprovedBharatDrip:drip.length},null,2));
+          NODE
+
+      - name: Verify BharatDrip is customer-visible
+        run: |
+          curl --silent --show-error --fail-with-body --max-time 120 "$BHARATSHOP_URL/api/storefront/products?category=BharatDrip%20Streetwear&limit=24" | tee bharatdrip-storefront.json
+          node - <<'NODE'
+          const d=require('./bharatdrip-storefront.json');
+          const drip=(d.products||[]).filter(p=>p.madeToOrder&&String(p.brand)==='BharatDrip');
+          if(drip.length<3) throw new Error(`Only ${drip.length} BharatDrip products are customer-visible`);
+          if(drip.some(p=>Number(p.sellingPriceInr)<599||Number(p.sellingPriceInr)>999)) throw new Error('Customer-visible BharatDrip price is outside 599-999');
+          if(drip.some(p=>!Array.isArray(p.imageUrls)||p.imageUrls.length<4)) throw new Error('Customer-visible BharatDrip gallery has fewer than four views');
+          console.log(JSON.stringify({bharatDripLive:drip.length,products:drip.map(p=>({id:p.id,title:p.title,price:p.sellingPriceInr,brand:p.brand,images:p.imageUrls.length}))},null,2));
           NODE
