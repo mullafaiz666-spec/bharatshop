@@ -5,21 +5,7 @@ import { aiModels, runText } from "@/lib/ai/provider";
 
 export const dynamic = "force-dynamic";
 
-const BASE_SYSTEM = `You are BharatShop AI CEO. Use only supplied facts. Never invent stock, orders, prices, approvals, sources, actions, or successful execution. Think like an ecommerce operator. Spending, purchasing, external commitments, refunds, payouts, credentials, and destructive database work require human approval.`;
-
-const AGENT_FOCUS: Record<string, string> = {
-  "AI CEO": "Coordinate the business and choose the next safe action.",
-  "Product Research": "Find product opportunities from public evidence.",
-  "Source Verification": "Verify sources, pricing, availability, and economics.",
-  "Image & Media": "Resolve exact-product media from evidence.",
-  "Fashion Designer": "Handle explicitly requested fashion design work.",
-  "Fashion Enrichment": "Enrich explicitly requested fashion variants.",
-  "Listing & Marketing": "Prepare truthful listings and publication decisions.",
-  "Learning & Analytics": "Explain performance and lessons.",
-  "Advertising": "Prepare advertising decisions; spending stays human-gated.",
-  "Order Re-check": "Re-check order economics; purchases stay human-gated.",
-  "Fulfilment & Tracking": "Review fulfilment and tracking without inventing shipment state.",
-};
+const BASE_SYSTEM = `You are BharatShop AI CEO. Use only supplied facts. Never invent stock, orders, prices, approvals, sources, actions, or successful execution. Spending, purchasing, external commitments, refunds, payouts, credentials, and destructive database work require human approval.`;
 
 const AGENT_TOOLS: Record<string, string[]> = {
   "AI CEO": ["research_web", "resolve_product_images", "fashion_studio", "design_fashion_collection", "list_fashion_commands", "reject_product", "create_approval", "list_pending_approvals"],
@@ -35,22 +21,11 @@ const AGENT_TOOLS: Record<string, string[]> = {
   "Fulfilment & Tracking": ["list_pending_approvals", "create_approval"],
 };
 
-const TOOL_LABELS: Record<string, string> = {
-  research_web: "web research",
-  resolve_product_images: "product media",
-  fashion_studio: "explicit fashion command",
-  design_fashion_collection: "explicit fashion collection",
-  list_fashion_commands: "fashion command list",
-  reject_product: "hold/reject product",
-  create_approval: "request human approval",
-  list_pending_approvals: "read approval queue",
-};
-
 const allowed = (agent: string, tool: string) => (AGENT_TOOLS[agent] || AGENT_TOOLS["AI CEO"]).includes(tool);
 const BOTLIKE = /(live evidence inspection completed|audited tool execution|deterministic summary|model wording step|human fallback|raw json|tool telemetry)/i;
 
 type PlannerDecision =
-  | { kind: "tool"; tool: string; args?: Record<string, unknown>; reason?: string }
+  | { kind: "tool"; tool: string; args?: Record<string, unknown> }
   | { kind: "final"; answer?: string };
 
 function slashCommand(question: string) {
@@ -99,33 +74,51 @@ function compactLive(live: any) {
 }
 
 function compactTrace(trace: any[]) {
-  return trace.slice(-2).map(x => ({ tool: x.tool, status: x.status, result: JSON.stringify(x.result ?? {}).slice(0, 420) }));
+  return trace.slice(-2).map(x => ({ tool: x.tool, status: x.status, result: JSON.stringify(x.result ?? {}).slice(0, 260) }));
 }
 
-function evidenceDigest(evidence: any) {
+function tinyFacts(evidence: any) {
   const live = evidence?.live || {};
-  return {
-    products: live.products,
-    storefrontOrders: live.storefrontOrders,
-    internalOrders: live.internalOrders,
-    pendingApprovals: Array.isArray(live.pendingApprovals) ? live.pendingApprovals.length : 0,
-    recent: Array.isArray(live.recentActivity) ? live.recentActivity.slice(0, 2) : [],
-    observations: Array.isArray(evidence?.tools) ? evidence.tools.slice(-2) : [],
-    product: evidence?.context || {},
-  };
+  const p = live.products || {};
+  const so = live.storefrontOrders || {};
+  const io = live.internalOrders || {};
+  const approvals = Array.isArray(live.pendingApprovals) ? live.pendingApprovals.length : 0;
+  const observation = Array.isArray(evidence?.tools) && evidence.tools.length ? evidence.tools[evidence.tools.length - 1] : null;
+  return [
+    `P=${p.total ?? 0}/${p.published ?? 0};ceo=${p.ceo_pending ?? 0};stage=${p.staged ?? 0};rej=${p.rejected ?? 0};img=${p.missing_images ?? 0}`,
+    `SO=${so.total ?? 0};pend=${so.pending ?? 0};rev=${so.revenue ?? 0}`,
+    `IO=${io.total ?? 0};pend=${io.pending ?? 0}`,
+    `A=${approvals}`,
+    observation ? `T=${observation.tool}:${observation.status}` : "T=none",
+  ].join("|");
 }
 
 async function auditDecision(agent: string, status: string, summary: string, evidence: any) {
   try { await recordAudit({ agentName: agent, eventType: "CEO_DECISION", status, summary, evidence }); } catch {}
 }
 
+const TOOL_ALIASES: Record<string, string> = {
+  approval: "create_approval",
+  approvals: "list_pending_approvals",
+  web: "research_web",
+  research: "research_web",
+  images: "resolve_product_images",
+  media: "resolve_product_images",
+};
+
 function parsePlannerResponse(text: string): PlannerDecision {
   const cleaned = text.trim().replace(/^```\w*\s*/i, "").replace(/\s*```$/i, "");
   const toolMatch = cleaned.match(/^TOOL\s*:\s*([a-z0-9_/-]+)/i);
-  if (toolMatch) return { kind: "tool", tool: toolMatch[1].toLowerCase() };
+  if (toolMatch) {
+    const raw = toolMatch[1].toLowerCase();
+    return { kind: "tool", tool: TOOL_ALIASES[raw] || raw };
+  }
+  const bareTool = cleaned.toLowerCase().replace(/[^a-z0-9_/-]/g, "");
+  if (TOOL_ALIASES[bareTool]) return { kind: "tool", tool: TOOL_ALIASES[bareTool] };
+  if (Object.values(AGENT_TOOLS).some(xs => xs.includes(bareTool))) return { kind: "tool", tool: bareTool };
   const answerMatch = cleaned.match(/^ANSWER\s*:\s*([\s\S]+)/i);
   if (answerMatch?.[1]?.trim()) return { kind: "final", answer: answerMatch[1].trim() };
-  if (cleaned.length >= 8 && !BOTLIKE.test(cleaned) && !cleaned.startsWith("{")) return { kind: "final", answer: cleaned };
+  if (cleaned.length >= 5 && !BOTLIKE.test(cleaned) && !cleaned.startsWith("{")) return { kind: "final", answer: cleaned };
   throw new Error("Gemma planner returned unusable output");
 }
 
@@ -142,7 +135,7 @@ function parseApprovalIntent(question: string) {
 
 function normalizeToolArgs(tool: string, args: Record<string, unknown>, question: string, context: any) {
   const next: Record<string, unknown> = { ...args };
-  if (tool === "research_web" && !String(next.query || "").trim()) next.query = question.slice(0, 360);
+  if (tool === "research_web" && !String(next.query || "").trim()) next.query = question.slice(0, 300);
   if (["resolve_product_images", "fashion_studio", "reject_product"].includes(tool)) {
     if (!next.product_id && context.productId) next.product_id = context.productId;
     if (!next.product_name && context.productName) next.product_name = context.productName;
@@ -166,21 +159,18 @@ function validateToolArgs(tool: string, args: Record<string, unknown>) {
 
 async function planWithGemma(question: string, incoming: any[], agent: string, evidence: any): Promise<PlannerDecision> {
   const toolNames = AGENT_TOOLS[agent] || AGENT_TOOLS["AI CEO"];
-  const tools = toolNames.map(name => `${name}=${TOOL_LABELS[name]}`).join(", ");
-  const recent = incoming.slice(-2).map((m: any) => `${m?.role === "assistant" ? "A" : "U"}:${String(m?.content || "").slice(0, 120)}`).join(" | ");
-  const facts = JSON.stringify(evidenceDigest(evidence)).slice(0, 1500);
-  const system = `${BASE_SYSTEM}\nRole: ${agent}. ${AGENT_FOCUS[agent] || "Operate within the assigned role."}\nChoose ONE next step. Reply exactly either TOOL:<tool_name> or ANSWER:<max 28 words>. If the user asks for a gated action, choose create_approval. Tools: ${tools}`;
-  const user = `Q:${question.slice(0, 320)}\nFacts:${facts}${recent ? `\nRecent:${recent}` : ""}`;
-  const result = await runText([{ role: "system", content: system }, { role: "user", content: user }], { model: aiModels().text, temperature: 0.1, maxTokens: 36, timeoutMs: 20_000 });
+  const recent = incoming.at(-2)?.content ? String(incoming.at(-2).content).slice(0, 60) : "";
+  const system = `BharatShop CEO. Use only F. If F is enough, ANSWER. External-current info may use research_web. If Q asks to create/request approval, MUST use create_approval. Reply only TOOL:<name> or ANSWER:<max 16 words>. Tools:${toolNames.join("|")}`;
+  const user = `Q:${question.slice(0, 220)}\nF:${tinyFacts(evidence)}${recent ? `\nR:${recent}` : ""}`;
+  const result = await runText([{ role: "system", content: system }, { role: "user", content: user }], { model: aiModels().text, temperature: 0, maxTokens: 20, timeoutMs: 20_000 });
   return parsePlannerResponse(result.content);
 }
 
 async function finalWithGemma(question: string, agent: string, evidence: any) {
-  const facts = JSON.stringify(evidenceDigest(evidence)).slice(0, 1700);
   const result = await runText([
-    { role: "system", content: `${BASE_SYSTEM}\nRole: ${agent}. Answer directly in at most 32 words. Do not mention JSON, telemetry, hidden tools, or system internals.` },
-    { role: "user", content: `Q:${question.slice(0, 320)}\nFacts:${facts}` },
-  ], { model: aiModels().text, temperature: 0.2, maxTokens: 40, timeoutMs: 20_000 });
+    { role: "system", content: `${BASE_SYSTEM}\nRole:${agent}. Answer from F in at most 18 words. No internals.` },
+    { role: "user", content: `Q:${question.slice(0, 220)}\nF:${tinyFacts(evidence)}` },
+  ], { model: aiModels().text, temperature: 0.1, maxTokens: 22, timeoutMs: 20_000 });
   const reply = result.content.trim().replace(/^ANSWER\s*:\s*/i, "");
   if (!reply || BOTLIKE.test(reply)) throw new Error("Gemma returned an empty or system-like final answer");
   return reply;
@@ -213,7 +203,7 @@ export async function POST(req: Request) {
   const started = Date.now();
   try {
     const body = await req.json();
-    const incoming = Array.isArray(body.messages) ? body.messages.slice(-6) : [];
+    const incoming = Array.isArray(body.messages) ? body.messages.slice(-4) : [];
     const question = String(body.question || incoming.at(-1)?.content || "").trim();
     if (!question) return NextResponse.json({ error: "Question required" }, { status: 400 });
 
@@ -239,7 +229,7 @@ export async function POST(req: Request) {
       if (decision.kind === "final") {
         const reply = String(decision.answer || "").trim();
         if (!reply || BOTLIKE.test(reply)) throw new Error("Gemma returned an unusable CEO answer");
-        await auditDecision(agent, "SUCCESS", "Compact Gemma CEO produced an evidence-grounded answer.", { question, toolExecutions: trace, provider: process.env.AI_PROVIDER || "local-openai-compatible", model: aiModels().text, durationMs: Date.now() - started });
+        await auditDecision(agent, "SUCCESS", "Tiny Gemma CEO produced an evidence-grounded answer.", { question, toolExecutions: trace, provider: process.env.AI_PROVIDER || "local-openai-compatible", model: aiModels().text, durationMs: Date.now() - started });
         return NextResponse.json({ reply, mode: "ai-agent-live", agent, toolExecutions: trace, provider: process.env.AI_PROVIDER || "local-openai-compatible", model: aiModels().text, orchestration: "gemma-compact-plan-act", modelStatus: "live" });
       }
 
@@ -253,7 +243,7 @@ export async function POST(req: Request) {
 
       const needsSynthesis = ["research_web", "resolve_product_images", "reject_product", "fashion_studio", "design_fashion_collection"].includes(decision.tool);
       const reply = needsSynthesis ? await finalWithGemma(question, agent, evidence) : actionReceipt(decision.tool, result);
-      await auditDecision(agent, "SUCCESS", "Compact Gemma CEO selected and completed a permitted action.", { question, selectedTool: decision.tool, toolExecutions: trace, provider: process.env.AI_PROVIDER || "local-openai-compatible", model: aiModels().text, durationMs: Date.now() - started });
+      await auditDecision(agent, "SUCCESS", "Tiny Gemma CEO selected and completed a permitted action.", { question, selectedTool: decision.tool, toolExecutions: trace, provider: process.env.AI_PROVIDER || "local-openai-compatible", model: aiModels().text, durationMs: Date.now() - started });
       return NextResponse.json({ reply, mode: "ai-agent-live", agent, toolExecutions: trace, provider: process.env.AI_PROVIDER || "local-openai-compatible", model: aiModels().text, orchestration: "gemma-compact-plan-act", modelStatus: "live" });
     } catch (modelError) {
       const unavailable = unavailableReply(modelError);
