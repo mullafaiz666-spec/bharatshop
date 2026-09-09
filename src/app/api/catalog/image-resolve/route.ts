@@ -3,8 +3,9 @@ import { db } from "@/db";
 import { productDetails, productImages, products } from "@/db/schema";
 import { desc, eq, or } from "drizzle-orm";
 import { resolveVerifiedProductMedia } from "@/lib/ai/media-resolver";
+import { criticalFirst } from "@/lib/catalog/priority-coverage";
 
-export const dynamic = "force-dynamic";
+export const dynamic="force-dynamic";
 const BAD=/(unsplash|placeholder|placehold|picsum|loremflickr|placekitten|dummyimage|via\.placeholder)/i;
 const MIN_CONFIDENCE=0.75;
 const VERIFICATION_PROVIDERS=new Set(["local-ai","local-evidence"]);
@@ -18,10 +19,9 @@ async function runMaintenance(limit:number){
  ]);
  const counts=new Map<number,number>();for(const x of imgs)if(qualifies(x))counts.set(x.productId,(counts.get(x.productId)||0)+1);
  const sourceVerified=new Set(details.filter(d=>d.verificationStatus==="SOURCE_VERIFIED"&&/^https?:\/\//i.test(String(d.sourceUrl||""))).map(d=>d.productId));
- // Don't spend image-search capacity on raw discoveries that have not passed supplier verification.
- // Published legacy products may still be repaired, while fresh SOURCE_VERIFIED staged rows get priority.
- const candidates=all.filter(p=>(p.status==="Published"||sourceVerified.has(p.id))&&(counts.get(p.id)||0)<1).slice(0,limit);
+ const eligible=all.filter(p=>(p.status==="Published"||sourceVerified.has(p.id))&&(counts.get(p.id)||0)<1);
+ const candidates=criticalFirst(eligible,p=>({title:p.title,category:p.category,brand:p.brand})).slice(0,limit);
  const results=[];for(const p of candidates)results.push(await resolveVerifiedProductMedia(p.id));
- return NextResponse.json({status:"COMPLETED",provider:"searxng+local-evidence",processed:candidates.length,resolved:results.filter((r:any)=>r.status==="COMPLETE_MEDIA_RESOLVED").length,blocked:results.filter((r:any)=>r.publicationGate==="BLOCK").length,results,selectionPolicy:"newest SOURCE_VERIFIED staged products first; legacy Published repair allowed",policy:"Standard sourced products need at least one reachable evidence-verified primary image. Raw discoveries never consume publication media capacity before source verification. Made-to-order fashion keeps its stricter multi-image editorial gate."});
+ return NextResponse.json({status:"COMPLETED",provider:"searxng+local-evidence",processed:candidates.length,resolved:results.filter((r:any)=>r.status==="COMPLETE_MEDIA_RESOLVED").length,blocked:results.filter((r:any)=>r.publicationGate==="BLOCK").length,results,selectionPolicy:"critical coverage buckets first; then newest SOURCE_VERIFIED staged products; legacy Published repair allowed",policy:"Standard sourced products need at least one reachable evidence-verified primary image. Raw discoveries never consume publication media capacity before source verification. Made-to-order fashion uses its verified original design media and can receive editorial upgrades separately."});
 }
 export async function POST(req:Request){try{const token=req.headers.get("authorization")?.replace(/^Bearer\s+/i,"");if(!process.env.BHARATSHOP_AUTOMATION_TOKEN||token!==process.env.BHARATSHOP_AUTOMATION_TOKEN)return NextResponse.json({error:"Unauthorized"},{status:401});const body=await req.json().catch(()=>({}));const limit=Math.max(1,Math.min(12,Number(body.limit||5)));if(maintenanceInFlight)return NextResponse.json({status:"IN_PROGRESS",message:"Catalog image resolution is already running; no overlapping SearXNG/local-evidence job was started."},{status:202});maintenanceInFlight=runMaintenance(limit).finally(()=>{maintenanceInFlight=null;});return await maintenanceInFlight;}catch(e){return NextResponse.json({error:e instanceof Error?e.message:"Media resolver failed",publicationGate:"BLOCK"},{status:503});}}

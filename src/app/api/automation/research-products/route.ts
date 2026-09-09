@@ -4,22 +4,18 @@ import { products, productDetails, aiActivityLogs } from "@/db/schema";
 import { ilike } from "drizzle-orm";
 import { serpSearch } from "@/lib/ai/agent-tools";
 import { UNIVERSAL_CATALOGUE_QUERIES } from "@/lib/suppliers/universal-catalogue";
+import { CRITICAL_DISCOVERY_QUERIES, criticalCoverageCounts } from "@/lib/catalog/priority-coverage";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const PRIORITY_QUERIES = [
-  "Meesho women fashion India price",
-  "Meesho men fashion India price",
-  "Meesho kids fashion India price",
-  "Meesho footwear bags jewellery India price",
+  ...CRITICAL_DISCOVERY_QUERIES,
   "best selling smartphones India price",
   "best selling tablets India price",
-  "best selling laptops India price",
   "best selling desktop computers India price",
   "computer monitors components SSD keyboard mouse India price",
   "mobile accessories chargers power banks cases India price",
-  "TV appliances home kitchen India price",
   "beauty personal care toys sports automotive India price",
 ] as const;
 
@@ -42,13 +38,18 @@ function inferCategory(query: string, title: string) {
   const text = `${query} ${title}`.toLowerCase();
   const rules: Array<[RegExp, string]> = [
     [/(smartphone|mobile phone|\bmobile\b|tablet|iphone|android phone)/, "Mobiles & Tablets"],
-    [/(laptop|desktop|computer|gaming pc|monitor|pc component|motherboard|processor|cpu|gpu|graphics card|ram\b|ssd|hard drive|keyboard|mouse|router|networking|printer)/, "Laptops & Computers"],
+    [/(laptop|notebook|chromebook|macbook)/, "Laptops & Computers"],
+    [/(desktop|computer|gaming pc|monitor|pc component|motherboard|processor|cpu|gpu|graphics card|ram\b|ssd|hard drive|keyboard|mouse|router|networking|printer)/, "Laptops & Computers"],
     [/(gaming console|playstation|xbox|gaming access|gamepad)/, "Gaming"],
-    [/(smart tv|television|soundbar|speaker|home entertainment|projector)/, "TV & Home Entertainment"],
+    [/(smart tv|television|led tv|oled tv|qled tv|google tv|android tv)/, "TV & Home Entertainment"],
+    [/(soundbar|speaker|home entertainment|projector)/, "TV & Home Entertainment"],
     [/(earbud|headphone|neckband|audio|microphone)/, "Audio & Headphones"],
     [/(camera|lens|tripod|gimbal)/, "Cameras & Photography"],
     [/(smartwatch|wearable|fitness band)/, "Wearables & Watches"],
-    [/(refrigerator|washing machine|air conditioner|\bac\b|air cooler|fan|microwave|appliance)/, "Appliances"],
+    [/(refrigerator|fridge|freezer)/, "Refrigerators"],
+    [/(washing machine|washer|front load|top load)/, "Washing Machines"],
+    [/(air conditioner|split ac|window ac|inverter ac|air conditioning|\b\d(?:\.\d)?\s*ton\s+ac\b)/, "Air Conditioners"],
+    [/(air cooler|fan|microwave|appliance)/, "Appliances"],
     [/(kitchen|cookware|bottle|storage container|mixer grinder|induction|air fryer)/, "Home & Kitchen"],
     [/(furniture|mattress|home decor|lighting|organizer|curtain|bedsheet)/, "Furniture & Home Decor"],
     [/(women fashion|men fashion|kids fashion|fashion|shirt|t-shirt|tshirt|dress|kurti|kurta|saree|sari|jeans|trouser|top|hoodie|jacket|clothing|apparel)/, "Fashion"],
@@ -97,10 +98,7 @@ export async function POST(req: Request) {
         data = await serpSearch(String(query), "google_shopping");
         queriesSucceeded += 1;
       } catch (error) {
-        searchErrors.push({
-          query: String(query),
-          error: error instanceof Error ? error.message : String(error),
-        });
+        searchErrors.push({ query: String(query), error: error instanceof Error ? error.message : String(error) });
         continue;
       }
 
@@ -137,16 +135,7 @@ export async function POST(req: Request) {
           productId: product.id,
           sourceUrl,
           verificationStatus: "DISCOVERED",
-          specificationsJson: {
-            discovery: {
-              query: String(query),
-              sourceName,
-              sourceUrl,
-              discoveryPriceInr: sourcePrice,
-              category,
-              discoveredAt: new Date().toISOString(),
-            },
-          },
+          specificationsJson: { discovery: { query: String(query), sourceName, sourceUrl, discoveryPriceInr: sourcePrice, category, discoveredAt: new Date().toISOString() } },
         });
 
         await db.insert(aiActivityLogs).values({
@@ -159,21 +148,11 @@ export async function POST(req: Request) {
         categoryCounts[category] = (categoryCounts[category] || 0) + 1;
         sourceCounts[sourceName] = (sourceCounts[sourceName] || 0) + 1;
         createdForQuery += 1;
-        created.push({
-          id: product.id,
-          title,
-          category,
-          sourceName,
-          sourceUrl,
-          discoveryPrice: sourcePrice,
-          sellingPrice,
-          marginPct: Number(margin.toFixed(2)),
-          mediaStatus: "PENDING_MEDIA_VERIFICATION",
-          publicationGate: "BLOCK",
-        });
+        created.push({ id: product.id, title, category, sourceName, sourceUrl, discoveryPrice: sourcePrice, sellingPrice, marginPct: Number(margin.toFixed(2)), mediaStatus: "PENDING_MEDIA_VERIFICATION", publicationGate: "BLOCK" });
       }
     }
 
+    const criticalCoverage = criticalCoverageCounts(created, item => item);
     if (searchErrors.length) {
       await db.insert(aiActivityLogs).values({
         userId,
@@ -182,26 +161,24 @@ export async function POST(req: Request) {
         message: `Product discovery completed with ${searchErrors.length} rate-limited or unavailable search queries; downstream verification remains active.`,
         profitImpactInr: "0.00",
         status: "WARNING",
-        metadataJson: { searchErrors, queriesAttempted, queriesSucceeded, created: created.length, perQueryLimit, categoryCounts, sourceCounts },
+        metadataJson: { searchErrors, queriesAttempted, queriesSucceeded, created: created.length, perQueryLimit, categoryCounts, sourceCounts, criticalCoverage },
       });
     }
 
-    const status = searchErrors.length
-      ? (queriesSucceeded > 0 ? "COMPLETED_WITH_DEGRADED_SEARCH" : "DEGRADED_SEARCH")
-      : "COMPLETED";
-
+    const status = searchErrors.length ? (queriesSucceeded > 0 ? "COMPLETED_WITH_DEGRADED_SEARCH" : "DEGRADED_SEARCH") : "COMPLETED";
     return NextResponse.json({
       status,
       researched: created.length,
       products: created,
       categoryCounts,
+      criticalCoverage,
       sourceCounts,
       queriesScanned: queriesAttempted,
       queriesSucceeded,
       perQueryLimit,
       searchErrors,
       provider: "SearXNG/Google-Shopping->PostgreSQL",
-      selectionPolicy: "balanced per-query discovery so one category cannot consume the whole batch",
+      selectionPolicy: "critical fashion/TV/laptop/refrigerator/AC/washing-machine queries first, then balanced per-query discovery",
       nextStage: "source verification -> enrichment -> media verification -> CEO review",
       publicationPolicy: "Discovery never implies fulfilment. Publish only after live source qualification, evidence-backed enrichment, verified media and CEO approval.",
     });
@@ -219,6 +196,6 @@ export async function GET() {
     providers: { localGemma: localAI, searxng },
     queryCount: DEFAULT_QUERIES.length,
     defaultPerQueryLimit: 3,
-    priorityCoverage: ["Meesho fashion", "mobiles", "tablets", "laptops", "desktop computers", "computer components", "mobile accessories", "home", "beauty", "sports", "automotive"],
+    priorityCoverage: ["fashion", "smart TVs", "laptops", "refrigerators", "washing machines", "air conditioners", "mobiles", "tablets", "computers", "beauty", "sports", "automotive"],
   });
 }
