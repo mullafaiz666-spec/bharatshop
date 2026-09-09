@@ -24,11 +24,12 @@ async function main(){
   gate('GATE 4 Storefront privacy',privacyLeaks.length===0?'PASS':'FAIL',`vendor/internal leaks=${privacyLeaks.length}; privacy=${s.data?.privacy||'missing'}`);
   gate('GATE 5 Category integrity',badCategories.length===0?'PASS':'FAIL',`categories=${Object.keys(categoryCounts).length}; invalid=${badCategories.length}`);
   const bharatDrip=fashion.filter(p=>String(p.brand||'')==='BharatDrip');
-  const modelled=bharatDrip.filter(p=>Array.isArray(p.imageUrls)&&p.imageUrls.some(u=>String(u).includes('/api/fashion-photo/')));
+  const modelled=bharatDrip.filter(p=>String(p.imageUrl||'').includes('/api/fashion-photo/')&&Array.isArray(p.imageUrls)&&p.imageUrls.some(u=>String(u).includes('/api/fashion-photo/')));
   let artOk=false,artDetail='no BharatDrip model photo';
-  const sample=modelled[0]?.imageUrls?.find(u=>String(u).includes('/api/fashion-photo/'));
+  const sample=modelled[0]?.imageUrl;
   if(sample){const art=await fetch(sample,{signal:AbortSignal.timeout(30000)});const ct=(art.headers.get('content-type')||'').split(';')[0];const bytes=art.ok?(await art.arrayBuffer()).byteLength:0;artOk=art.ok&&/^image\/(?:png|jpeg|webp)$/i.test(ct)&&bytes>10000;artDetail=`HTTP ${art.status}; type=${ct}; bytes=${bytes}; ${sample}`;}
-  gate('GATE 6 BharatDrip model media live',bharatDrip.length>=4&&modelled.length>=1&&artOk?'PASS':'FAIL',`bharatDrip=${bharatDrip.length}; modelled=${modelled.length}; ${artDetail}`);
+  const everyVisibleModelReady=bharatDrip.length>=1&&modelled.length===bharatDrip.length;
+  gate('GATE 6 BharatDrip model media live',everyVisibleModelReady&&artOk?'PASS':'FAIL',`bharatDrip=${bharatDrip.length}; modelled=${modelled.length}; ${artDetail}`);
  }catch(e){gate('GATE 3 Storefront/PostgreSQL','FAIL',String(e));gate('GATE 4 Storefront privacy','FAIL',String(e));gate('GATE 5 Category integrity','FAIL',String(e));gate('GATE 6 BharatDrip model media live','FAIL',String(e));}
  gate('GATE 7 Automation auth',TOKEN?'PASS':'FAIL',TOKEN?'automation token supplied to CI':'BHARATSHOP_AUTOMATION_TOKEN missing');
  try{const r=await req('/api/automation/source-verify');gate('GATE 8 Source verifier',r.r.status===200&&r.data?.status==='ready'?'PASS':'FAIL',`HTTP ${r.r.status}; status=${r.data?.status}`);}catch(e){gate('GATE 8 Source verifier','FAIL',String(e));}
