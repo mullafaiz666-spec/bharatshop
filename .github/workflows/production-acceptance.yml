@@ -30,10 +30,36 @@ jobs:
             code=$(curl -sS -o /tmp/health.json -w '%{http_code}' --max-time 20 "$BHARATSHOP_URL/api/health" || true)
             revision=$(node -e "try{const d=require('/tmp/health.json');process.stdout.write(String(d.revision||''))}catch{}")
             echo "shallow health HTTP=$code revision=$revision expected=$GITHUB_SHA"
-            if [ "$code" = "200" ] && [ "$revision" = "$GITHUB_SHA" ]; then exit 0; fi
+            if [ "$code" = "200" ] && [ "$revision" = "$GITHUB_SHA" ]; then break; fi
+            if [ "$i" = "42" ]; then
+              echo "Render did not expose the exact commit $GITHUB_SHA within the acceptance wait window"
+              exit 1
+            fi
             sleep 10
           done
-          echo "Render did not expose the exact commit $GITHUB_SHA within the acceptance wait window"
+
+      - name: Wait for dependent providers and Gemma model
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 18); do
+            code=$(curl -sS -o /tmp/deep-health.json -w '%{http_code}' --max-time 45 "$BHARATSHOP_URL/api/health?deep=1" || true)
+            state=$(node - <<'NODE'
+          const fs=require('fs');
+          try{
+            const d=JSON.parse(fs.readFileSync('/tmp/deep-health.json','utf8'));
+            const r=d.readiness||{};
+            const ready=Boolean(r.postgres?.ready&&r.ai?.ready&&r.ai?.modelReady&&r.vision?.ready&&r.searxng?.ready);
+            process.stdout.write(JSON.stringify({ready,postgres:r.postgres?.ready===true,ai:r.ai?.ready===true,modelReady:r.ai?.modelReady===true,vision:r.vision?.ready===true,searxng:r.searxng?.ready===true,reason:r.ai?.reason||''}));
+          }catch{process.stdout.write(JSON.stringify({ready:false,parseError:true}));}
+          NODE
+            )
+            echo "deep health HTTP=$code $state"
+            ready=$(printf '%s' "$state" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{process.stdout.write(JSON.parse(s).ready?'1':'0')}catch{process.stdout.write('0')}})")
+            if [ "$code" = "200" ] && [ "$ready" = "1" ]; then exit 0; fi
+            sleep 10
+          done
+          echo "Dependent providers did not become fully ready; refusing to run a false-negative acceptance pass"
+          cat /tmp/deep-health.json || true
           exit 1
 
       - name: Prepare operational live catalog
