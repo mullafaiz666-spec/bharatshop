@@ -48,7 +48,7 @@ jobs:
           curl --silent --show-error --fail-with-body --max-time 300 -X POST "$BHARATSHOP_URL/api/automation/ceo-delegation" "${AUTH[@]}" --data '{}' | tee /tmp/ceo-delegation.json
 
       - name: Run strict live production acceptance
-        run: node scripts/production-acceptance-v3.mjs
+        run: node scripts/production-acceptance-v4.mjs
 
       - name: Verify zero-budget marketing surfaces
         run: node scripts/marketing-acceptance.mjs
