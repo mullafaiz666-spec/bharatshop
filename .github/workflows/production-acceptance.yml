@@ -49,3 +49,6 @@ jobs:
 
       - name: Run strict live production acceptance
         run: node scripts/production-acceptance-v3.mjs
+
+      - name: Verify zero-budget marketing surfaces
+        run: node scripts/marketing-acceptance.mjs
