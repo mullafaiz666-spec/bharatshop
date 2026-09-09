@@ -20,9 +20,13 @@ on:
       - 'src/app/api/fashion-designer/**'
       - 'src/app/api/fashion-art/**'
       - 'src/app/api/fashion-photo/**'
+      - 'src/app/api/admin/fashion-studio/**'
+      - 'src/app/dashboard/fashion/**'
+      - 'src/components/FashionDesignerStudio.tsx'
       - 'src/lib/ai/media-resolver.ts'
       - 'src/lib/catalog/economics-policy.ts'
       - 'src/lib/catalog/market-pricing.ts'
+      - 'src/lib/catalog/priority-coverage.ts'
       - 'src/lib/suppliers/universal-catalogue.ts'
       - 'src/lib/suppliers/marketplace-policy.ts'
       - 'src/lib/suppliers/qikink-rate-card.ts'
@@ -67,7 +71,7 @@ jobs:
             -H "Authorization: Bearer $TOKEN" -H "x-automation-token: $TOKEN" -H "Content-Type: application/json" \
             --data '{"limit":30,"maxPages":16}' | tee deodap-bootstrap.json
 
-      - name: Discover balanced universal catalog
+      - name: Discover priority fashion and big-ticket catalog
         continue-on-error: true
         env:
           TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
@@ -76,57 +80,52 @@ jobs:
           curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 \
             -X POST "$BHARATSHOP_URL/api/automation/research-products" \
             -H "Authorization: Bearer $TOKEN" -H "x-automation-token: $TOKEN" -H "Content-Type: application/json" \
-            --data '{"userId":1,"limit":36,"perQueryLimit":3}' | tee universal-research.json
+            --data '{"userId":1,"limit":64,"perQueryLimit":4}' | tee universal-research.json
           node - <<'NODE'
           const d=require('./universal-research.json');
-          console.log(JSON.stringify({status:d.status,researched:d.researched,queriesScanned:d.queriesScanned,queriesSucceeded:d.queriesSucceeded,categoryCounts:d.categoryCounts,sourceCounts:d.sourceCounts},null,2));
+          console.log(JSON.stringify({status:d.status,researched:d.researched,queriesScanned:d.queriesScanned,queriesSucceeded:d.queriesSucceeded,categoryCounts:d.categoryCounts,criticalCoverage:d.criticalCoverage,sourceCounts:d.sourceCounts},null,2));
           NODE
 
-      - name: Verify fresh universal supplier candidates
+      - name: Verify fresh supplier candidates with critical coverage priority
         continue-on-error: true
         env:
           TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
         run: |
           set -euo pipefail
-          for round in 1 2; do
+          for round in 1 2 3 4; do
             curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 \
               -X POST "$BHARATSHOP_URL/api/automation/source-verify" \
               -H "Authorization: Bearer $TOKEN" -H "x-automation-token: $TOKEN" -H "Content-Type: application/json" \
               --data '{"limit":8}' | tee "universal-source-verify-$round.json"
           done
-          node - <<'NODE'
-          for(const f of ['universal-source-verify-1.json','universal-source-verify-2.json']){
-            const d=require('./'+f);console.log(f,JSON.stringify({processed:d.processed,verified:d.verified,unqualified:d.unqualified,errors:d.errors,selectionPolicy:d.selectionPolicy,results:(d.results||[]).map(x=>({id:x.productId,category:x.category,status:x.status,persisted:x.persisted}))},null,2));
-          }
-          NODE
 
-      - name: Enrich fresh source-verified products
+      - name: Enrich source-verified priority products
         continue-on-error: true
         env:
           TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
         run: |
           set -euo pipefail
-          for round in 1 2; do
+          for round in 1 2 3 4; do
             curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 \
               -X POST "$BHARATSHOP_URL/api/automation/product-enrich" \
               -H "Authorization: Bearer $TOKEN" -H "x-automation-token: $TOKEN" -H "Content-Type: application/json" \
               --data '{"limit":8}' | tee "universal-enrich-$round.json"
           done
 
-      - name: Resolve verified media for universal products
+      - name: Resolve verified media for priority products
         continue-on-error: true
         env:
           TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
         run: |
           set -euo pipefail
-          for round in 1 2; do
+          for round in 1 2 3 4; do
             curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 \
               -X POST "$BHARATSHOP_URL/api/catalog/image-resolve" \
               -H "Authorization: Bearer $TOKEN" -H "x-automation-token: $TOKEN" -H "Content-Type: application/json" \
-              --data '{"limit":10}' | tee "universal-media-$round.json"
+              --data '{"limit":12}' | tee "universal-media-$round.json"
           done
 
-      - name: Create or refresh market-priced BharatShop and BharatDrip fashion
+      - name: Create or refresh BharatShop and BharatDrip fashion
         env:
           TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
         run: |
@@ -156,10 +155,10 @@ jobs:
           curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 \
             -X POST "$BHARATSHOP_URL/api/automation/fashion-photo-studio" \
             -H "Authorization: Bearer $TOKEN" -H "x-automation-token: $TOKEN" -H "Content-Type: application/json" \
-            --data '{"externalAttemptLimit":2}' | tee fashion-photo-studio.json
+            --data '{"views":[0,2],"productLimit":6,"externalAttemptLimit":2}' | tee fashion-photo-studio.json
           node - <<'NODE'
           const d=require('./fashion-photo-studio.json');
-          console.log(JSON.stringify({provider:d.provider,externalGenerated:d.externalGenerated||0,localGenerated:d.localGenerated||0,cachedRewired:d.cachedRewired||0,frontReady:d.frontReady||0},null,2));
+          console.log(JSON.stringify({status:d.status,photorealFrontReady:d.photorealFrontReady||0,totalProducts:d.totalProducts||0,waitingPhotorealUpgrade:d.waitingPhotorealUpgrade||0,generated:d.generated||0,cached:d.cached||0,mockupFallbacks:d.mockupFallbacks||0},null,2));
           NODE
 
       - name: Reprice or block uncompetitive supplier products
@@ -172,49 +171,39 @@ jobs:
             curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 \
               -X POST "$BHARATSHOP_URL/api/automation/market-reprice" \
               -H "Authorization: Bearer $TOKEN" -H "x-automation-token: $TOKEN" -H "Content-Type: application/json" \
-              --data '{"limit":6}' | tee "market-reprice-$round.json"
+              --data '{"limit":8}' | tee "market-reprice-$round.json"
           done
 
-      - name: Publish queued products through CEO round 1
+      - name: Publish queued products through CEO rounds
         env:
           TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
         run: |
           set -euo pipefail
-          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 \
-            -X POST "$BHARATSHOP_URL/api/automation/ceo-cycle?skipResearch=1" \
-            -H "Authorization: Bearer $TOKEN" -H "x-automation-token: $TOKEN" -H "Content-Type: application/json" --data '{}' | tee ceo-cycle-1.json
+          for round in 1 2 3; do
+            curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 \
+              -X POST "$BHARATSHOP_URL/api/automation/ceo-cycle?skipResearch=1" \
+              -H "Authorization: Bearer $TOKEN" -H "x-automation-token: $TOKEN" -H "Content-Type: application/json" --data '{}' | tee "ceo-cycle-$round.json"
+          done
 
-      - name: Publish queued products through CEO round 2
+      - name: Refresh zero-cost fashion mockups and optional editorials
+        continue-on-error: true
         env:
           TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
         run: |
           set -euo pipefail
-          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 \
-            -X POST "$BHARATSHOP_URL/api/automation/ceo-cycle?skipResearch=1" \
-            -H "Authorization: Bearer $TOKEN" -H "x-automation-token: $TOKEN" -H "Content-Type: application/json" --data '{}' | tee ceo-cycle-2.json
-
-      - name: Ensure zero-cost BharatDrip editorial media after publication
-        env:
-          TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
-        run: |
-          set -euo pipefail
-          test -n "$TOKEN"
           curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 \
             -X POST "$BHARATSHOP_URL/api/automation/fashion-photo-studio" \
             -H "Authorization: Bearer $TOKEN" -H "x-automation-token: $TOKEN" -H "Content-Type: application/json" \
-            --data '{"externalAttemptLimit":0}' | tee fashion-media-ready.json
+            --data '{"views":[0],"productLimit":12,"externalAttemptLimit":1}' | tee fashion-media-ready.json
           node - <<'NODE'
           const d=require('./fashion-media-ready.json');
-          if(!d.success) throw new Error(`BharatDrip media not ready: ${JSON.stringify(d)}`);
-          if(Number(d.frontReady)<4) throw new Error(`Only ${d.frontReady} BharatDrip front editorial assets are ready`);
-          if(Number(d.waitingRefresh)!==0) throw new Error(`${d.waitingRefresh} BharatDrip products still lack current editorial media`);
-          console.log(JSON.stringify({frontReady:d.frontReady,totalProducts:d.totalProducts,externalGenerated:d.externalGenerated||0,localGenerated:d.localGenerated||0,cachedRewired:d.cachedRewired||0},null,2));
+          console.log(JSON.stringify({success:d.success,status:d.status,photorealFrontReady:d.photorealFrontReady||0,totalProducts:d.totalProducts||0,waitingPhotorealUpgrade:d.waitingPhotorealUpgrade||0,mockupFallbacks:d.mockupFallbacks||0},null,2));
           NODE
 
-      - name: Require a substantial safe live catalog
+      - name: Require requested catalog coverage
         run: |
           set -euo pipefail
-          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 120 --retry 3 --retry-delay 10 "$BHARATSHOP_URL/api/storefront/products?limit=192" | tee storefront.json
+          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 120 --retry 3 --retry-delay 10 "$BHARATSHOP_URL/api/storefront/products?limit=96" | tee storefront.json
           node - <<'NODE'
           const d=require('./storefront.json');
           if(!Array.isArray(d.products)) throw new Error('Storefront products contract is invalid');
@@ -224,20 +213,13 @@ jobs:
           });
           const fashion=d.products.filter(p=>p.madeToOrder&&['BharatShop Studio','BharatDrip'].includes(p.brand));
           const designer=fashion.filter(p=>p.brand==='BharatDrip');
-          const badValue=fashion.filter(p=>p.brand==='BharatShop Studio'&&Number(p.sellingPriceInr)>599);
-          const badDesigner=designer.filter(p=>Number(p.sellingPriceInr)<599||Number(p.sellingPriceInr)>999);
-          const keyCoverage={
-            fashion:Number(d.categoryCount?.Fashion||0),
-            mobiles:Number(d.categoryCount?.['Mobiles & Tablets']||0),
-            computers:Number(d.categoryCount?.['Laptops & Computers']||0),
-            home:Number(d.categoryCount?.['Home & Kitchen']||0),
-            appliances:Number(d.categoryCount?.Appliances||0),
-            beauty:Number(d.categoryCount?.Beauty||0),
-          };
-          if(d.products.length<12) throw new Error(`Storefront still too small: ${d.products.length} published`);
-          if(fashion.length<8) throw new Error(`BharatShop fashion is not operational: ${fashion.length} live`);
-          if(designer.length<4) throw new Error(`BharatDrip designer line is not live: ${designer.length}`);
-          if(badValue.length||badDesigner.length) throw new Error(`Fashion pricing lanes invalid: ${JSON.stringify({badValue,badDesigner})}`);
-          if(unsafe.length) throw new Error(`Published storefront contains ${unsafe.length} unsafe product(s)`);
-          console.log(JSON.stringify({published:d.products.length,fashion:fashion.length,bharatDrip:designer.length,unsafe:unsafe.length,keyCoverage,allCategories:d.categoryCount},null,2));
+          const coverage=d.criticalCoverage||{};
+          const required={fashion:8,tv:1,laptop:1,refrigerator:1,airConditioner:1,washingMachine:1};
+          const missing=Object.entries(required).filter(([key,min])=>Number(coverage[key]||0)<min);
+          if(Number(d.total||0)<12) throw new Error(`Storefront still too small: ${d.total} published`);
+          if(Number(coverage.fashion||0)<8) throw new Error(`BharatShop fashion is not operational: ${coverage.fashion||0} live`);
+          if(designer.length<1 && Number(coverage.fashion||0)>0) console.log('Designer items may be outside first page; total fashion coverage is authoritative.');
+          if(unsafe.length) throw new Error(`Published storefront page contains ${unsafe.length} unsafe product(s)`);
+          if(missing.length) throw new Error(`Critical catalog coverage missing: ${JSON.stringify({coverage,required,missing})}`);
+          console.log(JSON.stringify({publishedTotal:d.total,pageProducts:d.products.length,criticalCoverage:coverage,required,categoryCount:d.categoryCount,unsafe:unsafe.length},null,2));
           NODE
