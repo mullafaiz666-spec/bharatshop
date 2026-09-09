@@ -29,14 +29,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Wait for live service
+      - name: Wait for exact live revision
         run: |
           set -euo pipefail
-          for i in $(seq 1 36); do
+          for i in $(seq 1 42); do
             code=$(curl -sS -o /tmp/h.json -w '%{http_code}' --max-time 20 "$BHARATSHOP_URL/api/health" || true)
-            if [ "$code" = "200" ]; then exit 0; fi
+            revision=$(node -e "try{const d=require('/tmp/h.json');process.stdout.write(String(d.revision||''))}catch{}")
+            echo "health=$code revision=$revision expected=$GITHUB_SHA"
+            if [ "$code" = "200" ] && [ "$revision" = "$GITHUB_SHA" ]; then exit 0; fi
             sleep 10
           done
+          echo "Render did not expose the exact fashion workflow revision"
           exit 1
 
       - name: Create original Qikink fashion
