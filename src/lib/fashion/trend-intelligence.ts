@@ -30,17 +30,25 @@ const TREND_QUERIES=[
   "Etsy embroidered Japanese streetwear hoodie",
   "Etsy Y2K dark graphic streetwear India",
 ] as const;
+const TREND_QUERY_BATCH_SIZE=2;
+const TREND_ROTATION_MS=4*60*60*1000;
 
 const IP_TERMS=/\b(?:naruto|itachi|uchiha|jujutsu|gojo|sukuna|frieren|berserk|guts|pokemon|pikachu|levi|attack on titan|one piece|luffy|dragon ball|demon slayer|tanjiro|marvel|dc comics|nike|air force|adidas|supreme)\b/gi;
 const DIGITAL_TERMS=/\b(?:digital download|png bundle|svg bundle|eps bundle|design bundle|mega bundle|printable)\b/i;
 
 function clean(value:unknown){return String(value||"").replace(IP_TERMS,"[licensed-reference-removed]").replace(/\s+/g," ").trim();}
 function priceOf(item:any){const n=Number(item?.extracted_price);if(Number.isFinite(n)&&n>0)return n;const m=String(item?.price||item?.snippet||"").replace(/,/g,"").match(/(?:₹|INR|Rs\.?\s*)(\d+(?:\.\d+)?)/i);return m?Number(m[1]):null;}
+function trendQueryBatch(now=Date.now()){
+  const slot=Math.floor(now/TREND_ROTATION_MS);
+  const start=(slot*TREND_QUERY_BATCH_SIZE)%TREND_QUERIES.length;
+  return Array.from({length:Math.min(TREND_QUERY_BATCH_SIZE,TREND_QUERIES.length)},(_,i)=>TREND_QUERIES[(start+i)%TREND_QUERIES.length]);
+}
 
 export async function scanFashionMarketplaceTrends(){
   const signals:FashionTrendSignal[]=[];
   const errors:Array<{query:string;error:string}>=[];
-  for(const query of TREND_QUERIES){
+  const queries=trendQueryBatch();
+  for(const query of queries){
     try{
       const data=await serpSearch(query,"google_shopping");
       const rows=Array.isArray(data.shopping_results)?data.shopping_results:[];
@@ -52,7 +60,7 @@ export async function scanFashionMarketplaceTrends(){
       }
     }catch(error){errors.push({query,error:error instanceof Error?error.message:String(error)});}
   }
-  return{signals:signals.slice(0,32),errors,queries:TREND_QUERIES};
+  return{signals:signals.slice(0,16),errors,queries,queryPoolSize:TREND_QUERIES.length,queryBatchSize:TREND_QUERY_BATCH_SIZE,rotationHours:4};
 }
 
 const FALLBACK_DIRECTIONS:FashionTrendDirection[]=[
@@ -74,8 +82,8 @@ export async function fashionTrendDirections(){
       {timeoutMs:10000,maxTokens:1100},
     );
     const directions=Array.isArray(ai?.directions)?ai.directions.slice(0,8).map((x:any)=>({trendName:clean(x?.trendName),garment:clean(x?.garment),silhouette:clean(x?.silhouette),finish:clean(x?.finish),placement:clean(x?.placement),motif:clean(x?.motif),palette:Array.isArray(x?.palette)?x.palette.map(clean).filter(Boolean).slice(0,5):[],brief:clean(x?.brief)})).filter((x:any)=>x.trendName&&x.brief):[];
-    return{status:"LIVE_TRENDS",summary:clean(ai?.summary)||"Marketplace trend signals converted into original BharatDrip directions.",directions:directions.length?directions:FALLBACK_DIRECTIONS,signals:scan.signals,errors:scan.errors,ipPolicy:"TREND_ONLY_NO_COPY_NO_LICENSED_IP",digitalBundlePolicy:"SIGNAL_ONLY_NEVER_IMPORT_AS_ARTWORK"};
+    return{status:"LIVE_TRENDS",summary:clean(ai?.summary)||"Marketplace trend signals converted into original BharatDrip directions.",directions:directions.length?directions:FALLBACK_DIRECTIONS,signals:scan.signals,errors:scan.errors,queries:scan.queries,queryPoolSize:scan.queryPoolSize,queryBatchSize:scan.queryBatchSize,rotationHours:scan.rotationHours,ipPolicy:"TREND_ONLY_NO_COPY_NO_LICENSED_IP",digitalBundlePolicy:"SIGNAL_ONLY_NEVER_IMPORT_AS_ARTWORK"};
   }catch(error){
-    return{status:"DETERMINISTIC_TRENDS",summary:"Using the safe original-streetwear trend fallback while live trend synthesis is unavailable.",directions:FALLBACK_DIRECTIONS,signals:scan.signals,errors:[...scan.errors,{query:"local-gemma",error:error instanceof Error?error.message:String(error)}],ipPolicy:"TREND_ONLY_NO_COPY_NO_LICENSED_IP",digitalBundlePolicy:"SIGNAL_ONLY_NEVER_IMPORT_AS_ARTWORK"};
+    return{status:"DETERMINISTIC_TRENDS",summary:"Using the safe original-streetwear trend fallback while live trend synthesis is unavailable.",directions:FALLBACK_DIRECTIONS,signals:scan.signals,errors:[...scan.errors,{query:"local-gemma",error:error instanceof Error?error.message:String(error)}],queries:scan.queries,queryPoolSize:scan.queryPoolSize,queryBatchSize:scan.queryBatchSize,rotationHours:scan.rotationHours,ipPolicy:"TREND_ONLY_NO_COPY_NO_LICENSED_IP",digitalBundlePolicy:"SIGNAL_ONLY_NEVER_IMPORT_AS_ARTWORK"};
   }
 }
