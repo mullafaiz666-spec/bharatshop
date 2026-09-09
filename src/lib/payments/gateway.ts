@@ -7,13 +7,26 @@ export function safeSignatureEqual(expected: string, supplied: string) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-export function gatewayMode() { return process.env.PAYMENT_MODE === "live" ? "live" : "test"; }
+export function cashfreeCredentials() {
+  return {
+    clientId: process.env.CASHFREE_CLIENT_ID || process.env.CASHFREE_APP_ID,
+    clientSecret: process.env.CASHFREE_CLIENT_SECRET || process.env.CASHFREE_SECRET_KEY,
+  };
+}
+
+export function gatewayMode() {
+  const mode = String(process.env.PAYMENT_MODE || process.env.CASHFREE_ENV || "").trim().toLowerCase();
+  return ["live", "production", "prod"].includes(mode) ? "live" : "test";
+}
+
+export function cashfreeBaseUrl() {
+  return gatewayMode() === "live" ? "https://api.cashfree.com/pg" : "https://sandbox.cashfree.com/pg";
+}
 
 export async function fetchCashfreeOrder(orderId: string) {
-  const clientId = process.env.CASHFREE_CLIENT_ID, clientSecret = process.env.CASHFREE_CLIENT_SECRET;
+  const { clientId, clientSecret } = cashfreeCredentials();
   if (!clientId || !clientSecret) throw new Error("Cashfree is not configured");
-  const base = gatewayMode() === "live" ? "https://api.cashfree.com/pg" : "https://sandbox.cashfree.com/pg";
-  const response = await fetch(`${base}/orders/${encodeURIComponent(orderId)}`, {
+  const response = await fetch(`${cashfreeBaseUrl()}/orders/${encodeURIComponent(orderId)}`, {
     headers: { "x-client-id": clientId, "x-client-secret": clientSecret, "x-api-version": process.env.CASHFREE_API_VERSION || "2025-01-01" },
     cache: "no-store", signal: AbortSignal.timeout(15000),
   });
@@ -35,11 +48,9 @@ export async function createRazorpayOrder(input: { amountInr: number; receipt: s
 }
 
 export async function createCashfreeOrder(input: { orderId: string; amountInr: number; customer: { name: string; email: string; phone: string } }) {
-  const clientId = process.env.CASHFREE_CLIENT_ID;
-  const clientSecret = process.env.CASHFREE_CLIENT_SECRET;
+  const { clientId, clientSecret } = cashfreeCredentials();
   if (!clientId || !clientSecret) throw new Error("Cashfree keys are not configured");
-  const base = gatewayMode() === "live" ? "https://api.cashfree.com/pg" : "https://sandbox.cashfree.com/pg";
-  const res = await fetch(`${base}/orders`, { method: "POST", signal: AbortSignal.timeout(15000), headers: { "x-client-id": clientId, "x-client-secret": clientSecret, "x-api-version": process.env.CASHFREE_API_VERSION || "2025-01-01", "Content-Type": "application/json" }, body: JSON.stringify({ order_id: input.orderId, order_amount: Number(input.amountInr.toFixed(2)), order_currency: "INR", customer_details: { customer_id: input.orderId, customer_name: input.customer.name, customer_email: input.customer.email, customer_phone: input.customer.phone }, order_meta: { return_url: `${process.env.PUBLIC_APP_URL || ""}/checkout/success?order_id=${encodeURIComponent(input.orderId)}` } }) });
+  const res = await fetch(`${cashfreeBaseUrl()}/orders`, { method: "POST", signal: AbortSignal.timeout(15000), headers: { "x-client-id": clientId, "x-client-secret": clientSecret, "x-api-version": process.env.CASHFREE_API_VERSION || "2025-01-01", "Content-Type": "application/json" }, body: JSON.stringify({ order_id: input.orderId, order_amount: Number(input.amountInr.toFixed(2)), order_currency: "INR", customer_details: { customer_id: input.orderId, customer_name: input.customer.name, customer_email: input.customer.email, customer_phone: input.customer.phone }, order_meta: { return_url: `${process.env.PUBLIC_APP_URL || ""}/checkout/success?order_id=${encodeURIComponent(input.orderId)}` } }) });
   const data = await res.json();
   if (!res.ok) throw new Error(data?.message || "Cashfree order creation failed");
   return { provider: "cashfree" as const, mode: gatewayMode(), orderId: data.order_id, paymentSessionId: data.payment_session_id };
@@ -53,7 +64,8 @@ export function verifyRazorpayWebhook(rawBody: string, signature: string) {
 }
 
 export function verifyCashfreeWebhook(rawBody: string, timestamp: string, signature: string) {
-  const secret = process.env.CASHFREE_WEBHOOK_SECRET || process.env.CASHFREE_CLIENT_SECRET;
+  const { clientSecret } = cashfreeCredentials();
+  const secret = process.env.CASHFREE_WEBHOOK_SECRET || clientSecret;
   if (!secret || !timestamp || !signature) return false;
   const expected = crypto.createHmac("sha256", secret).update(timestamp + rawBody).digest("base64");
   return safeSignatureEqual(expected, signature);
