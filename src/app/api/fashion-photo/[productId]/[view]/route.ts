@@ -16,7 +16,7 @@ async function ensureTable() {
   )`);
 }
 
-export async function GET(_req: Request, { params }: { params: Promise<{ productId: string; view: string }> }) {
+export async function GET(req: Request, { params }: { params: Promise<{ productId: string; view: string }> }) {
   const { productId, view } = await params;
   const id = Number(productId);
   const v = Number(view);
@@ -31,11 +31,15 @@ export async function GET(_req: Request, { params }: { params: Promise<{ product
   );
   const row = result.rows[0];
   if (!row?.image_bytes) return new Response("Not found", { status: 404 });
+  const style = new URL(req.url).searchParams.get("style") || "legacy";
+  const createdAt = new Date(row.created_at);
   return new Response(row.image_bytes, {
     headers: {
       "Content-Type": String(row.mime_type || "image/webp"),
-      "Cache-Control": "public, max-age=86400, stale-while-revalidate=604800",
+      "Cache-Control": "public, max-age=300, must-revalidate",
+      ...(Number.isNaN(createdAt.getTime()) ? {} : { "Last-Modified": createdAt.toUTCString() }),
       "X-Fashion-Image-Provider": String(row.provider || "editorial-ai"),
+      "X-Fashion-Style": style,
       "X-Content-Type-Options": "nosniff",
     },
   });
