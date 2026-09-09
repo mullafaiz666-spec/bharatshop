@@ -1,6 +1,6 @@
 export type AIMessage = { role: "system" | "user" | "assistant" | "tool"; content: string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>; tool_call_id?: string };
 
-type ProviderOptions = { model?: string; temperature?: number; maxTokens?: number; tools?: any[]; toolChoice?: any };
+type ProviderOptions = { model?: string; temperature?: number; maxTokens?: number; tools?: any[]; toolChoice?: any; timeoutMs?: number };
 
 const baseUrl = () => (process.env.AI_BASE_URL || process.env.LOCAL_AI_BASE_URL || "").replace(/\/+$/, "");
 const apiKey = () => process.env.AI_API_KEY || process.env.LOCAL_AI_API_KEY || "";
@@ -38,7 +38,7 @@ export async function runAI(messages: AIMessage[], options: ProviderOptions = {}
     max_tokens: options.maxTokens ?? 1024,
     stream: false,
     ...(options.tools ? { tools: options.tools, tool_choice: options.toolChoice ?? "auto" } : {}),
-  });
+  }, options.timeoutMs ?? 120000);
 }
 
 export async function runText(messages: AIMessage[], options: ProviderOptions = {}) {
@@ -48,8 +48,8 @@ export async function runText(messages: AIMessage[], options: ProviderOptions = 
   return { content: String(message.content || ""), toolCalls: Array.isArray(message.tool_calls) ? message.tool_calls : [], raw: message };
 }
 
-export async function runStructured<T>(system: string, user: string): Promise<T> {
-  const result = await runText([{ role: "system", content: `${system}\nReturn ONLY valid JSON. No markdown fences.` }, { role: "user", content: user }], { temperature: 0, maxTokens: 2048 });
+export async function runStructured<T>(system: string, user: string, options: Pick<ProviderOptions, "timeoutMs" | "maxTokens"> = {}): Promise<T> {
+  const result = await runText([{ role: "system", content: `${system}\nReturn ONLY valid JSON. No markdown fences.` }, { role: "user", content: user }], { temperature: 0, maxTokens: options.maxTokens ?? 2048, timeoutMs: options.timeoutMs });
   const match = result.content.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
   if (!match) throw new Error("AI provider returned non-JSON output");
   return JSON.parse(match[0]) as T;
