@@ -1,5 +1,6 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
+import { commerceFreshnessBundle, type EvidenceFreshness } from "@/lib/evidence/freshness";
 
 export type CommerceSourceEvidence = {
   checkedAt: string;
@@ -17,6 +18,12 @@ export type CommerceSourceEvidence = {
   shippingVerified: boolean;
   shippingCostInr?: number;
   shippingSignal?: string;
+  freshness?: {
+    price: EvidenceFreshness;
+    availability: EvidenceFreshness;
+    shipping: EvidenceFreshness;
+    productUrl: EvidenceFreshness;
+  };
   error?: string;
 };
 
@@ -128,7 +135,7 @@ async function safeCommerceFetch(initialUrl: string) {
       headers: {
         Accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5",
         "Accept-Language": "en-IN,en;q=0.9",
-        "User-Agent": "Mozilla/5.0 (compatible; BharatShop-Source-Verifier/1.0; +https://bharatshop-9w4a.onrender.com)",
+        "User-Agent": "Mozilla/5.0 (compatible; BharatShop-Source-Verifier/1.1; +https://bharatshop-9w4a.onrender.com)",
       },
     });
     if (![301, 302, 303, 307, 308].includes(response.status)) return { response, finalUrl: current.toString() };
@@ -189,6 +196,7 @@ export async function verifyCommerceSource(url: string, expectedTitle: string, e
       shippingVerified: shipping.verified,
       shippingCostInr: shipping.cost,
       shippingSignal: shipping.signal,
+      freshness: commerceFreshnessBundle(checkedAt),
     };
   } catch (error) {
     return { checkedAt, requestedUrl, reachable: false, titleMatch: false, priceVerified: false, stockVerified: false, shippingVerified: false, error: error instanceof Error ? error.message : String(error) };
