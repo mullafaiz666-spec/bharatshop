@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 
 const agents = [
@@ -26,11 +27,17 @@ export default function AgentStudio() {
   }
 
   return <main style={{ maxWidth: 1100, margin: "0 auto", padding: 32, fontFamily: "system-ui" }}>
-    <h1 style={{ fontSize: 36, marginBottom: 8 }}>BharatShop Agent Studio</h1>
-    <p style={{ opacity: .7, marginBottom: 28 }}>Three purpose-built agents sharing one BharatShop context and tool contract.</p>
+    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+      <div>
+        <h1 style={{ fontSize: 36, marginBottom: 8 }}>BharatShop Agent Studio</h1>
+        <p style={{ opacity: .7, marginBottom: 28 }}>Three purpose-built agents sharing one BharatShop context and tool contract.</p>
+      </div>
+      <Link href="/dashboard/marketing" style={{ textDecoration: "none", background: "#c8ff3d", color: "#0b0c0e", fontWeight: 800, padding: "11px 16px", borderRadius: 10 }}>Open Marketing Cockpit</Link>
+    </div>
     <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 24 }}>
       {agents.map((item) => <button key={item.id} onClick={() => setAgent(item.id)} style={{ textAlign: "left", padding: 18, borderRadius: 14, border: agent === item.id ? "2px solid #111" : "1px solid #ddd", background: "white" }}><strong>{item.title}</strong><div style={{ marginTop: 8, fontSize: 13, opacity: .65 }}>{item.subtitle}</div></button>)}
     </div>
+    {agent === "marketing" && <div style={{ margin: "0 0 18px", padding: 14, borderRadius: 12, background: "#f5ffd8", border: "1px solid #d6ee87", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}><span style={{ fontSize: 13 }}>The Marketing Agent now has a full operational dashboard with campaigns, calendar, live metrics, integrations, assets and reviews.</span><Link href="/dashboard/marketing" style={{ fontWeight: 800, color: "#172000" }}>Open dashboard →</Link></div>}
     <textarea value={objective} onChange={(e) => setObjective(e.target.value)} placeholder="Tell the agent what you want to accomplish…" rows={6} style={{ width: "100%", padding: 16, borderRadius: 14, border: "1px solid #ddd", fontSize: 16, boxSizing: "border-box" }} />
     {agent === "automation" && <label style={{ display: "block", margin: "14px 0" }}><input type="checkbox" checked={approve} onChange={(e) => setApprove(e.target.checked)} /> Allow approved mutating actions to execute</label>}
     <button disabled={busy || !objective.trim()} onClick={run} style={{ marginTop: 14, padding: "12px 20px", borderRadius: 10, border: 0, background: "#111", color: "white" }}>{busy ? "Running…" : "Run agent"}</button>
