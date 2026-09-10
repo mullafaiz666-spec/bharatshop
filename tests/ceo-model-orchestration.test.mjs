@@ -4,20 +4,32 @@ import { readFileSync } from "node:fs";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 
-test("CEO chat is model-led and never impersonates Gemma with a canned fallback", () => {
+test("CEO chat uses the shared multi-step runtime and never impersonates an unavailable model", () => {
   const route = read("src/app/api/ceo-chat/route.ts");
-  assert.match(route, /planWithGemma/);
-  assert.match(route, /gemma-compact-plan-act/);
-  assert.match(route, /Gemma selected a tool outside the agent permission set/);
-  assert.match(route, /no canned CEO answer was substituted/i);
-  assert.match(route, /modelStatus: "live"/);
-  assert.doesNotMatch(route, /function humanFallback/);
-  assert.doesNotMatch(route, /modelStatus:\s*["']human-fallback["']/);
+  const runtime = read("src/lib/agents/runtime.ts");
+  assert.match(route, /runAgentRuntime/);
+  assert.match(runtime, /agent-runtime-v4-plan-tool-observe/);
+  assert.match(runtime, /for \(let step = 1; step <= maxSteps; step\+\+\)/);
+  assert.match(runtime, /tools: nativeTools\(agentId\)/);
+  assert.match(runtime, /delegate_agent/);
+  assert.match(runtime, /agent_chat_messages/);
+  assert.match(runtime, /will not invent an answer/);
+  assert.doesNotMatch(route, /humanFallback/);
 });
 
-test("CEO UI exposes the real Gemma runtime state", () => {
+test("CEO UI exposes multi-step runtime state and persistent session id", () => {
   const ui = read("src/components/CEOChat.tsx");
-  assert.match(ui, /model-driven CEO/);
-  assert.match(ui, /Local Gemma unavailable • no canned fallback/);
+  assert.match(ui, /multi-step agent runtime/);
+  assert.match(ui, /sessionId/);
+  assert.match(ui, /localStorage\.setItem/);
   assert.match(ui, /d\.modelStatus === "live"/);
+});
+
+test("Agent Studio exposes every operational specialist as a conversational agent", () => {
+  const ui = read("src/app/agents/page.tsx");
+  for (const id of ["ceo","source-discovery","source-verification","seller-discovery","listing","marketing","advertising","order-recheck","tracking","learning","automation","web-design"]) {
+    assert.match(ui, new RegExp(id.replace(/-/g, "[-]")));
+  }
+  assert.match(ui, /Verified workflow trace/);
+  assert.match(ui, /\/api\/agents/);
 });
