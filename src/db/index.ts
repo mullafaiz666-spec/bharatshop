@@ -11,9 +11,9 @@ const isTransientConnectionError = (error: unknown) => {
 };
 
 const createPool = (): Pool => {
-  const rawDatabaseUrl = process.env.DATABASE_URL;
+  const rawDatabaseUrl = process.env.DATABASE_URL || process.env.SUPABASE_DB_URL;
   if (!rawDatabaseUrl) {
-    throw new Error("DATABASE_URL is required at runtime");
+    throw new Error("DATABASE_URL or SUPABASE_DB_URL is required at runtime");
   }
 
   const isLocalDatabase = /(?:localhost|127\.0\.0\.1|\.railway\.internal)(?::\d+)?(?:\/|$)/i.test(rawDatabaseUrl);
@@ -22,9 +22,6 @@ const createPool = (): Pool => {
   if (!isLocalDatabase) {
     try {
       const parsed = new URL(rawDatabaseUrl);
-      // Keep credentials and host intact, but make the client-side SSL policy
-      // explicit through the Pool `ssl` option below. This avoids conflicting
-      // pg connection-string SSL options while preserving Render's hostname.
       parsed.searchParams.delete("sslmode");
       parsed.searchParams.delete("sslcert");
       parsed.searchParams.delete("sslkey");
@@ -35,10 +32,11 @@ const createPool = (): Pool => {
     }
   }
 
+  const defaultPoolMax = process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME ? 2 : 5;
   const pool = new Pool({
     connectionString: databaseUrl,
     ssl: isLocalDatabase ? undefined : { rejectUnauthorized: false, minVersion: "TLSv1.2" },
-    max: Number(process.env.DB_POOL_MAX ?? 5),
+    max: Number(process.env.DB_POOL_MAX ?? defaultPoolMax),
     idleTimeoutMillis: Number(process.env.DB_IDLE_TIMEOUT_MS ?? 30_000),
     connectionTimeoutMillis: Number(process.env.DB_CONNECTION_TIMEOUT_MS ?? 15_000),
     maxUses: Number(process.env.DB_MAX_USES ?? 1000),
