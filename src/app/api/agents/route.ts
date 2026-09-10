@@ -1,38 +1,51 @@
 import { NextResponse } from "next/server";
-import { runMarketingAgent } from "@/lib/agents/marketing";
-import { runWebDesignAgent } from "@/lib/agents/web-design";
-import { runAutomationAgent } from "@/lib/agents/automation";
 import { publicAgentContracts } from "@/lib/agents/contracts";
 import { GOOGLE_INTELLIGENCE_POLICY } from "@/lib/agents/live-intelligence";
-import type { AgentName } from "@/lib/agents/types";
+import { agentRuntimeCatalog, runAgentRuntime, type RuntimeMessage } from "@/lib/agents/runtime";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json() as { agent?: AgentName; objective?: string; context?: Record<string, unknown>; approveActions?: boolean };
-    if (!body.agent || !body.objective?.trim()) return NextResponse.json({ error: "agent and objective are required" }, { status: 400 });
-    const context = body.context ?? {};
-    const result = body.agent === "marketing" ? await runMarketingAgent(body.objective, context)
-      : body.agent === "web-design" ? await runWebDesignAgent(body.objective, context)
-      : await runAutomationAgent(body.objective, context, body.approveActions === true);
-    return NextResponse.json(result);
+    const body = await request.json() as {
+      agent?: string;
+      objective?: string;
+      question?: string;
+      messages?: RuntimeMessage[];
+      history?: RuntimeMessage[];
+      context?: Record<string, unknown>;
+      sessionId?: string;
+      maxSteps?: number;
+    };
+    const objective = String(body.objective || body.question || "").trim();
+    if (!objective) return NextResponse.json({ error: "objective is required" }, { status: 400 });
+
+    const result = await runAgentRuntime({
+      agent: body.agent || "ceo",
+      objective,
+      history: Array.isArray(body.history) ? body.history : Array.isArray(body.messages) ? body.messages : [],
+      context: body.context ?? {},
+      sessionId: body.sessionId,
+      origin: new URL(request.url).origin,
+      maxSteps: body.maxSteps,
+    });
+    return NextResponse.json(result, { status: result.modelStatus === "unavailable" ? 503 : 200 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Agent execution failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: message, code: "AGENT_RUNTIME_FAILED" }, { status: 500 });
   }
 }
 
 export async function GET() {
   return NextResponse.json({
-    suite: "BharatShop Agent Suite v3",
-    promptVersion: "agent-suite-v3-google-evidence",
-    expertiseStandard: "Every AI agent operates under postgraduate/doctoral-level domain-rigor instructions; the CEO uses masters/MBA-level business leadership, strategy, finance and operations standards. These are reasoning-quality standards, not claims of human academic credentials.",
-    intelligence: { provider: "public-google-intelligence", sharedAcrossAgents: true, policy: GOOGLE_INTELLIGENCE_POLICY },
+    suite: "BharatShop Agent Suite v4",
+    promptVersion: "agent-runtime-v4",
+    orchestration: "multi-step plan -> tool -> observe -> continue -> answer, with bounded specialist handoffs",
+    memory: "PostgreSQL session memory with request-history fallback",
+    intelligence: { provider: "local OpenAI-compatible Gemma + verified BharatShop/public evidence tools", sharedAcrossAgents: true, policy: GOOGLE_INTELLIGENCE_POLICY },
     operationalAgents: publicAgentContracts(),
-    workspaceAgents: ["marketing","web-design","automation"],
-    learningLoop: "Fresh public Google market context + BharatShop production outcomes -> specialist reasoning -> evidence-backed recommendation/action -> hard gates -> audit log -> future learning.",
-    rule: "Specialist operational agents execute through their dedicated endpoints; public trend/news context can prioritize work but cannot replace live source verification. Paid spend, supplier purchases, refunds/payouts, credentials and destructive database actions remain approval-gated.",
+    runtimeAgents: agentRuntimeCatalog(),
+    rule: "Every agent is conversational and tool-using. No agent may fabricate execution. Paid spend, supplier purchases, refunds/payouts, credentials and destructive database actions remain human-approval gated.",
   });
 }
