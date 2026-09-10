@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { AGENT_CONTRACTS, type OperationalAgentId } from "@/lib/agents/contracts";
-import { createCompanyGoal, queueAgentWork, recordSharedEvent } from "@/lib/agents/company-state";
+import { ensureCompanyTables, recordSharedEvent, type AgentWorkItem, type CompanyGoal } from "@/lib/agents/company-state";
+import { pool } from "@/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -44,54 +45,86 @@ function authorized(request: Request) {
   return supplied === expected;
 }
 
+async function ensureDailyGoal(today: string, objective: string) {
+  await ensureCompanyTables();
+  const goalId = `free-stack-daily-${today}`;
+  const inserted = await pool.query<CompanyGoal>(
+    `INSERT INTO agent_company_goals(id,title,objective,status,priority,created_by)
+     VALUES($1,$2,$3,'ACTIVE',85,NULL)
+     ON CONFLICT(id) DO NOTHING
+     RETURNING *`,
+    [goalId, `BharatShop daily growth cycle ${today}`, objective],
+  );
+  if (inserted.rows[0]) return { goal: inserted.rows[0], created: true };
+  const existing = await pool.query<CompanyGoal>(`SELECT * FROM agent_company_goals WHERE id=$1 LIMIT 1`, [goalId]);
+  if (!existing.rows[0]) throw new Error("Unable to recover idempotent daily goal");
+  return { goal: existing.rows[0], created: false };
+}
+
+async function ensureDailyWork(goalId: string, today: string, objective: string, plan: (typeof DAILY_PLAN)[number]) {
+  const workId = `free-stack-daily-${today}-${plan.agentId}`;
+  const input = { scheduledFreeStackCycle: true, scheduledDate: today };
+  const inserted = await pool.query<AgentWorkItem>(
+    `INSERT INTO agent_work_items(id,goal_id,agent_id,title,objective,status,priority,input,created_by)
+     VALUES($1,$2,$3,$4,$5,'QUEUED',$6,$7::jsonb,NULL)
+     ON CONFLICT(id) DO NOTHING
+     RETURNING *`,
+    [
+      workId,
+      goalId,
+      plan.agentId,
+      plan.title,
+      `${objective}\n\nSpecialist assignment: ${plan.objective}`,
+      plan.priority,
+      JSON.stringify(input),
+    ],
+  );
+  if (inserted.rows[0]) return { item: inserted.rows[0], created: true };
+  const existing = await pool.query<AgentWorkItem>(`SELECT * FROM agent_work_items WHERE id=$1 LIMIT 1`, [workId]);
+  if (!existing.rows[0]) throw new Error(`Unable to recover idempotent work item ${workId}`);
+  return { item: existing.rows[0], created: false };
+}
+
 export async function POST(request: Request) {
   if (!authorized(request)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   try {
     const today = new Date().toISOString().slice(0, 10);
     const objective = `BharatShop daily growth cycle ${today}: improve profitable, truthful ecommerce growth using current evidence and the shared company database. Keep paid spend, supplier purchase/payment, refunds/payouts, credentials and destructive database actions human-approved.`;
-    const goal = await createCompanyGoal({
-      title: `BharatShop daily growth cycle ${today}`,
-      objective,
-      createdBy: null,
-      priority: 85,
-    });
+    const goalResult = await ensureDailyGoal(today, objective);
 
-    const queued = [];
+    const ensured = [];
     for (const plan of DAILY_PLAN) {
-      queued.push(await queueAgentWork({
-        goalId: goal.id,
-        agentId: plan.agentId,
-        title: plan.title,
-        objective: `${objective}\n\nSpecialist assignment: ${plan.objective}`,
-        priority: plan.priority,
-        createdBy: null,
-        data: { scheduledFreeStackCycle: true, scheduledDate: today },
-      }));
+      ensured.push(await ensureDailyWork(goalResult.goal.id, today, objective, plan));
     }
+    const newlyQueued = ensured.filter((entry) => entry.created).map((entry) => entry.item);
 
-    await recordSharedEvent({
-      goalId: goal.id,
-      agentId: "ceo",
-      eventType: "FREE_STACK_DAILY_WORK_QUEUED",
-      status: "READY",
-      summary: `${queued.length} bounded daily specialist tasks were queued for later execution on the shared PostgreSQL work bus.`,
-      evidence: {
-        scheduledDate: today,
-        agents: queued.map((item) => item.agent_id),
-        approvalGates: ["paid spend", "supplier purchase/payment", "refunds/payouts", "credentials/secrets", "destructive database actions"],
-      },
-    });
+    if (newlyQueued.length) {
+      await recordSharedEvent({
+        goalId: goalResult.goal.id,
+        agentId: "ceo",
+        eventType: "FREE_STACK_DAILY_WORK_QUEUED",
+        status: "READY",
+        summary: `${newlyQueued.length} bounded daily specialist task(s) were queued for later execution on the shared PostgreSQL work bus.`,
+        evidence: {
+          scheduledDate: today,
+          agents: newlyQueued.map((item) => item.agent_id),
+          approvalGates: ["paid spend", "supplier purchase/payment", "refunds/payouts", "credentials/secrets", "destructive database actions"],
+        },
+      });
+    }
 
     return NextResponse.json({
       ok: true,
-      status: "QUEUED",
-      goal: { id: goal.id, title: goal.title },
-      queued: queued.map((item) => ({ id: item.id, agentId: item.agent_id, title: item.title, priority: item.priority })),
+      status: newlyQueued.length ? "QUEUED" : "ALREADY_QUEUED",
+      idempotent: true,
+      goal: { id: goalResult.goal.id, title: goalResult.goal.title, created: goalResult.created },
+      queued: ensured.map(({ item, created }) => ({ id: item.id, agentId: item.agent_id, title: item.title, priority: item.priority, created, status: item.status })),
+      newlyQueuedCount: newlyQueued.length,
       execution: "Deferred to the existing authenticated company-cycle worker/runtime.",
       policy: "This scheduler never activates paid spend, purchases suppliers, moves money, exposes credentials or performs destructive database actions.",
       queuedAt: new Date().toISOString(),
-    }, { status: 201 });
+    }, { status: newlyQueued.length ? 201 : 200 });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Free-stack schedule failed" }, { status: 500 });
   }
@@ -101,7 +134,8 @@ export async function GET() {
   return NextResponse.json({
     status: "READY",
     mode: "queue-only",
+    idempotent: true,
     agents: DAILY_PLAN.map((item) => ({ id: item.agentId, name: AGENT_CONTRACTS[item.agentId].name, title: item.title })),
-    rule: "POST requires the automation token. Scheduling queues work only; execution remains in the company agent runtime.",
+    rule: "POST requires the automation token. Scheduling queues at most one work item per configured agent per UTC date; execution remains in the company agent runtime.",
   });
 }
