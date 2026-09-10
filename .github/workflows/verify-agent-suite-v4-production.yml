@@ -9,36 +9,36 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 3
     steps:
       - name: Probe live BharatShop Agent Suite v4
         env:
           HEALTH_URL: https://bharatshop-9w4a.onrender.com/api/agents/health?deep=1
         run: |
-          set -euo pipefail
-          last=''
-          for attempt in $(seq 1 18); do
-            echo "Production readiness attempt $attempt"
-            last=$(curl --silent --show-error --location --connect-timeout 15 --max-time 80 "$HEALTH_URL" || true)
-            printf '%s' "$last" > /tmp/readiness.json
-            if node <<'NODE'
+          set -uo pipefail
+          http=$(curl --silent --show-error --location --connect-timeout 15 --max-time 70 --output /tmp/readiness.json --write-out '%{http_code}' "$HEALTH_URL" || true)
+          echo "HTTP_STATUS=$http"
+          echo "READINESS_PAYLOAD_BEGIN"
+          cat /tmp/readiness.json 2>/dev/null || true
+          echo
+          echo "READINESS_PAYLOAD_END"
+          node <<'NODE'
           const fs = require('fs');
           let data;
           try { data = JSON.parse(fs.readFileSync('/tmp/readiness.json', 'utf8')); }
-          catch { process.exit(2); }
-          console.log(JSON.stringify({suite:data.suite,verificationMode:data.verificationMode,summary:data.summary,infrastructure:data.infrastructure,agents:(data.agents||[]).map(a=>({id:a.id,status:a.status,ready:a.ready,reason:a.reason,dependencyChecks:a.dependencyChecks,runtimeTools:a.runtimeTools}))}, null, 2));
+          catch (error) { console.error('Invalid readiness JSON:', error.message); process.exit(2); }
+          const report = {
+            suite: data.suite,
+            verificationMode: data.verificationMode,
+            summary: data.summary,
+            infrastructure: data.infrastructure,
+            agents: (data.agents || []).map(a => ({ id:a.id, status:a.status, ready:a.ready, reason:a.reason, dependencyChecks:a.dependencyChecks, runtimeTools:a.runtimeTools })),
+          };
+          console.log('READINESS_REPORT=' + JSON.stringify(report, null, 2));
           if (data.suite !== 'BharatShop Agent Suite v4') process.exit(3);
           if (data.verificationMode !== 'DEEP_LIVE_DEPENDENCY_PROBE') process.exit(4);
           if (!data.summary || data.summary.total !== 13) process.exit(5);
-          if (data.summary.allReady !== true || data.summary.ready !== 13 || (data.summary.blocked||[]).length !== 0) process.exit(6);
-          if (!(data.agents||[]).every(a => a.ready === true && a.status === 'READY' && Array.isArray(a.runtimeTools) && a.runtimeTools.length > 0)) process.exit(7);
+          if (data.summary.allReady !== true || data.summary.ready !== 13 || (data.summary.blocked || []).length !== 0) process.exit(6);
+          if (!(data.agents || []).every(a => a.ready === true && a.status === 'READY' && Array.isArray(a.runtimeTools) && a.runtimeTools.length > 0)) process.exit(7);
+          console.log('ALL_13_AGENTS_READY=true');
           NODE
-            then
-              echo "ALL_13_AGENTS_READY=true"
-              exit 0
-            fi
-            sleep 15
-          done
-          echo "Production deep readiness did not reach all-ready state. Last payload:"
-          cat /tmp/readiness.json
-          exit 1
