@@ -44,7 +44,8 @@ function effectiveTimeout(timeoutMs: number) {
 }
 
 async function request(path: string, body: unknown, timeoutMs = 120000) {
-  const res = await fetch(providerUrl(path), { method: "POST", headers: headers(), body: JSON.stringify(body), cache: "no-store", signal: AbortSignal.timeout(effectiveTimeout(timeoutMs)) });
+  const effectiveTimeoutMs = effectiveTimeout(timeoutMs);
+  const res = await fetch(providerUrl(path), { method: "POST", headers: headers(), body: JSON.stringify(body), cache: "no-store", signal: AbortSignal.timeout(effectiveTimeoutMs) });
   const text = await res.text();
   let data: any = null; try { data = JSON.parse(text); } catch {}
   if (!res.ok) throw new Error(`AI provider ${res.status}: ${String(data?.error?.message || data?.message || text).slice(0,1200)}`);
@@ -100,12 +101,13 @@ async function requestGemini(messages: AIMessage[], options: ProviderOptions = {
   const toolConfig = geminiToolConfig(options.toolChoice);
   if (toolConfig) body.toolConfig = toolConfig;
 
+  const effectiveTimeoutMs = effectiveTimeout(options.timeoutMs ?? 120_000);
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-goog-api-key": key },
     body: JSON.stringify(body),
     cache: "no-store",
-    signal: AbortSignal.timeout(effectiveTimeout(options.timeoutMs ?? 120_000)),
+    signal: AbortSignal.timeout(effectiveTimeoutMs),
   });
   const text = await res.text();
   let data: any = null; try { data = JSON.parse(text); } catch {}
