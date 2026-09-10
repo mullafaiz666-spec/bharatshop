@@ -19,6 +19,25 @@ export function gatewayMode() {
   return ["live", "production", "prod"].includes(mode) ? "live" : "test";
 }
 
+export function razorpayMode(keyId = process.env.RAZORPAY_KEY_ID || "") {
+  if (keyId.startsWith("rzp_live_")) return "live";
+  if (keyId.startsWith("rzp_test_")) return "test";
+  return "unknown";
+}
+
+export function paymentReturnOrigin() {
+  for (const value of [process.env.PUBLIC_APP_URL, process.env.NEXT_PUBLIC_SITE_URL, process.env.RENDER_EXTERNAL_URL]) {
+    try {
+      if (!value) continue;
+      const url = new URL(value);
+      if (url.protocol !== "https:" || url.username || url.password) continue;
+      if (/^(?:0\.0\.0\.0|127(?:\.\d{1,3}){3}|localhost|\[::1\])$/i.test(url.hostname)) continue;
+      return url.origin;
+    } catch { /* Try the next configured public URL. */ }
+  }
+  return "https://bharatshop-9w4a.onrender.com";
+}
+
 export function cashfreeBaseUrl() {
   return gatewayMode() === "live" ? "https://api.cashfree.com/pg" : "https://sandbox.cashfree.com/pg";
 }
@@ -40,17 +59,19 @@ export async function createRazorpayOrder(input: { amountInr: number; receipt: s
   const keyId = process.env.RAZORPAY_KEY_ID;
   const keySecret = process.env.RAZORPAY_KEY_SECRET;
   if (!keyId || !keySecret) throw new Error("Razorpay keys are not configured");
+  const mode = razorpayMode(keyId);
+  if (mode === "unknown") throw new Error("Razorpay key ID format is invalid");
   const auth = Buffer.from(`${keyId}:${keySecret}`).toString("base64");
   const res = await fetch("https://api.razorpay.com/v1/orders", { method: "POST", signal: AbortSignal.timeout(15000), headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" }, body: JSON.stringify({ amount: Math.round(input.amountInr * 100), currency: "INR", receipt: input.receipt, notes: input.notes || {} }) });
   const data = await res.json();
   if (!res.ok) throw new Error(data?.error?.description || "Razorpay order creation failed");
-  return { provider: "razorpay" as const, mode: gatewayMode(), orderId: data.id, amount: data.amount, currency: data.currency, keyId };
+  return { provider: "razorpay" as const, mode, orderId: data.id, amount: data.amount, currency: data.currency, keyId };
 }
 
 export async function createCashfreeOrder(input: { orderId: string; amountInr: number; customer: { name: string; email: string; phone: string } }) {
   const { clientId, clientSecret } = cashfreeCredentials();
   if (!clientId || !clientSecret) throw new Error("Cashfree keys are not configured");
-  const res = await fetch(`${cashfreeBaseUrl()}/orders`, { method: "POST", signal: AbortSignal.timeout(15000), headers: { "x-client-id": clientId, "x-client-secret": clientSecret, "x-api-version": process.env.CASHFREE_API_VERSION || "2025-01-01", "Content-Type": "application/json" }, body: JSON.stringify({ order_id: input.orderId, order_amount: Number(input.amountInr.toFixed(2)), order_currency: "INR", customer_details: { customer_id: input.orderId, customer_name: input.customer.name, customer_email: input.customer.email, customer_phone: input.customer.phone }, order_meta: { return_url: `${process.env.PUBLIC_APP_URL || ""}/checkout/success?order_id=${encodeURIComponent(input.orderId)}` } }) });
+  const res = await fetch(`${cashfreeBaseUrl()}/orders`, { method: "POST", signal: AbortSignal.timeout(15000), headers: { "x-client-id": clientId, "x-client-secret": clientSecret, "x-api-version": process.env.CASHFREE_API_VERSION || "2025-01-01", "Content-Type": "application/json" }, body: JSON.stringify({ order_id: input.orderId, order_amount: Number(input.amountInr.toFixed(2)), order_currency: "INR", customer_details: { customer_id: input.orderId, customer_name: input.customer.name, customer_email: input.customer.email, customer_phone: input.customer.phone }, order_meta: { return_url: `${paymentReturnOrigin()}/checkout/success?order_id=${encodeURIComponent(input.orderId)}` } }) });
   const data = await res.json();
   if (!res.ok) throw new Error(data?.message || "Cashfree order creation failed");
   return { provider: "cashfree" as const, mode: gatewayMode(), orderId: data.order_id, paymentSessionId: data.payment_session_id };
