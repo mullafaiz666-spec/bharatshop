@@ -3,15 +3,17 @@ type Channel = { key: string; label: string; configured: boolean; connected: boo
 
 function present(name:string){return Boolean(process.env[name]?.trim());}
 function datasetId(){return (process.env.META_DATASET_ID||process.env.META_PIXEL_ID||process.env.NEXT_PUBLIC_META_PIXEL_ID||"").trim();}
-function capiToken(){return (process.env.META_CONVERSIONS_API_TOKEN||process.env.META_ACCESS_TOKEN||"").trim();}
+function capiToken(){return (process.env.META_CONVERSIONS_API_TOKEN||process.env.META_CAPI_TOKEN||process.env.META_ACCESS_TOKEN||"").trim();}
 
 export function marketingConnections(): Channel[] {
   const configs = [
-    { key:"google", label:"Google Ads", missing:["GOOGLE_ADS_CUSTOMER_ID","GOOGLE_ADS_DEVELOPER_TOKEN","GOOGLE_ADS_REFRESH_TOKEN","GOOGLE_ADS_CLIENT_ID","GOOGLE_ADS_CLIENT_SECRET"].filter(n=>!present(n)) },
+    // Google sunset developer tokens on 2026-09-09. Existing tokens remain harmless,
+    // but OAuth/Cloud-project access is now the required authentication path.
+    { key:"google", label:"Google Ads", missing:["GOOGLE_ADS_CUSTOMER_ID","GOOGLE_ADS_REFRESH_TOKEN","GOOGLE_ADS_CLIENT_ID","GOOGLE_ADS_CLIENT_SECRET"].filter(n=>!present(n)) },
     { key:"meta", label:"Meta Ads (Facebook / Instagram)", missing:["META_ACCESS_TOKEN","META_AD_ACCOUNT_ID"].filter(n=>!present(n)) },
     { key:"facebook", label:"Facebook Page", missing:["META_ACCESS_TOKEN","META_PAGE_ID"].filter(n=>!present(n)) },
     { key:"instagram", label:"Instagram Business", missing:["META_ACCESS_TOKEN","META_INSTAGRAM_ACCOUNT_ID","META_PAGE_ID"].filter(n=>!present(n)) },
-    { key:"meta-capi", label:"Meta Pixel/Dataset + Conversions API", missing:[...(datasetId()?[]:["META_DATASET_ID or META_PIXEL_ID or NEXT_PUBLIC_META_PIXEL_ID"]),...(capiToken()?[]:["META_CONVERSIONS_API_TOKEN or META_ACCESS_TOKEN"])] },
+    { key:"meta-capi", label:"Meta Pixel/Dataset + Conversions API", missing:[...(datasetId()?[]:["META_DATASET_ID or META_PIXEL_ID or NEXT_PUBLIC_META_PIXEL_ID"]),...(capiToken()?[]:["META_CONVERSIONS_API_TOKEN or META_CAPI_TOKEN or META_ACCESS_TOKEN"])] },
   ];
   return configs.map(c=>({key:c.key,label:c.label,configured:!c.missing.length,connected:false,status:c.missing.length?"NOT_CONFIGURED":"NOT_TESTED",missing:c.missing}));
 }
@@ -37,8 +39,9 @@ export async function verifyMarketingConnections() {
         if (!token.access_token) throw new Error("Google did not return an access token");
         const managerId = process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID?.replace(/-/g, "");
         if (managerId && !/^\d{10}$/.test(managerId)) throw new Error("Invalid Google Ads manager ID");
+        const developerToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN?.trim();
         const result = await checkedJson(`https://googleads.googleapis.com/${version}/customers/${customerId}/googleAds:search`, {
-          method: "POST", headers: { Authorization: `Bearer ${token.access_token}`, "Content-Type": "application/json", "developer-token": process.env.GOOGLE_ADS_DEVELOPER_TOKEN!, ...(managerId ? { "login-customer-id": managerId } : {}) },
+          method: "POST", headers: { Authorization: `Bearer ${token.access_token}`, "Content-Type": "application/json", ...(developerToken ? { "developer-token": developerToken } : {}), ...(managerId ? { "login-customer-id": managerId } : {}) },
           body: JSON.stringify({ query: "SELECT customer.id, customer.status FROM customer LIMIT 1" }),
         });
         const customer = result.results?.[0]?.customer;
@@ -68,7 +71,7 @@ export async function verifyMarketingConnections() {
       }
       return { ...channel, connected: true, status: "VERIFIED" as const };
     } catch (error) {
-      return { ...channel, status: "BROKEN" as const, error: error instanceof Error ? error.message : "Connection check failed" };
+      return { ...channel, connected: false, status: "BROKEN" as const, error: error instanceof Error ? error.message : "Connection check failed" };
     }
   }));
 }
