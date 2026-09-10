@@ -11,9 +11,9 @@ console.log(`${cf.configured&&cf.authenticated?"PASS":"FAIL"}  Cashfree credenti
 if(cf.modeMismatch)console.log(`FAIL  Cashfree environment mismatch  set PAYMENT_MODE=${cf.detectedMode}`);
 const razorpayLive=rp.configured===true&&rp.authenticated===true&&rp.keyMode==="live";
 const cashfreeLive=cf.configured===true&&cf.authenticated===true&&cf.selectedMode==="live"&&cf.detectedMode==="live"&&!cf.modeMismatch;
-const checkoutReady=response.ok&&data?.status==="READY"&&data?.allAuthenticated===true&&data?.selectedModeReady===true&&razorpayLive&&cashfreeLive;
-if(!rp.webhookConfigured)console.log("WARN  Razorpay webhook secret is not configured; immediate checkout is still server-verified, but asynchronous webhook recovery is not active.");
-if(!cf.webhookConfigured)console.log("WARN  Cashfree webhook verification is not configured.");
-console.log(`\nLIVE PAYMENT CHECKOUT ACCEPTANCE: ${checkoutReady?"PASS":"FAIL"}`);
-console.log(`ASYNC WEBHOOK RECOVERY: ${rp.webhookConfigured&&cf.webhookConfigured?"PASS":"PARTIAL"}`);
-if(!checkoutReady)process.exit(1);
+const webhooksReady=rp.webhookConfigured===true&&cf.webhookConfigured===true;
+const productionReady=response.ok&&data?.status==="READY"&&data?.allAuthenticated===true&&data?.selectedModeReady===true&&razorpayLive&&cashfreeLive&&webhooksReady;
+console.log(`${rp.webhookConfigured?"PASS":"FAIL"}  Razorpay webhook recovery  configured=${Boolean(rp.webhookConfigured)}`);
+console.log(`${cf.webhookConfigured?"PASS":"FAIL"}  Cashfree webhook recovery  configured=${Boolean(cf.webhookConfigured)}`);
+console.log(`\nPRODUCTION PAYMENT ACCEPTANCE: ${productionReady?"PASS":"FAIL"}`);
+if(!productionReady)process.exit(1);
