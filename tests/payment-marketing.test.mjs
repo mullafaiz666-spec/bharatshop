@@ -150,6 +150,34 @@ test('marketing credentials alone never produce VERIFIED status; read-only probe
   assert.equal((await connections.verifyMarketingConnections()).find(c => c.key === 'meta').status, 'BROKEN');
 });
 
+test('Google Ads connection no longer requires the retired developer token', async t => {
+  for (const key of Object.keys(process.env)) if (key.startsWith('META_') || key.startsWith('GOOGLE_ADS_')) delete process.env[key];
+  process.env.GOOGLE_ADS_CUSTOMER_ID = '123-456-7890';
+  process.env.GOOGLE_ADS_REFRESH_TOKEN = 'refresh';
+  process.env.GOOGLE_ADS_CLIENT_ID = 'client';
+  process.env.GOOGLE_ADS_CLIENT_SECRET = 'secret';
+  const connections = load('src/lib/marketing/connections.ts');
+  const configured = connections.marketingConnections().find(c => c.key === 'google');
+  assert.equal(configured.status, 'NOT_TESTED');
+  assert.equal(configured.missing.includes('GOOGLE_ADS_DEVELOPER_TOKEN'), false);
+  const mock = t.mock.method(globalThis, 'fetch', async (url, init) => {
+    if (String(url).includes('oauth2.googleapis.com/token')) return Response.json({ access_token: 'access' });
+    assert.ok(String(url).includes('/v25/customers/1234567890/googleAds:search'));
+    assert.equal(Object.hasOwn(init.headers, 'developer-token'), false);
+    return Response.json({ results: [{ customer: { id: '1234567890', status: 'ENABLED' } }] });
+  });
+  assert.equal((await connections.verifyMarketingConnections()).find(c => c.key === 'google').status, 'VERIFIED');
+  mock.mock.restore();
+});
+
+test('Meta CAPI common token alias is accepted as configured', () => {
+  for (const key of ['META_CONVERSIONS_API_TOKEN','META_ACCESS_TOKEN','META_CAPI_TOKEN','META_DATASET_ID']) delete process.env[key];
+  process.env.META_DATASET_ID = '123456789';
+  process.env.META_CAPI_TOKEN = 'capi-token';
+  const connections = load('src/lib/marketing/connections.ts');
+  assert.equal(connections.marketingConnections().find(c => c.key === 'meta-capi').status, 'NOT_TESTED');
+});
+
 test('public image URLs reject bind addresses and use the configured Render origin', () => {
   const origin = load('src/lib/public-origin.ts');
   process.env.PUBLIC_APP_URL = 'https://0.0.0.0:10000';
