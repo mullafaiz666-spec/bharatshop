@@ -11,6 +11,15 @@ export type DependencyProbe = {
   detail?: Record<string, unknown>;
 };
 
+type AIProbe = {
+  configured?: boolean;
+  ready?: boolean;
+  modelReady?: boolean;
+  degraded?: boolean;
+  reason?: string;
+  error?: string;
+};
+
 function automationTokenConfigured() {
   return Boolean(String(process.env.BHARATSHOP_AUTOMATION_TOKEN || process.env.AUTOMATION_TOKEN || "").trim());
 }
@@ -24,10 +33,11 @@ async function probeDatabase(): Promise<DependencyProbe> {
       to_regclass('public.agent_shared_events')::text AS shared_events,
       to_regclass('public.agent_chat_messages')::text AS chat_memory`);
     const row = result.rows[0] || {};
+    const tablesReady = Boolean(row.work_items && row.shared_events && row.chat_memory);
     return {
-      ready: true,
+      ready: tablesReady,
       configured: true,
-      reason: "production PostgreSQL query succeeded",
+      reason: tablesReady ? "production PostgreSQL query and shared agent tables succeeded" : "PostgreSQL is reachable but one or more shared agent tables are missing",
       latencyMs: Date.now() - started,
       detail: {
         workBusTable: Boolean(row.work_items),
@@ -56,7 +66,7 @@ async function probeSearch(): Promise<DependencyProbe> {
     if (!response.ok) return { ready: false, configured: true, reason: `SearXNG returned HTTP ${response.status}`, latencyMs: Date.now() - started, detail: { httpStatus: response.status } };
     if (!contentType.includes("application/json")) return { ready: false, configured: true, reason: "SearXNG search did not return JSON", latencyMs: Date.now() - started, detail: { contentType } };
     const body = await response.json().catch(() => null) as { results?: unknown[] } | null;
-    return { ready: true, configured: true, reason: "SearXNG JSON search succeeded", latencyMs: Date.now() - started, detail: { resultCount: Array.isArray(body?.results) ? body!.results!.length : 0 } };
+    return { ready: true, configured: true, reason: "SearXNG JSON search succeeded", latencyMs: Date.now() - started, detail: { resultCount: Array.isArray(body?.results) ? body.results.length : 0 } };
   } catch (error) {
     return { ready: false, configured: true, reason: error instanceof Error ? error.message : "SearXNG probe failed", latencyMs: Date.now() - started };
   }
@@ -81,11 +91,12 @@ function depsForAgent(id: OperationalAgentId) {
 }
 
 export async function deepAgentReadiness() {
-  const [database, ai, search] = await Promise.all([
+  const [database, aiRaw, search] = await Promise.all([
     probeDatabase(),
     checkAI(true),
     probeSearch(),
   ]);
+  const ai = aiRaw as AIProbe;
   const automation = automationTokenConfigured();
   const runtime = agentRuntimeCatalog();
   const runtimeMap = new Map(runtime.map((entry) => [entry.id, entry]));
@@ -94,7 +105,7 @@ export async function deepAgentReadiness() {
   const infrastructure = {
     database,
     ai: {
-      ready: Boolean(ai.ready && (ai.modelReady !== false)),
+      ready: Boolean(ai.ready && ai.modelReady !== false),
       configured: Boolean(ai.configured),
       reason: String(ai.reason || (ai.ready ? "AI provider ready" : "AI provider unavailable")),
       detail: { provider: aiProviderName(), models: aiModels(), modelReady: ai.modelReady, degraded: ai.degraded, error: ai.error },
@@ -111,7 +122,7 @@ export async function deepAgentReadiness() {
     const id = contract.id as OperationalAgentId;
     const deps = depsForAgent(id);
     const runtimeEntry = runtimeMap.get(id);
-    const runtimeTools = Array.isArray(runtimeEntry?.tools) ? runtimeEntry!.tools : [];
+    const runtimeTools = Array.isArray(runtimeEntry?.tools) ? runtimeEntry.tools : [];
     const dependencyChecks = deps.map((dep) => ({ dependency: dep, ready: infrastructure[dep].ready, reason: infrastructure[dep].reason }));
     const toolMapReady = runtimeTools.length > 0;
     const ready = dependencyChecks.every((item) => item.ready) && toolMapReady;
