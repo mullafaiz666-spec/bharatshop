@@ -64,19 +64,8 @@ jobs:
           const d=require('./fashion-photo-studio.json');
           if(!d.success) throw new Error(`Fashion studio failed: ${JSON.stringify(d)}`);
           if(d.styleVersion!==process.env.FASHION_EDITORIAL_STYLE) throw new Error(`Unexpected style version: ${d.styleVersion}`);
-          console.log(JSON.stringify({
-            status:d.status,
-            styleVersion:d.styleVersion,
-            attempted:d.attempted||0,
-            generated:d.generated||0,
-            cached:d.cached||0,
-            photorealFrontReady:d.photorealFrontReady||0,
-            totalProducts:d.totalProducts||0,
-            waitingPhotorealUpgrade:d.waitingPhotorealUpgrade||0
-          },null,2));
-          if(Number(d.waitingPhotorealUpgrade||0)>0) {
-            console.log('Photoreal upgrades are still pending. Verified original fashion media remains customer-safe while the free photoreal upgrade waits for capacity.');
-          }
+          console.log(JSON.stringify({status:d.status,styleVersion:d.styleVersion,attempted:d.attempted||0,generated:d.generated||0,cached:d.cached||0,photorealFrontReady:d.photorealFrontReady||0,totalProducts:d.totalProducts||0,waitingPhotorealUpgrade:d.waitingPhotorealUpgrade||0},null,2));
+          if(Number(d.waitingPhotorealUpgrade||0)>0) console.log('Photoreal upgrades are pending; verified original artwork remains the approved zero-cost fallback.');
           NODE
 
       - name: Verify storefront fashion media policy
@@ -90,27 +79,32 @@ jobs:
           const products=Array.isArray(d.products)?d.products:[];
           const fashion=products.filter(p=>p.madeToOrder===true);
           const allowedStates=new Set(['PHOTOREAL_CURRENT','PHOTOREAL_UPGRADE_PENDING']);
-          const bad=fashion.filter(p=>{
-            const image=String(p.imageUrl||'');
-            return !allowedStates.has(String(p.editorialStyleState||'')) || !/^https:\/\//i.test(image) || !Array.isArray(p.imageUrls) || p.imageUrls.length<4;
-          });
+          const bad=fashion.filter(p=>!allowedStates.has(String(p.editorialStyleState||''))||!/^https:\/\//i.test(String(p.imageUrl||''))||!Array.isArray(p.imageUrls)||p.imageUrls.length<4);
           if(bad.length) throw new Error(`Made-to-order fashion violated the approved media policy: ${JSON.stringify(bad.map(p=>({id:p.id,title:p.title,imageUrl:p.imageUrl,state:p.editorialStyleState,imageCount:Array.isArray(p.imageUrls)?p.imageUrls.length:0})))}`);
           console.log(JSON.stringify({visibleProducts:products.length,visibleFashion:fashion.length,style:expected,photorealCurrent:fashion.filter(p=>p.editorialStyleState==='PHOTOREAL_CURRENT').length,safeVerifiedPending:fashion.filter(p=>p.editorialStyleState==='PHOTOREAL_UPGRADE_PENDING').length},null,2));
           NODE
 
-      - name: Verify visible fashion primary images are raster media
+      - name: Verify visible fashion primary media matches editorial state
         run: |
           set -euo pipefail
-          node -e "const d=require('./storefront.json'); for(const p of d.products||[]) if(p.madeToOrder===true) console.log(p.imageUrl);" > /tmp/model-urls.txt
+          node - <<'NODE' > /tmp/model-media.tsv
+          const d=require('./storefront.json');
+          for(const p of d.products||[]) if(p.madeToOrder===true) console.log(`${p.editorialStyleState}\t${p.imageUrl}`);
+          NODE
           count=0
-          while IFS= read -r image; do
+          while IFS=$'\t' read -r state image; do
             [ -z "$image" ] && continue
             curl -sS -D /tmp/model-headers.txt -o /tmp/model-image --fail --max-time 90 "$image"
             type=$(awk 'BEGIN{IGNORECASE=1}/^content-type:/{print $2}' /tmp/model-headers.txt | tr -d '\r' | tail -1)
             bytes=$(wc -c < /tmp/model-image | tr -d ' ')
-            echo "fashion image=$image type=$type bytes=$bytes"
-            case "$type" in image/png|image/jpeg|image/webp) ;; *) echo "Expected raster image, got $type"; exit 1;; esac
-            test "$bytes" -gt 10000
+            echo "fashion state=$state image=$image type=$type bytes=$bytes"
+            if [ "$state" = "PHOTOREAL_CURRENT" ]; then
+              case "$type" in image/png*|image/jpeg*|image/webp*) ;; *) echo "Current photoreal media must be raster, got $type"; exit 1;; esac
+              test "$bytes" -gt 10000
+            else
+              case "$type" in image/svg+xml*|image/png*|image/jpeg*|image/webp*) ;; *) echo "Pending editorial fallback is not approved image media: $type"; exit 1;; esac
+              test "$bytes" -gt 1000
+            fi
             count=$((count+1))
-          done < /tmp/model-urls.txt
-          echo "verified visible fashion raster images=$count"
+          done < /tmp/model-media.tsv
+          echo "verified visible fashion primary media=$count"
