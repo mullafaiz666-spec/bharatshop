@@ -13,6 +13,8 @@ jobs:
         with:
           node-version: 24
       - run: npm ci
+      - name: Reject critical dependency vulnerabilities
+        run: npm audit --audit-level=critical
       - run: npm run test:integrations
       - run: npm run typecheck
       - run: npm run build
