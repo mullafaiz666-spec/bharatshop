@@ -14,9 +14,14 @@ jobs:
       - name: Probe live BharatShop Agent Suite v4
         env:
           HEALTH_URL: https://bharatshop-9w4a.onrender.com/api/agents/health?deep=1
+          BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
         run: |
           set -uo pipefail
-          http=$(curl --silent --show-error --location --connect-timeout 15 --max-time 70 --output /tmp/readiness.json --write-out '%{http_code}' "$HEALTH_URL" || true)
+          test -n "$BHARATSHOP_AUTOMATION_TOKEN"
+          http=$(curl --silent --show-error --location --connect-timeout 15 --max-time 70 \
+            -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" \
+            -H "x-automation-token: $BHARATSHOP_AUTOMATION_TOKEN" \
+            --output /tmp/readiness.json --write-out '%{http_code}' "$HEALTH_URL" || true)
           echo "HTTP_STATUS=$http"
           echo "READINESS_PAYLOAD_BEGIN"
           cat /tmp/readiness.json 2>/dev/null || true
