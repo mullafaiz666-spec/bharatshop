@@ -15,12 +15,14 @@ export async function POST(req: Request) {
     const headline = body.headline || `${p.title} — Smart Price, Fast Delivery`;
     const bodyText = body.bodyText || p.aiMarketingCopy || `${p.title}. Verified supplier stock, competitive pricing and India delivery.`;
     const platforms = Array.isArray(body.platforms) && body.platforms.length ? body.platforms : ["Google Shopping", "Facebook Ads", "Instagram Reels"];
+    const requestedBudget = Number(body.budgetInr ?? 0);
+    const budgetInr = Number.isFinite(requestedBudget) && requestedBudget >= 0 ? requestedBudget : 0;
     const created = [];
     for (const platform of platforms) {
       const [campaign] = await db.insert(marketingCampaigns).values({
         userId: p.userId, productId: p.id, productTitle: p.title, platform: String(platform), campaignType: body.campaignType || "NEW_LAUNCH",
         headline, bodyText, ctaText: body.ctaText || "Abhi Kharido!", targetAudience: body.targetAudience || p.aiTargetAudience,
-        budgetInr: String(body.budgetInr || 500), estimatedReachK: 0, estimatedRoas: "0", status: "READY_FOR_CONNECTOR",
+        budgetInr: String(budgetInr), estimatedReachK: 0, estimatedRoas: "0", status: "READY_FOR_CONNECTOR",
       }).returning();
       created.push(campaign);
     }

@@ -11,9 +11,14 @@ export default async function DashboardPage() {
   const admin = await getAdminUser();
   if (!admin) redirect("/admin-login");
   return <>
-    <Link href="/dashboard/fashion" className="fixed bottom-5 right-5 z-[80] rounded-2xl border border-orange-400/40 bg-orange-500 px-4 py-3 text-sm font-black text-slate-950 shadow-2xl shadow-orange-950/40 transition hover:bg-orange-400">
-      👕 Fashion Studio
-    </Link>
+    <div className="fixed bottom-5 right-5 z-[80] flex flex-col items-end gap-2">
+      <Link href="/dashboard/marketing" className="rounded-2xl border border-lime-300/40 bg-lime-300 px-4 py-3 text-sm font-black text-slate-950 shadow-2xl shadow-lime-950/40 transition hover:bg-lime-200">
+        📣 Marketing Cockpit
+      </Link>
+      <Link href="/dashboard/fashion" className="rounded-2xl border border-orange-400/40 bg-orange-500 px-4 py-3 text-sm font-black text-slate-950 shadow-2xl shadow-orange-950/40 transition hover:bg-orange-400">
+        👕 Fashion Studio
+      </Link>
+    </div>
     <DashboardV2 />
   </>;
 }

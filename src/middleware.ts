@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-const ADMIN_PATHS=["/api/admin","/api/agent-execute","/api/milestone","/api/payments/diagnostics","/api/marketing/status","/api/marketing/organic-pack","/api/marketing/launch","/api/marketing/connections","/api/marketing/meta/campaigns","/dashboard","/api/overview","/api/ceo-chat","/api/ceo-approvals","/api/ceo-research","/api/agent-audit","/api/agents","/api/catalog","/api/sourcing","/api/suppliers","/api/products","/api/orders","/api/rules","/api/engine","/api/shopify","/api/automation","/api/fashion-designer","/api/fashion-studio"];
+const ADMIN_PATHS=["/api/admin","/api/agent-execute","/api/milestone","/api/payments/diagnostics","/api/marketing","/dashboard","/api/overview","/api/ceo-chat","/api/ceo-approvals","/api/ceo-research","/api/agent-audit","/api/agents","/api/catalog","/api/sourcing","/api/suppliers","/api/products","/api/orders","/api/rules","/api/engine","/api/shopify","/api/automation","/api/fashion-designer","/api/fashion-studio"];
 function hex(bytes:ArrayBuffer){return Array.from(new Uint8Array(bytes),b=>b.toString(16).padStart(2,"0")).join("");}
 function safeEqual(a:string,b:string){if(a.length!==b.length)return false;let diff=0;for(let i=0;i<a.length;i++)diff|=a.charCodeAt(i)^b.charCodeAt(i);return diff===0;}
 async function isValidSessionCookie(value:string|undefined){
