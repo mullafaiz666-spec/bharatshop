@@ -39,3 +39,28 @@ test("dashboard chat receives stable per-browser per-agent memory sessions", () 
   assert.match(route, /maxAge: 60 \* 60 \* 24 \* 30/);
   assert.match(route, /httpOnly: true/);
 });
+
+test("CEO and Agent Studio recover from full-schema overload with the compact evidence runtime", () => {
+  const ceo = read("src/app/api/ceo-chat/route.ts");
+  const agents = read("src/app/api/agents/route.ts");
+  const compact = read("src/lib/agents/compact-runtime.ts");
+  assert.match(ceo, /runCompactAgentFallback/);
+  assert.match(agents, /runCompactAgentFallback/);
+  assert.match(ceo, /primary\.modelStatus === "unavailable"/);
+  assert.match(agents, /primary\.modelStatus === "live"/);
+  assert.match(compact, /inspectLiveBusinessData/);
+  assert.match(compact, /catalogQuery\(6\)/);
+  assert.match(compact, /researchWeb/);
+  assert.match(compact, /for \(let attempt = 1; attempt <= 2; attempt\+\+\)/);
+  assert.match(compact, /agent-runtime-v4-compact-evidence-reason/);
+  assert.doesNotMatch(compact, /toolChoice|tools:/);
+});
+
+test("agent API traces preserve result for production acceptance and older observers", () => {
+  const ceo = read("src/app/api/ceo-chat/route.ts");
+  const agents = read("src/app/api/agents/route.ts");
+  assert.match(ceo, /result: trace\.result !== undefined \? trace\.result : trace\.output/);
+  assert.match(agents, /result: trace\.result !== undefined \? trace\.result : trace\.output/);
+  assert.match(ceo, /compactRecovery/);
+  assert.match(agents, /compactRecovery/);
+});
