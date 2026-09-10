@@ -26,6 +26,7 @@ test("every visible DashboardV2 AI persona maps to an intended specialist runtim
     assert.match(route.toLowerCase(), new RegExp(persona.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
   assert.match(route, /runtimeAgent = DASHBOARD_AGENT_MAP/);
+  assert.match(route, /"image & media": "image-media"/);
   assert.match(route, /"bharatdrip fashion": "listing"/);
   assert.match(route, /"automation engineering": "automation"/);
   assert.match(route, /"web & conversion": "web-design"/);
@@ -51,7 +52,9 @@ test("CEO and Agent Studio recover from full-schema overload with the compact ev
   assert.match(compact, /inspectLiveBusinessData/);
   assert.match(compact, /catalogQuery\(6\)/);
   assert.match(compact, /researchWeb/);
-  assert.match(compact, /for \(let attempt = 1; attempt <= 2; attempt\+\+\)/);
+  assert.match(compact, /const maxAttempts = Math\.max\(1, Math\.min\(2,/);
+  assert.match(compact, /tinyModel \? 1 : 2/);
+  assert.match(compact, /attempt <= maxAttempts/);
   assert.match(compact, /agent-runtime-v4-compact-evidence-reason/);
   assert.doesNotMatch(compact, /toolChoice|tools:/);
 });
