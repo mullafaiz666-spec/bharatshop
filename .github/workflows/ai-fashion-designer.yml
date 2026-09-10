@@ -36,17 +36,28 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - name: Wait for exact live revision
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Wait for compatible live revision
         run: |
           set -euo pipefail
           for i in $(seq 1 42); do
             code=$(curl -sS -o /tmp/h.json -w '%{http_code}' --max-time 20 "$BHARATSHOP_URL/api/health" || true)
             revision=$(node -e "try{const d=require('/tmp/h.json');process.stdout.write(String(d.revision||''))}catch{}")
-            echo "health=$code revision=$revision expected=$GITHUB_SHA"
-            if [ "$code" = "200" ] && [ "$revision" = "$GITHUB_SHA" ]; then exit 0; fi
+            echo "health=$code revision=$revision required=$GITHUB_SHA"
+            if [ "$code" = "200" ] && [ -n "$revision" ]; then
+              if [ "$revision" = "$GITHUB_SHA" ]; then exit 0; fi
+              git fetch --quiet --no-tags origin "$revision" || true
+              if git cat-file -e "$revision^{commit}" 2>/dev/null && git merge-base --is-ancestor "$GITHUB_SHA" "$revision"; then
+                echo "Render is on descendant revision $revision containing required commit $GITHUB_SHA"
+                exit 0
+              fi
+            fi
             sleep 10
           done
-          echo "Render did not expose the exact fashion workflow revision"
+          echo "Render did not expose the required fashion revision or a descendant containing it"
           exit 1
 
       - name: Create value and BharatDrip fashion
