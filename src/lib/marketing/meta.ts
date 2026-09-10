@@ -19,7 +19,7 @@ export type MetaConversionInput = {
 const graphVersion = () => process.env.META_GRAPH_API_VERSION || "v26.0";
 export const metaPixelId = () => (process.env.NEXT_PUBLIC_META_PIXEL_ID || process.env.META_PIXEL_ID || "").trim();
 export const metaDatasetId = () => (process.env.META_DATASET_ID || process.env.META_PIXEL_ID || process.env.NEXT_PUBLIC_META_PIXEL_ID || "").trim();
-const capiToken = () => (process.env.META_CONVERSIONS_API_TOKEN || process.env.META_ACCESS_TOKEN || "").trim();
+const capiToken = () => (process.env.META_CONVERSIONS_API_TOKEN || process.env.META_CAPI_TOKEN || process.env.META_ACCESS_TOKEN || "").trim();
 export const metaCapiConfigured = () => Boolean(metaDatasetId() && capiToken());
 
 function hash(value?: string, mode: "email" | "phone" | "generic" = "generic") {

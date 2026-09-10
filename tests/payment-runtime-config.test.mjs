@@ -34,3 +34,22 @@ test('Cashfree production environment aliases resolve to live mode', () => {
   assert.equal(gateway.gatewayMode(), 'test');
   assert.equal(gateway.cashfreeBaseUrl(), 'https://sandbox.cashfree.com/pg');
 });
+
+test('Razorpay mode is derived from the Razorpay key instead of Cashfree mode', () => {
+  process.env.PAYMENT_MODE = 'test';
+  assert.equal(gateway.razorpayMode('rzp_live_example'), 'live');
+  process.env.PAYMENT_MODE = 'live';
+  assert.equal(gateway.razorpayMode('rzp_test_example'), 'test');
+  assert.equal(gateway.razorpayMode('bad-key'), 'unknown');
+});
+
+test('payment return URLs never use an internal bind address', () => {
+  process.env.PUBLIC_APP_URL = 'https://0.0.0.0:10000';
+  process.env.NEXT_PUBLIC_SITE_URL = 'http://localhost:3000';
+  process.env.RENDER_EXTERNAL_URL = 'https://bharatshop-9w4a.onrender.com';
+  assert.equal(gateway.paymentReturnOrigin(), 'https://bharatshop-9w4a.onrender.com');
+  delete process.env.PUBLIC_APP_URL;
+  delete process.env.NEXT_PUBLIC_SITE_URL;
+  delete process.env.RENDER_EXTERNAL_URL;
+  assert.equal(gateway.paymentReturnOrigin(), 'https://bharatshop-9w4a.onrender.com');
+});

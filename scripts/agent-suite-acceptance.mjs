@@ -15,15 +15,21 @@ console.log(`${health?.freeInfrastructure?.serpApiRequired===false?"PASS":"FAIL"
 
 const marketing=await json("/api/marketing/connections",{method:"POST",body:"{}"});
 const channels=Array.isArray(marketing.channels)?marketing.channels:[];
-for(const key of ["meta","facebook","instagram","meta-capi"]){
+const metaConfig=marketing.metaConfiguration||{};
+const browserPixelReady=metaConfig.browserPixelConfigured===true;
+const capiReady=metaConfig.conversionsApiConfigured===true;
+console.log(`${browserPixelReady?"PASS":"FAIL"}  Meta browser Pixel configuration  configured=${browserPixelReady}`);if(!browserPixelReady)failed=true;
+console.log(`${capiReady?"PASS":"FAIL"}  Meta Conversions API configuration  configured=${capiReady}`);if(!capiReady)failed=true;
+for(const key of ["google","meta","facebook","instagram","meta-capi"]){
   const c=channels.find(x=>x.key===key);
   if(!c){console.log(`FAIL  ${key} integration  missing from connection registry`);failed=true;continue;}
   if(c.status==="VERIFIED"){console.log(`PASS  ${key} integration  configured=true connected=true`);continue;}
   if(c.status==="NOT_CONFIGURED"){
-    console.log(`WARN  ${key} integration  not configured; missing=${(c.missing||[]).join(",")}`);
+    console.log(`FAIL  ${key} integration  not configured; missing=${(c.missing||[]).join(",")}`);
+    failed=true;
     continue;
   }
   console.log(`FAIL  ${key} integration  status=${c.status} error=${c.error||"unknown"}`);failed=true;
 }
-console.log(`\nAGENT SUITE ACCEPTANCE: ${failed?"FAIL":"PASS"}`);
+console.log(`\nAGENT + MARKETING ACCEPTANCE: ${failed?"FAIL":"PASS"}`);
 if(failed)process.exit(1);
