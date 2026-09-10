@@ -12,6 +12,7 @@ const APPROVED_SOURCE_PROVIDERS=new Set(["local-ai","local-evidence"]);
 const APPROVED_EDITORIAL_PROVIDERS=new Set(["hf-zerogpu","hf-zerogpu-custom","hf-zerogpu-flux1-schnell","hf-zerogpu-zimage-turbo"]);
 const MTO_FASHION_BRANDS=new Set(["bharatshop studio","bharatdrip"]);
 const FASHION_EDITORIAL_STYLE="drip-realworld-v4";
+const FASHION_RASTER_REV="png-v1";
 const MIN_STANDARD_IMAGES=Math.max(1,Number(process.env.MIN_STANDARD_PRODUCT_IMAGES||1));
 const MIN_FASHION_IMAGES=Math.max(4,Number(process.env.MIN_FASHION_PRODUCT_IMAGES||4));
 const MIN_CONFIDENCE=.75;
@@ -22,7 +23,7 @@ const fashionOrigin=(d:any)=>String(specsOf(d).designOrigin||"").trim();
 const madeToOrder=(d:any)=>{const s=specsOf(d),origin=fashionOrigin(d).toLowerCase();return MTO_FASHION_BRANDS.has(origin)&&String(s.inventoryMode||"").toUpperCase()==="MADE_TO_ORDER"&&String(s.productionSupplier||"").toLowerCase()==="qikink"&&Boolean(String(s.qikinkProductCode||"").trim());};
 
 function publicOrigin(req:Request){for(const value of [process.env.PUBLIC_APP_URL,process.env.NEXT_PUBLIC_SITE_URL,process.env.RENDER_EXTERNAL_URL,new URL(req.url).origin,"https://bharatshop-9w4a.onrender.com"]){try{if(!value)continue;const u=new URL(value);if(u.protocol==="https:"&&!LOCAL_HOST.test(u.hostname))return u.origin;}catch{}}return"https://bharatshop-9w4a.onrender.com";}
-function cleanUrl(value:unknown,origin:string){let raw=String(value||"").trim();if(!raw||BAD_IMAGE.test(raw))return"";try{const u=new URL(raw);if(LOCAL_HOST.test(u.hostname)&&(u.pathname.startsWith("/api/fashion-art/")||u.pathname.startsWith("/api/fashion-photo/")))raw=`${origin}${u.pathname}${u.search}`;}catch{return"";}return/^https:\/\//i.test(raw)&&!BAD_IMAGE.test(raw)?raw:"";}
+function cleanUrl(value:unknown,origin:string){let raw=String(value||"").trim();if(!raw||BAD_IMAGE.test(raw))return"";try{const u=new URL(raw);if(LOCAL_HOST.test(u.hostname)&&(u.pathname.startsWith("/api/fashion-art/")||u.pathname.startsWith("/api/fashion-photo/")))raw=`${origin}${u.pathname}${u.search}`;const normalized=new URL(raw);if(normalized.pathname.startsWith("/api/fashion-art/")&&(normalized.origin===origin||LOCAL_HOST.test(normalized.hostname))){normalized.searchParams.set("raster",FASHION_RASTER_REV);raw=normalized.toString();}}catch{return"";}return/^https:\/\//i.test(raw)&&!BAD_IMAGE.test(raw)?raw:"";}
 function customerText(value:unknown){return String(value||"").split(/(?<=[.!?])\s+/).filter(sentence=>!INTERNAL_VENDOR.test(sentence)).join(" ").replace(/\b(?:Qikink|DeoDap)\b/gi,"").replace(/\s{2,}/g," ").trim();}
 
 export async function GET(req:Request){
@@ -34,7 +35,7 @@ export async function GET(req:Request){
   for(const row of imageRows){
     const d=detailMap.get(row.productId),s=specsOf(d),view=Math.max(0,Math.min(3,Number(row.sortOrder)||0)),mto=madeToOrder(d);
     const oldLocalEditorial=String(row.verificationStatus)==="AI_GENERATED_EDITORIAL"&&String(row.verificationProvider)==="bharatshop-local-raster"&&mto;
-    const rawImage=oldLocalEditorial?`${origin}/api/fashion-art/${row.productId}/${view}?style=${FASHION_EDITORIAL_STYLE}&fallback=product-mockup`:row.imageUrl;
+    const rawImage=oldLocalEditorial?`${origin}/api/fashion-art/${row.productId}/${view}?style=${FASHION_EDITORIAL_STYLE}&fallback=product-mockup&raster=${FASHION_RASTER_REV}`:row.imageUrl;
     const image=cleanUrl(rawImage,origin);if(!image||!row.verifiedAt)continue;
     const sourceBacked=APPROVED_SOURCE_MEDIA.has(String(row.verificationStatus))&&Number(row.verificationConfidence)>=MIN_CONFIDENCE&&APPROVED_SOURCE_PROVIDERS.has(String(row.verificationProvider));
     const originalFashion=((String(row.verificationStatus)==="AI_GENERATED_ORIGINAL"&&String(row.verificationProvider)==="bharatshop-studio")||oldLocalEditorial)&&MTO_FASHION_BRANDS.has(fashionOrigin(d).toLowerCase())&&String(s.productionSupplier||"").toLowerCase()==="qikink"&&mto;
@@ -62,7 +63,7 @@ export async function GET(req:Request){
   const total=filtered.length,offset=(page-1)*limit,paginated=filtered.slice(offset,offset+limit);
   const customerProducts=paginated.map(p=>{
     const gallery=galleryMap.get(p.id)||[],d=detailMap.get(p.id),spec=specsOf(d),mto=madeToOrder(d),fashionBrand=fashionOrigin(d),publicBrand=mto?(MTO_FASHION_BRANDS.has(fashionBrand.toLowerCase())?fashionBrand:"BharatShop Studio"):"BharatShop Select";
-    const derivedFashion=mto?Array.from({length:4},(_,i)=>`${origin}/api/fashion-art/${p.id}/${i}?style=${FASHION_EDITORIAL_STYLE}&fallback=product-mockup`):[];
+    const derivedFashion=mto?Array.from({length:4},(_,i)=>`${origin}/api/fashion-art/${p.id}/${i}?style=${FASHION_EDITORIAL_STYLE}&fallback=product-mockup&raster=${FASHION_RASTER_REV}`):[];
     const preferred=mto?[...gallery.filter(x=>x.currentEditorial),...gallery.filter(x=>x.editorial&&!x.currentEditorial),...gallery.filter(x=>!x.editorial)]:gallery;
     const combined=mto?[...preferred.map(x=>x.url),...derivedFashion]:preferred.map(x=>x.url),imageUrls=Array.from(new Set(combined)).slice(0,8);
     const imageLabels=imageUrls.map((u,i)=>gallery.find(x=>x.url===u)?.label||(["Editorial / product view","Design detail","Back view","Colour palette"][i]||"Product view"));
