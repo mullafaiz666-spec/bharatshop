@@ -2,6 +2,7 @@ import { db } from "@/db";
 import { productImages, products } from "@/db/schema";
 import { asc, eq, ilike } from "drizzle-orm";
 import { searxngImageSearch, SearXNGRateLimitError } from "@/lib/searxng";
+import { dedupeImageEvidence, validateImageCandidate, type ImageEvidence } from "@/lib/ai/image-evidence";
 
 const STOP = new Set(["the","with","and","for","from","pack","piece","pieces","new","best","online","india","buy","sale","free","exact","product","official","image","images","front","back","side","angle","box","packaging","contents","colour","colors","color","variants"]);
 const BAD = /(unsplash|placeholder|placehold|picsum|loremflickr|placekitten|dummyimage|via\.placeholder)/i;
@@ -15,12 +16,13 @@ const MAX_CANDIDATES = 12;
 const SEARCH_LIMIT = 10;
 const FAILURE_CACHE_MS = 10 * 60 * 1000;
 const VERIFIER_PROVIDER = "local-evidence";
-const VERIFIER_MODEL = "local-evidence-v1";
+const VERIFIER_MODEL = "local-evidence-v2-byte-validated";
 const inFlight = new Map<number, Promise<any>>();
 const recentFailures = new Map<number, { expiresAt: number; result: any }>();
 
 type Candidate = { url: string; sourceUrl?: string; title?: string; textScore?: number };
 type Product = { id: number; title: string; brand: string; category: string; sellingPriceInr?: unknown; mrpInr?: unknown; stockCount?: unknown; status?: string };
+type Usable = { candidate: Candidate; evidence: ImageEvidence };
 
 function tokens(s: string) {
   return String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").split(/\s+/).filter(x => x.length > 2 && !STOP.has(x));
@@ -62,26 +64,7 @@ function cacheFailure(id: number, result: any) {
   recentFailures.set(id, { expiresAt: Date.now() + FAILURE_CACHE_MS, result });
 }
 
-async function downloadImage(url: string) {
-  try {
-    const u = new URL(url);
-    if (u.protocol !== "https:") return null;
-    const r = await fetch(u.toString(), { signal: AbortSignal.timeout(10000), redirect: "follow", cache: "no-store", headers: { "User-Agent": "BharatShop-Image-Verifier/1.0" } });
-    if (!r.ok) return null;
-    const mediaType = (r.headers.get("content-type") || "").split(";")[0].toLowerCase();
-    if (!mediaType.startsWith("image/")) return null;
-    const buf = await r.arrayBuffer();
-    if (buf.byteLength < 4_000 || buf.byteLength > 5_000_000) return null;
-    return { data: Buffer.from(buf).toString("base64"), mediaType, byteSize: buf.byteLength };
-  } catch {
-    return null;
-  }
-}
-
-function verifyWithLocalEvidence(
-  usable: Array<{ candidate: Candidate; image: { data: string; mediaType: string; byteSize: number } }>,
-  product: Product,
-) {
+function verifyWithLocalEvidence(usable: Usable[], product: Product) {
   const brandTokens = product.brand && product.brand !== "Generic" ? tokens(product.brand) : [];
   return usable.map((entry, index) => {
     const hay = `${entry.candidate.title || ""} ${entry.candidate.sourceUrl || ""} ${entry.candidate.url}`.toLowerCase();
@@ -91,13 +74,14 @@ function verifyWithLocalEvidence(
     const titleHits = exactTitleTokens.filter(t => hay.includes(t)).length;
     const titleCoverage = exactTitleTokens.length ? titleHits / exactTitleTokens.length : 0;
     const evidenceScore = Math.max(score, titleCoverage);
-    const confidence = Math.min(0.99, Number((0.50 + 0.50 * evidenceScore).toFixed(3)));
-    const matches = brandOk && evidenceScore >= 0.50 && entry.image.byteSize >= 4_000;
+    const technicalQuality = Number(entry.evidence.technicalQuality || 0);
+    const confidence = Math.min(0.99, Number((0.45 + 0.35 * evidenceScore + 0.20 * technicalQuality).toFixed(3)));
+    const matches = Boolean(entry.evidence.ok && brandOk && evidenceScore >= 0.50 && Number(entry.evidence.byteSize || 0) >= 4_000);
     return {
       index: index + 1,
       matches,
       confidence,
-      reason: `local evidence: tokenCoverage=${evidenceScore.toFixed(2)}, brandMatch=${brandOk}, https=true, contentType=${entry.image.mediaType}, bytes=${entry.image.byteSize}`,
+      reason: `technical/source evidence: tokenCoverage=${evidenceScore.toFixed(2)}, brandMatch=${brandOk}, raster=${entry.evidence.mediaType || "unknown"}, dimensions=${entry.evidence.width || 0}x${entry.evidence.height || 0}, bytes=${entry.evidence.byteSize || 0}, quality=${technicalQuality.toFixed(2)}, semanticVision=false`,
     };
   });
 }
@@ -181,11 +165,24 @@ async function resolveOne(productId?: number, productName?: string) {
     return result;
   }
 
-  const usable = (await Promise.all(candidates.map(async candidate => ({ candidate, image: await downloadImage(candidate.url) }))))
-    .filter(x => x.image) as Array<{ candidate: Candidate; image: { data: string; mediaType: string; byteSize: number } }>;
+  const checked = await Promise.all(candidates.map(async candidate => ({ candidate, evidence: await validateImageCandidate(candidate.url) })));
+  const technicallyValid = checked.filter(x => x.evidence.ok) as Usable[];
+  const deduped = dedupeImageEvidence(technicallyValid);
+  const usable = deduped.kept;
 
   if (!usable.length) {
-    const result = { status: "NEEDS_IMAGES", productId: product.id, product: product.title, imageCount: 0, requiredImageCount: minImages, searched: queries, publicationGate: "BLOCK", message: "SearXNG returned no reachable HTTPS image bytes. Product remains staged." };
+    const result = {
+      status: "NEEDS_IMAGES",
+      productId: product.id,
+      product: product.title,
+      imageCount: 0,
+      requiredImageCount: minImages,
+      searched: queries,
+      technicalRejects: checked.filter(x => !x.evidence.ok).map(x => ({ url: x.candidate.url, reason: x.evidence.reason })),
+      duplicateRejects: deduped.rejected.map(x => ({ url: x.item.candidate.url, reason: x.reason })),
+      publicationGate: "BLOCK",
+      message: "No candidate passed byte-level raster validation and duplicate removal. Product remains staged.",
+    };
     cacheFailure(product.id, result);
     return result;
   }
@@ -194,7 +191,7 @@ async function resolveOne(productId?: number, productName?: string) {
   const accepted = verdicts
     .map(v => ({ ...v, item: usable[v.index - 1] }))
     .filter(v => v.item && v.matches && Number(v.confidence) >= MIN_CONFIDENCE && /^https:\/\//i.test(v.item.candidate.url) && !BAD.test(v.item.candidate.url))
-    .sort((a, b) => b.confidence - a.confidence)
+    .sort((a, b) => b.confidence - a.confidence || Number(b.item.evidence.technicalQuality || 0) - Number(a.item.evidence.technicalQuality || 0))
     .slice(0, MAX_IMAGES);
 
   if (accepted.length < minImages) {
@@ -205,11 +202,14 @@ async function resolveOne(productId?: number, productName?: string) {
       imageCount: accepted.length,
       requiredImageCount: minImages,
       verdicts,
+      technicalRejects: checked.filter(x => !x.evidence.ok).map(x => ({ url: x.candidate.url, reason: x.evidence.reason })),
+      duplicateRejects: deduped.rejected.map(x => ({ url: x.item.candidate.url, reason: x.reason })),
       searched: queries,
       publicationGate: "BLOCK",
       provider: VERIFIER_PROVIDER,
       model: VERIFIER_MODEL,
-      message: `Only ${accepted.length} image(s) passed the local evidence verifier (need ${minImages}). Product remains staged.`,
+      semanticVisionPerformed: false,
+      message: `Only ${accepted.length} image(s) passed technical/source evidence verification (need ${minImages}). No placeholder or fabricated vision result was substituted.`,
     };
     cacheFailure(product.id, result);
     return result;
@@ -222,7 +222,7 @@ async function resolveOne(productId?: number, productName?: string) {
     await tx.delete(productImages).where(eq(productImages.productId, product.id));
     await tx.insert(productImages).values(accepted.map((v, index) => ({
       productId: product.id,
-      imageUrl: v.item.candidate.url,
+      imageUrl: v.item.evidence.finalUrl || v.item.candidate.url,
       sourceUrl: v.item.candidate.sourceUrl || v.item.candidate.url,
       sortOrder: index,
       altText: v.item.candidate.title || `${product.title} view ${index + 1}`,
@@ -230,10 +230,25 @@ async function resolveOne(productId?: number, productName?: string) {
       verificationConfidence: Number(v.confidence).toFixed(3),
       verificationModel: VERIFIER_MODEL,
       verificationProvider: VERIFIER_PROVIDER,
-      verificationMetadata: { reason: v.reason, matches: v.matches, sourceTitle: v.item.candidate.title || "", verifiedAt: verifiedAt.toISOString() },
+      verificationMetadata: {
+        reason: v.reason,
+        matches: v.matches,
+        sourceTitle: v.item.candidate.title || "",
+        verifiedAt: verifiedAt.toISOString(),
+        semanticVisionPerformed: false,
+        technicalValidation: {
+          mediaType: v.item.evidence.mediaType,
+          byteSize: v.item.evidence.byteSize,
+          width: v.item.evidence.width,
+          height: v.item.evidence.height,
+          sha256: v.item.evidence.sha256,
+          technicalQuality: v.item.evidence.technicalQuality,
+          redirectCount: v.item.evidence.redirectCount,
+        },
+      },
       verifiedAt,
     })));
-    await tx.update(products).set({ imageUrl: accepted[0].item.candidate.url, status: nextStatus, updatedAt: new Date() }).where(eq(products.id, product.id));
+    await tx.update(products).set({ imageUrl: accepted[0].item.evidence.finalUrl || accepted[0].item.candidate.url, status: nextStatus, updatedAt: new Date() }).where(eq(products.id, product.id));
   });
 
   return {
@@ -244,12 +259,23 @@ async function resolveOne(productId?: number, productName?: string) {
     product: product.title,
     imageCount: accepted.length,
     requiredImageCount: minImages,
-    images: accepted.map(v => ({ url: v.item.candidate.url, confidence: v.confidence, reason: v.reason })),
+    images: accepted.map(v => ({
+      url: v.item.evidence.finalUrl || v.item.candidate.url,
+      confidence: v.confidence,
+      reason: v.reason,
+      width: v.item.evidence.width,
+      height: v.item.evidence.height,
+      byteSize: v.item.evidence.byteSize,
+      technicalQuality: v.item.evidence.technicalQuality,
+    })),
+    technicalRejectCount: checked.filter(x => !x.evidence.ok).length,
+    duplicateRejectCount: deduped.rejected.length,
     cached: false,
+    semanticVisionPerformed: false,
     publicationGate: dataReady ? "PASS" : "BLOCK",
     productStatus: nextStatus,
     nextStage: dataReady && nextStatus === "CEO_PENDING" ? "CEO_REVIEW" : nextStatus,
-    message: dataReady ? `${accepted.length} verified image(s) passed. Product is queued for CEO review and was not published by the media resolver.` : `${accepted.length} image(s) passed verification, but basic pricing/stock data is incomplete; product remains non-published.`,
+    message: dataReady ? `${accepted.length} technically and source-verified image(s) passed. Product is queued for CEO review; semantic AI vision was not claimed.` : `${accepted.length} image(s) passed verification, but basic pricing/stock data is incomplete; product remains non-published.`,
   };
 }
 
