@@ -12,7 +12,7 @@ concurrency:
 jobs:
   cycle:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Verify production health
         env:
@@ -38,3 +38,16 @@ jobs:
             -X POST "$BHARATSHOP_URL/api/automation/ceo-cycle?skipResearch=1" "${AUTH[@]}" --data '{}'
           curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 90 --retry 2 --retry-delay 5 \
             -X POST "$BHARATSHOP_URL/api/automation/ceo-delegation" "${AUTH[@]}" --data '{}'
+
+      - name: Advance shared specialist work queue
+        env:
+          BHARATSHOP_URL: ${{ secrets.BHARATSHOP_URL }}
+          BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
+        run: |
+          set -euo pipefail
+          AUTH=(-H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" -H "x-automation-token: $BHARATSHOP_AUTOMATION_TOKEN" -H "Content-Type: application/json")
+          # One company-bus task per scheduled pass keeps local Gemma memory/CPU bounded.
+          # The queue uses PostgreSQL row locking, so concurrent/manual runs cannot claim
+          # the same work item twice.
+          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 210 --retry 1 --retry-delay 5 \
+            -X POST "$BHARATSHOP_URL/api/automation/company-cycle?limit=1" "${AUTH[@]}" --data '{}'
