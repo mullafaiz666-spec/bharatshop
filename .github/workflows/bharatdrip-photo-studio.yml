@@ -8,7 +8,9 @@ on:
     branches: [main]
     paths:
       - 'src/lib/fashion/editorial-image.ts'
+      - 'src/lib/fashion/local-editorial-raster.ts'
       - 'src/app/api/automation/fashion-photo-studio/**'
+      - 'src/app/api/fashion-art/**'
       - 'src/app/api/fashion-photo/**'
       - 'src/app/api/storefront/products/route.ts'
       - '.github/workflows/bharatdrip-photo-studio.yml'
@@ -65,7 +67,7 @@ jobs:
           if(!d.success) throw new Error(`Fashion studio failed: ${JSON.stringify(d)}`);
           if(d.styleVersion!==process.env.FASHION_EDITORIAL_STYLE) throw new Error(`Unexpected style version: ${d.styleVersion}`);
           console.log(JSON.stringify({status:d.status,styleVersion:d.styleVersion,attempted:d.attempted||0,generated:d.generated||0,cached:d.cached||0,photorealFrontReady:d.photorealFrontReady||0,totalProducts:d.totalProducts||0,waitingPhotorealUpgrade:d.waitingPhotorealUpgrade||0},null,2));
-          if(Number(d.waitingPhotorealUpgrade||0)>0) console.log('Photoreal upgrades are pending; verified original artwork remains the approved zero-cost fallback.');
+          if(Number(d.waitingPhotorealUpgrade||0)>0) console.log('Photoreal upgrades are pending; locally rendered raster fashion media remains the approved zero-cost fallback.');
           NODE
 
       - name: Verify storefront fashion media policy
@@ -81,10 +83,10 @@ jobs:
           const allowedStates=new Set(['PHOTOREAL_CURRENT','PHOTOREAL_UPGRADE_PENDING']);
           const bad=fashion.filter(p=>!allowedStates.has(String(p.editorialStyleState||''))||!/^https:\/\//i.test(String(p.imageUrl||''))||!Array.isArray(p.imageUrls)||p.imageUrls.length<4);
           if(bad.length) throw new Error(`Made-to-order fashion violated the approved media policy: ${JSON.stringify(bad.map(p=>({id:p.id,title:p.title,imageUrl:p.imageUrl,state:p.editorialStyleState,imageCount:Array.isArray(p.imageUrls)?p.imageUrls.length:0})))}`);
-          console.log(JSON.stringify({visibleProducts:products.length,visibleFashion:fashion.length,style:expected,photorealCurrent:fashion.filter(p=>p.editorialStyleState==='PHOTOREAL_CURRENT').length,safeVerifiedPending:fashion.filter(p=>p.editorialStyleState==='PHOTOREAL_UPGRADE_PENDING').length},null,2));
+          console.log(JSON.stringify({visibleProducts:products.length,visibleFashion:fashion.length,style:expected,photorealCurrent:fashion.filter(p=>p.editorialStyleState==='PHOTOREAL_CURRENT').length,rasterFallbackPending:fashion.filter(p=>p.editorialStyleState==='PHOTOREAL_UPGRADE_PENDING').length},null,2));
           NODE
 
-      - name: Verify visible fashion primary media matches editorial state
+      - name: Verify every visible fashion primary image is raster
         run: |
           set -euo pipefail
           node - <<'NODE' > /tmp/model-media.tsv
@@ -98,13 +100,9 @@ jobs:
             type=$(awk 'BEGIN{IGNORECASE=1}/^content-type:/{print $2}' /tmp/model-headers.txt | tr -d '\r' | tail -1)
             bytes=$(wc -c < /tmp/model-image | tr -d ' ')
             echo "fashion state=$state image=$image type=$type bytes=$bytes"
-            if [ "$state" = "PHOTOREAL_CURRENT" ]; then
-              case "$type" in image/png*|image/jpeg*|image/webp*) ;; *) echo "Current photoreal media must be raster, got $type"; exit 1;; esac
-              test "$bytes" -gt 10000
-            else
-              case "$type" in image/svg+xml*|image/png*|image/jpeg*|image/webp*) ;; *) echo "Pending editorial fallback is not approved image media: $type"; exit 1;; esac
-              test "$bytes" -gt 1000
-            fi
+            case "$type" in image/png*|image/jpeg*|image/webp*) ;; *) echo "Visible fashion media must be raster; got $type for $image"; exit 1;; esac
+            test "$bytes" -gt 10000
             count=$((count+1))
           done < /tmp/model-media.tsv
-          echo "verified visible fashion primary media=$count"
+          test "$count" -gt 0
+          echo "verified visible raster fashion primary media=$count"
