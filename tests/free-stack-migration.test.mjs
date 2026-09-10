@@ -23,13 +23,15 @@ test("database runtime can use a Supabase Postgres URL without destructive migra
   assert.doesNotMatch(database, /DROP\s+(TABLE|DATABASE)|TRUNCATE/i);
 });
 
-test("Netlify scheduled function queues bounded work instead of running long AI inline", () => {
+test("Netlify scheduled function queues bounded idempotent work instead of running long AI inline", () => {
   const scheduler = read("netlify/functions/company-scheduler.mjs");
   const route = read("src/app/api/automation/free-stack-schedule/route.ts");
   assert.match(scheduler, /schedule: "10 2 \* \* \*"/);
   assert.match(scheduler, /\/api\/automation\/free-stack-schedule/);
   assert.match(scheduler, /AbortSignal\.timeout\(20_000\)/);
-  assert.match(route, /status: "QUEUED"/);
+  assert.match(route, /ALREADY_QUEUED/);
+  assert.match(route, /free-stack-daily-\$\{today\}/);
+  assert.match(route, /ON CONFLICT\(id\) DO NOTHING/);
   assert.match(route, /scheduledFreeStackCycle: true/);
   assert.match(route, /source-discovery/);
   assert.match(route, /listing/);
