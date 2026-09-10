@@ -83,6 +83,10 @@ const AGENT_ALIASES: Record<string, OperationalAgentId> = {
   "source-verification": "source-verification",
   "seller discovery": "seller-discovery",
   "seller-discovery": "seller-discovery",
+  "image & media": "image-media",
+  "image media": "image-media",
+  "image-media": "image-media",
+  media: "image-media",
   listing: "listing",
   "listing & marketing": "listing",
   marketing: "marketing",
@@ -97,7 +101,6 @@ const AGENT_ALIASES: Record<string, OperationalAgentId> = {
   automation: "automation",
   "web design": "web-design",
   "web-design": "web-design",
-  "image & media": "listing",
   "fashion designer": "listing",
   "fashion enrichment": "listing",
 };
@@ -180,6 +183,7 @@ const TOOL_PERMISSIONS: Record<OperationalAgentId, string[]> = {
   "source-discovery": ["catalog_query", "research_web"],
   "source-verification": ["catalog_query", "research_web"],
   "seller-discovery": ["research_web"],
+  "image-media": ["catalog_query", "research_web", "resolve_product_images"],
   listing: ["catalog_query", "research_web", "resolve_product_images", "fashion_studio", "list_fashion_commands"],
   marketing: ["catalog_query", "research_web", "fashion_studio", "list_fashion_commands"],
   advertising: ["inspect_business_data", "catalog_query", "research_web", "list_pending_approvals", "create_approval"],
@@ -403,7 +407,7 @@ function contextMessage(context: Record<string, unknown>) {
 }
 
 function shouldSeedCatalog(agentId: OperationalAgentId) {
-  return ["ceo", "source-discovery", "source-verification", "listing", "marketing", "advertising", "learning", "automation", "web-design"].includes(agentId);
+  return ["ceo", "source-discovery", "source-verification", "image-media", "listing", "marketing", "advertising", "learning", "automation", "web-design"].includes(agentId);
 }
 
 function shouldSeedBusiness(agentId: OperationalAgentId) {

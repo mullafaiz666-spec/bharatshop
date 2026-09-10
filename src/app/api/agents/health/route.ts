@@ -1,26 +1,35 @@
 import { NextResponse } from "next/server";
-import { aiConfigured, aiProviderName, aiModels } from "@/lib/ai/provider";
-import { publicAgentContracts, type OperationalAgentId } from "@/lib/agents/contracts";
+import { configuredAgentReadiness, deepAgentReadiness } from "@/lib/agents/readiness";
 import { marketingConnections } from "@/lib/marketing/connections";
-export const dynamic="force-dynamic";
 
-export async function GET(){
-  const ai=aiConfigured(), search=Boolean(process.env.SEARXNG_URL), automationToken=Boolean(process.env.BHARATSHOP_AUTOMATION_TOKEN||process.env.AUTOMATION_TOKEN);
-  const state:Record<OperationalAgentId,{ready:boolean;reason:string}>={
-    ceo:{ready:automationToken,reason:automationToken?"automation authorization configured":"missing automation authorization token"},
-    "source-discovery":{ready:ai&&search,reason:ai&&search?"local Gemma + SearXNG ready":"requires local Gemma and SearXNG"},
-    "source-verification":{ready:ai&&search,reason:ai&&search?"verification providers ready":"requires local Gemma and SearXNG"},
-    "seller-discovery":{ready:search,reason:search?"free SearXNG seller search ready":"requires SearXNG"},
-    listing:{ready:true,reason:ai?"local Gemma + verified-facts fallback":"verified-facts fallback ready; local Gemma unavailable"},
-    marketing:{ready:ai,reason:ai?"local Gemma ready":"local Gemma unavailable"},
-    advertising:{ready:ai,reason:ai?"local Gemma strategy ready":"local Gemma unavailable"},
-    "order-recheck":{ready:ai,reason:ai?"local Gemma + live source evidence ready":"local Gemma unavailable"},
-    tracking:{ready:true,reason:"database-backed tracking ready"},
-    learning:{ready:ai,reason:ai?"local Gemma outcome analysis ready":"local Gemma unavailable"},
-    automation:{ready:ai,reason:ai?"local Gemma workflow planning ready":"local Gemma unavailable"},
-    "web-design":{ready:ai,reason:ai?"local Gemma design planning ready":"local Gemma unavailable"},
-  };
-  const agents=publicAgentContracts().map(c=>({...c,...state[c.id as OperationalAgentId]}));
-  const meta=marketingConnections().filter(c=>["meta","facebook","instagram","meta-capi"].includes(c.key));
-  return NextResponse.json({suite:"BharatShop Agent Suite v2",promptVersion:"agent-suite-v2",provider:{name:aiProviderName(),models:aiModels(),configured:ai},freeInfrastructure:{localGemma:ai,searxng:search,serpApiRequired:false},agents,summary:{total:agents.length,ready:agents.filter(a=>a.ready).length,blocked:agents.filter(a=>!a.ready).map(a=>a.id)},metaIntegration:meta,checkedAt:new Date().toISOString()},{headers:{"Cache-Control":"no-store"}});
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const deep = ["1", "true", "yes"].includes(String(url.searchParams.get("deep") || "").toLowerCase());
+  try {
+    const readiness = deep ? await deepAgentReadiness() : configuredAgentReadiness();
+    const meta = marketingConnections().filter((connection) => ["meta", "facebook", "instagram", "meta-capi"].includes(connection.key));
+    return NextResponse.json({
+      ...(deep ? readiness : {
+        suite: "BharatShop Agent Suite v4",
+        promptVersion: "agent-suite-v4",
+        ...readiness,
+        checkedAt: new Date().toISOString(),
+      }),
+      verificationMode: deep ? "DEEP_LIVE_DEPENDENCY_PROBE" : "CONFIGURATION_PROBE",
+      metaIntegration: meta,
+      policy: "READY means the agent's required shared dependencies and runtime tool mapping passed. External paid activation, supplier payments, refunds/payouts and credential changes remain human-gated even when the agent is READY.",
+    }, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    return NextResponse.json({
+      suite: "BharatShop Agent Suite v4",
+      verificationMode: deep ? "DEEP_LIVE_DEPENDENCY_PROBE" : "CONFIGURATION_PROBE",
+      error: error instanceof Error ? error.message : "Agent readiness probe failed",
+      summary: { allReady: false },
+      checkedAt: new Date().toISOString(),
+    }, { status: 503, headers: { "Cache-Control": "no-store" } });
+  }
 }
