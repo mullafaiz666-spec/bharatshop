@@ -4,7 +4,7 @@ import { getAdminUser } from "@/lib/admin-auth";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-type ActionName = "ceo-cycle" | "company-cycle" | "google-refresh" | "catalog-repair" | "product-research" | "fashion-fronts" | "fashion-backs" | "learning-review" | "marketing-verify" | "payment-status";
+type ActionName = "ceo-cycle" | "company-cycle" | "google-refresh" | "catalog-repair" | "product-research" | "fashion-trends" | "fashion-capsule" | "fashion-fronts" | "fashion-backs" | "learning-review" | "marketing-verify" | "payment-status";
 
 type ActionSpec = {
   label: string;
@@ -20,6 +20,8 @@ const ACTIONS: Record<ActionName, ActionSpec> = {
   "google-refresh": { label: "Google market intelligence refresh", path: "/api/automation/google-intelligence", method: "POST", body: { force: true }, timeoutMs: 70_000 },
   "catalog-repair": { label: "Catalog verification and media repair", path: "/api/automation/catalog-maintenance", method: "POST", body: { limit: 6 }, timeoutMs: 180_000 },
   "product-research": { label: "Product research cycle", path: "/api/automation/research-products", method: "POST", body: { userId: 1, limit: 6 }, timeoutMs: 180_000 },
+  "fashion-trends": { label: "Refresh Fashion Trend Intelligence", path: "/api/automation/fashion-trend-intelligence", method: "POST", body: {}, timeoutMs: 120_000 },
+  "fashion-capsule": { label: "Generate 12 CEO-pending fashion products", path: "/api/fashion-designer", method: "POST", body: { count: 12 }, timeoutMs: 285_000 },
   "fashion-fronts": { label: "BharatDrip real-human front photo generation", path: "/api/automation/fashion-photo-studio", method: "POST", body: { views: [0], productLimit: 6, externalAttemptLimit: 6 }, timeoutMs: 285_000 },
   "fashion-backs": { label: "BharatDrip real-human back photo generation", path: "/api/automation/fashion-photo-studio", method: "POST", body: { views: [2], productLimit: 4, externalAttemptLimit: 4 }, timeoutMs: 285_000 },
   "learning-review": { label: "Learning and evidence review", path: "/api/agents/learning?userId=1", method: "GET", timeoutMs: 40_000 },
@@ -110,8 +112,9 @@ export async function GET(req: Request) {
       return { status: "ERROR", error: error instanceof Error ? error.message : String(error) };
     }
   }
-  const [fashion, google, research, learning, agentSuite, agentHealth, advertising, payments] = await Promise.all([
+  const [fashion, fashionTrends, google, research, learning, agentSuite, agentHealth, advertising, payments] = await Promise.all([
     safeGet("/api/automation/fashion-photo-studio"),
+    safeGet("/api/automation/fashion-trend-intelligence"),
     safeGet("/api/automation/google-intelligence"),
     safeGet("/api/automation/research-products"),
     safeGet("/api/agents/learning?userId=1", 35_000),
@@ -126,6 +129,7 @@ export async function GET(req: Request) {
     automationConfigured: Boolean(automationToken),
     services: {
       fashionStudio: compactService(fashion),
+      fashionTrendIntelligence: compactService(fashionTrends),
       googleIntelligence: compactService(google),
       productResearch: compactService(research),
       learningAgent: compactService(learning),
@@ -135,7 +139,7 @@ export async function GET(req: Request) {
       agentSuite: { status: agentSuite?.suite ? "READY" : agentSuite?.status || "UNKNOWN", suite: agentSuite?.suite, promptVersion: agentSuite?.promptVersion, operationalAgents: Array.isArray(agentSuite?.operationalAgents) ? agentSuite.operationalAgents.length : 0 },
     },
     actions: Object.entries(ACTIONS).map(([id, spec]) => ({ id, label: spec.label })),
-    policy: "Command Centre only invokes existing evidence-gated workflows and the bounded shared company work queue. Paid ad activation, supplier purchases/payments, refunds/payouts, credentials and destructive database actions are not exposed here.",
+    policy: "Command Centre only invokes existing evidence-gated workflows and the bounded shared company work queue. Fashion generation creates CEO-pending records only. Paid ad activation, supplier purchases/payments, refunds/payouts, credentials and destructive database actions are not exposed here.",
   });
 }
 
