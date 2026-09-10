@@ -9,7 +9,7 @@ test("tiny Gemma CEO read-only requests use the bounded compact primary runtime"
   const compact = read("src/lib/agents/compact-runtime.ts");
 
   assert.match(route, /"image & media": "image-media"/);
-  assert.match(route, /useBoundedFreeTierCeo/);
+  assert.match(route, /shouldUseBoundedFreeTierCeo/);
   assert.match(route, /isTinyGemmaModel\(aiModels\(\)\.text\)/);
   assert.match(route, /runCompactAgentRuntime/);
   assert.match(route, /maxAttempts: 1/);
