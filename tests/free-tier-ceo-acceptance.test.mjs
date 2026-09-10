@@ -17,8 +17,12 @@ test("tiny Gemma CEO read-only requests use the bounded compact primary runtime"
 
   assert.match(compact, /"image-media"/);
   assert.match(compact, /isTinyGemmaModel/);
+  assert.match(compact, /tinyPrimaryCeo/);
+  assert.match(compact, /tinyCeoBusinessEvidence/);
+  assert.match(compact, /CATALOG_AGENTS\.has\(input\.agentId\) && !tinyPrimaryCeo/);
+  assert.match(compact, /maxTokens: tinyPrimaryCeo \? 48/);
+  assert.match(compact, /timeoutMs: tinyPrimaryCeo \? 50_000/);
   assert.match(compact, /tinyModel \? 1 : 2/);
-  assert.match(compact, /timeoutMs: tinyModel \? 35_000 : 45_000/);
 });
 
 test("compact evidence runtime persists real tool observations and a CEO decision audit", () => {
