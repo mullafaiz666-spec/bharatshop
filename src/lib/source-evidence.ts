@@ -1,3 +1,6 @@
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
+
 export type CommerceSourceEvidence = {
   checkedAt: string;
   requestedUrl: string;
@@ -18,6 +21,7 @@ export type CommerceSourceEvidence = {
 };
 
 const STOP = new Set(["with","from","pack","piece","online","india","best","new","the","and","for","buy","sale"]);
+const MAX_REDIRECTS = 4;
 
 function tokens(value: string) {
   return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").split(/\s+/).filter(x => x.length >= 4 && !STOP.has(x));
@@ -61,21 +65,64 @@ function shippingEvidence(text: string) {
   return { verified: false };
 }
 
-export async function verifyCommerceSource(url: string, expectedTitle: string, expectedPriceInr?: number): Promise<CommerceSourceEvidence> {
-  const checkedAt = new Date().toISOString();
-  const requestedUrl = String(url || "").trim();
-  let parsed: URL;
-  try {
-    parsed = new URL(requestedUrl);
-    if (!["https:", "http:"].includes(parsed.protocol)) throw new Error("unsupported protocol");
-  } catch {
-    return { checkedAt, requestedUrl, reachable: false, titleMatch: false, priceVerified: false, stockVerified: false, shippingVerified: false, error: "Invalid source URL" };
-  }
+function publicIpv4(address: string) {
+  const parts = address.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((x) => !Number.isInteger(x) || x < 0 || x > 255)) return false;
+  const [a, b, c] = parts;
+  if (a === 0 || a === 10 || a === 127 || a >= 224) return false;
+  if (a === 100 && b >= 64 && b <= 127) return false;
+  if (a === 169 && b === 254) return false;
+  if (a === 172 && b >= 16 && b <= 31) return false;
+  if (a === 192 && b === 168) return false;
+  if (a === 192 && b === 0 && c === 0) return false;
+  if (a === 192 && b === 0 && c === 2) return false;
+  if (a === 198 && (b === 18 || b === 19)) return false;
+  if (a === 198 && b === 51 && c === 100) return false;
+  if (a === 203 && b === 0 && c === 113) return false;
+  return true;
+}
 
-  try {
-    const response = await fetch(parsed.toString(), {
+function publicIpv6(address: string) {
+  const lower = address.toLowerCase().split("%")[0];
+  if (lower === "::" || lower === "::1") return false;
+  if (lower.startsWith("fc") || lower.startsWith("fd")) return false;
+  if (/^fe[89ab]/.test(lower)) return false;
+  if (lower.startsWith("2001:db8:")) return false;
+  const mapped = lower.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (mapped) return publicIpv4(mapped[1]);
+  return true;
+}
+
+function publicAddress(address: string) {
+  const family = isIP(address);
+  if (family === 4) return publicIpv4(address);
+  if (family === 6) return publicIpv6(address);
+  return false;
+}
+
+async function assertPublicCommerceUrl(value: string) {
+  const parsed = new URL(value);
+  if (!["https:", "http:"].includes(parsed.protocol)) throw new Error("unsupported protocol");
+  if (parsed.username || parsed.password) throw new Error("credentials in source URL are not allowed");
+  const port = parsed.port || (parsed.protocol === "https:" ? "443" : "80");
+  if (!(["80", "443"].includes(port))) throw new Error("non-standard source URL port is not allowed");
+  const hostname = parsed.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  if (!hostname || hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local") || hostname.endsWith(".internal")) throw new Error("private/local source host is not allowed");
+  if (isIP(hostname)) {
+    if (!publicAddress(hostname)) throw new Error("private/reserved source address is not allowed");
+  } else {
+    const addresses = await lookup(hostname, { all: true, verbatim: true });
+    if (!addresses.length || addresses.some((entry) => !publicAddress(entry.address))) throw new Error("source host resolves to a private/reserved address");
+  }
+  return parsed;
+}
+
+async function safeCommerceFetch(initialUrl: string) {
+  let current = await assertPublicCommerceUrl(initialUrl);
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
+    const response = await fetch(current.toString(), {
       method: "GET",
-      redirect: "follow",
+      redirect: "manual",
       cache: "no-store",
       signal: AbortSignal.timeout(15000),
       headers: {
@@ -84,9 +131,29 @@ export async function verifyCommerceSource(url: string, expectedTitle: string, e
         "User-Agent": "Mozilla/5.0 (compatible; BharatShop-Source-Verifier/1.0; +https://bharatshop-9w4a.onrender.com)",
       },
     });
+    if (![301, 302, 303, 307, 308].includes(response.status)) return { response, finalUrl: current.toString() };
+    if (hop === MAX_REDIRECTS) throw new Error("Too many source redirects");
+    const location = response.headers.get("location");
+    if (!location) throw new Error("Source redirect is missing a location");
+    current = await assertPublicCommerceUrl(new URL(location, current).toString());
+  }
+  throw new Error("Source redirect limit exceeded");
+}
+
+export async function verifyCommerceSource(url: string, expectedTitle: string, expectedPriceInr?: number): Promise<CommerceSourceEvidence> {
+  const checkedAt = new Date().toISOString();
+  const requestedUrl = String(url || "").trim();
+  try {
+    await assertPublicCommerceUrl(requestedUrl);
+  } catch (error) {
+    return { checkedAt, requestedUrl, reachable: false, titleMatch: false, priceVerified: false, stockVerified: false, shippingVerified: false, error: error instanceof Error ? error.message : "Invalid source URL" };
+  }
+
+  try {
+    const { response, finalUrl } = await safeCommerceFetch(requestedUrl);
     const contentType = response.headers.get("content-type") || "";
-    if (!response.ok) return { checkedAt, requestedUrl, finalUrl: response.url, reachable: false, httpStatus: response.status, contentType, titleMatch: false, priceVerified: false, stockVerified: false, shippingVerified: false, error: `Source returned HTTP ${response.status}` };
-    if (!/text\/html|application\/xhtml\+xml/i.test(contentType)) return { checkedAt, requestedUrl, finalUrl: response.url, reachable: true, httpStatus: response.status, contentType, titleMatch: false, priceVerified: false, stockVerified: false, shippingVerified: false, error: "Source did not return an HTML commerce page" };
+    if (!response.ok) return { checkedAt, requestedUrl, finalUrl, reachable: false, httpStatus: response.status, contentType, titleMatch: false, priceVerified: false, stockVerified: false, shippingVerified: false, error: `Source returned HTTP ${response.status}` };
+    if (!/text\/html|application\/xhtml\+xml/i.test(contentType)) return { checkedAt, requestedUrl, finalUrl, reachable: true, httpStatus: response.status, contentType, titleMatch: false, priceVerified: false, stockVerified: false, shippingVerified: false, error: "Source did not return an HTML commerce page" };
 
     const text = visibleText(await response.text());
     const expectedTokens = tokens(expectedTitle).slice(0, 10);
@@ -109,7 +176,7 @@ export async function verifyCommerceSource(url: string, expectedTitle: string, e
     return {
       checkedAt,
       requestedUrl,
-      finalUrl: response.url,
+      finalUrl,
       reachable: true,
       httpStatus: response.status,
       contentType,

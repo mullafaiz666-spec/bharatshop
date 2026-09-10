@@ -12,6 +12,9 @@ export default async function DashboardPage() {
   if (!admin) redirect("/admin-login");
   return <>
     <div className="fixed bottom-5 right-5 z-[80] flex flex-col items-end gap-2">
+      <Link href="/dashboard/command-centre" className="rounded-2xl border border-cyan-300/40 bg-cyan-300 px-4 py-3 text-sm font-black text-slate-950 shadow-2xl shadow-cyan-950/40 transition hover:bg-cyan-200">
+        🧠 AI Company Command Centre
+      </Link>
       <Link href="/dashboard/marketing" className="rounded-2xl border border-lime-300/40 bg-lime-300 px-4 py-3 text-sm font-black text-slate-950 shadow-2xl shadow-lime-950/40 transition hover:bg-lime-200">
         📣 Marketing Cockpit
       </Link>

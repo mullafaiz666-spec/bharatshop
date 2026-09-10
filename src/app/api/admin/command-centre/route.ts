@@ -4,7 +4,7 @@ import { getAdminUser } from "@/lib/admin-auth";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-type ActionName = "ceo-cycle" | "google-refresh" | "catalog-repair" | "product-research" | "fashion-fronts" | "fashion-backs" | "learning-review" | "marketing-verify" | "payment-status";
+type ActionName = "ceo-cycle" | "company-cycle" | "google-refresh" | "catalog-repair" | "product-research" | "fashion-fronts" | "fashion-backs" | "learning-review" | "marketing-verify" | "payment-status";
 
 type ActionSpec = {
   label: string;
@@ -16,6 +16,7 @@ type ActionSpec = {
 
 const ACTIONS: Record<ActionName, ActionSpec> = {
   "ceo-cycle": { label: "CEO operating cycle", path: "/api/automation/ceo-cycle?skipResearch=1", method: "POST", body: {}, timeoutMs: 150_000 },
+  "company-cycle": { label: "Advance shared AI company queue", path: "/api/automation/company-cycle?limit=1", method: "POST", body: {}, timeoutMs: 220_000 },
   "google-refresh": { label: "Google market intelligence refresh", path: "/api/automation/google-intelligence", method: "POST", body: { force: true }, timeoutMs: 70_000 },
   "catalog-repair": { label: "Catalog verification and media repair", path: "/api/automation/catalog-maintenance", method: "POST", body: { limit: 6 }, timeoutMs: 180_000 },
   "product-research": { label: "Product research cycle", path: "/api/automation/research-products", method: "POST", body: { userId: 1, limit: 6 }, timeoutMs: 180_000 },
@@ -134,7 +135,7 @@ export async function GET(req: Request) {
       agentSuite: { status: agentSuite?.suite ? "READY" : agentSuite?.status || "UNKNOWN", suite: agentSuite?.suite, promptVersion: agentSuite?.promptVersion, operationalAgents: Array.isArray(agentSuite?.operationalAgents) ? agentSuite.operationalAgents.length : 0 },
     },
     actions: Object.entries(ACTIONS).map(([id, spec]) => ({ id, label: spec.label })),
-    policy: "Command Centre only invokes existing evidence-gated workflows. Paid ad activation, supplier purchases, refunds/payouts, credential changes and destructive database actions are not exposed here.",
+    policy: "Command Centre only invokes existing evidence-gated workflows and the bounded shared company work queue. Paid ad activation, supplier purchases/payments, refunds/payouts, credentials and destructive database actions are not exposed here.",
   });
 }
 
