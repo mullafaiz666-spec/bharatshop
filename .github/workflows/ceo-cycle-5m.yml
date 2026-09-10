@@ -7,12 +7,12 @@ on:
 
 concurrency:
   group: bharatshop-ceo-cycle
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   cycle:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - name: Verify production health
         env:
@@ -20,10 +20,10 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$BHARATSHOP_URL"
-          curl --silent --show-error --fail-with-body --retry 3 --retry-delay 5 "$BHARATSHOP_URL/api/health"
-          curl --silent --show-error --fail-with-body --retry 3 --retry-delay 5 "$BHARATSHOP_URL/api/storefront/products?limit=1"
+          curl --silent --show-error --fail-with-body --connect-timeout 10 --max-time 45 --retry 3 --retry-delay 5 "$BHARATSHOP_URL/api/health"
+          curl --silent --show-error --fail-with-body --connect-timeout 10 --max-time 45 --retry 3 --retry-delay 5 "$BHARATSHOP_URL/api/storefront/products?limit=1"
 
-      - name: Run CEO cycle and delegated operations
+      - name: Run bounded CEO cycle and delegated operations
         env:
           BHARATSHOP_URL: ${{ secrets.BHARATSHOP_URL }}
           BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
@@ -32,5 +32,9 @@ jobs:
           test -n "$BHARATSHOP_URL"
           test -n "$BHARATSHOP_AUTOMATION_TOKEN"
           AUTH=(-H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" -H "x-automation-token: $BHARATSHOP_AUTOMATION_TOKEN" -H "Content-Type: application/json")
-          curl --silent --show-error --fail-with-body --retry 3 --retry-delay 5 -X POST "$BHARATSHOP_URL/api/automation/ceo-cycle" "${AUTH[@]}" --data '{}'
-          curl --silent --show-error --fail-with-body --retry 3 --retry-delay 5 -X POST "$BHARATSHOP_URL/api/automation/ceo-delegation" "${AUTH[@]}" --data '{}'
+          # Product research has its own catalog workflow. Keep the five-minute CEO pass
+          # focused on approval/listing work so it stays inside the free-tier request budget.
+          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 270 --retry 1 --retry-delay 5 \
+            -X POST "$BHARATSHOP_URL/api/automation/ceo-cycle?skipResearch=1" "${AUTH[@]}" --data '{}'
+          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 90 --retry 2 --retry-delay 5 \
+            -X POST "$BHARATSHOP_URL/api/automation/ceo-delegation" "${AUTH[@]}" --data '{}'
