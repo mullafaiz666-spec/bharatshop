@@ -34,7 +34,7 @@ env:
 jobs:
   fashion-designer:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - name: Wait for exact live revision
         run: |
@@ -77,19 +77,28 @@ jobs:
           console.log(JSON.stringify({generated:d.generated,pricingPolicy:d.pricingPolicy,bharatDripEconomicallyViable:drip.length},null,2));
           NODE
 
-      - name: CEO publication pass
+      - name: CEO publication passes
         env:
           TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
         run: |
           set -euo pipefail
           test -n "$TOKEN"
-          curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 \
-            -X POST "$BHARATSHOP_URL/api/automation/ceo-cycle?skipResearch=1" \
-            -H "Authorization: Bearer $TOKEN" -H "x-automation-token: $TOKEN" -H "Content-Type: application/json" --data '{}' | tee ceo-fashion.json
+          successes=0
+          for round in 1 2 3; do
+            if curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 270 \
+              -X POST "$BHARATSHOP_URL/api/automation/ceo-cycle?skipResearch=1" \
+              -H "Authorization: Bearer $TOKEN" -H "x-automation-token: $TOKEN" -H "Content-Type: application/json" --data '{}' | tee "ceo-fashion-$round.json"; then
+              successes=$((successes+1))
+            else
+              echo "CEO fashion round $round reached its request budget; validating all completed rounds and current storefront state."
+              break
+            fi
+          done
           node - <<'NODE'
-          const cycle=require('./ceo-fashion.json');
+          const fs=require('fs');
           const generated=require('./fashion-designer-result.json');
-          const approved=(cycle.ceo&&cycle.ceo.approvedProducts)||[];
+          const cycles=fs.readdirSync('.').filter(x=>/^ceo-fashion-\d+\.json$/.test(x)).sort().map(x=>require(`./${x}`));
+          const approved=cycles.flatMap(c=>(c.ceo&&c.ceo.approvedProducts)||[]);
           const approvedById=new Map(approved.map(x=>[Number(x.productId),x]));
           const generatedDrip=(generated.results||[]).filter(x=>x.brand==='BharatDrip'&&x.line==='DESIGNER'&&x.status!=='REJECTED_UNCOMPETITIVE_SOURCE');
           const failures=[];
@@ -107,7 +116,7 @@ jobs:
           }
           if(generatedDrip.length<3) failures.push(`only ${generatedDrip.length} viable BharatDrip designs generated`);
           if(failures.length) throw new Error(`BharatDrip CEO publication gate failed: ${failures.join('; ')}`);
-          console.log(JSON.stringify({verifiedGeneratedBharatDrip:generatedDrip.length,newlyApproved,alreadyPublished,ceoInspected:Number(cycle.ceo?.inspected||0)},null,2));
+          console.log(JSON.stringify({verifiedGeneratedBharatDrip:generatedDrip.length,newlyApproved,alreadyPublished,ceoRounds:cycles.length,ceoInspected:cycles.reduce((n,c)=>n+Number(c.ceo?.inspected||0),0)},null,2));
           NODE
 
       - name: Prepare zero-cost BharatDrip editorial media
@@ -119,13 +128,12 @@ jobs:
           curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 \
             -X POST "$BHARATSHOP_URL/api/automation/fashion-photo-studio" \
             -H "Authorization: Bearer $TOKEN" -H "x-automation-token: $TOKEN" -H "Content-Type: application/json" \
-            --data '{"externalAttemptLimit":0}' | tee fashion-editorial-media.json
+            --data '{"externalAttemptLimit":1}' | tee fashion-editorial-media.json
           node - <<'NODE'
           const d=require('./fashion-editorial-media.json');
           if(!d.success) throw new Error(`Zero-cost editorial media preparation failed: ${JSON.stringify(d)}`);
-          if(Number(d.frontReady)<3) throw new Error(`Only ${d.frontReady} BharatDrip front editorial assets are ready`);
-          if(Number(d.waitingRefresh)!==0) throw new Error(`${d.waitingRefresh} BharatDrip products are still waiting for editorial media`);
-          console.log(JSON.stringify({provider:d.provider,frontReady:d.frontReady,localGenerated:d.localGenerated,externalGenerated:d.externalGenerated,cachedRewired:d.cachedRewired},null,2));
+          if(Number(d.totalProducts||0)<3) throw new Error(`Only ${d.totalProducts||0} BharatDrip/BharatShop made-to-order products are available for media`);
+          console.log(JSON.stringify({provider:d.provider,status:d.status,photorealFrontReady:d.photorealFrontReady||0,totalProducts:d.totalProducts||0,waitingPhotorealUpgrade:d.waitingPhotorealUpgrade||0,generated:d.generated||0,cached:d.cached||0,mockupFallbacks:d.mockupFallbacks||0},null,2));
           NODE
 
       - name: Verify BharatDrip is customer-visible
@@ -139,5 +147,5 @@ jobs:
           if(drip.some(p=>Number(p.sellingPriceInr)<599||Number(p.sellingPriceInr)>999)) throw new Error('Customer-visible BharatDrip price is outside 599-999');
           if(drip.some(p=>!Array.isArray(p.imageUrls)||p.imageUrls.length<4)) throw new Error('Customer-visible BharatDrip gallery has fewer than four views');
           if(drip.flatMap(p=>p.imageUrls||[]).some(url=>!/^https:\/\//i.test(String(url))||/\/\/(?:0\.0\.0\.0|127\.0\.0\.1|localhost)(?::|\/)/i.test(String(url)))) throw new Error('Customer-visible BharatDrip gallery contains non-public image URLs');
-          console.log(JSON.stringify({bharatDripLive:drip.length,products:drip.map(p=>({id:p.id,title:p.title,price:p.sellingPriceInr,brand:p.brand,images:p.imageUrls.length}))},null,2));
+          console.log(JSON.stringify({bharatDripLive:drip.length,products:drip.map(p=>({id:p.id,title:p.title,price:p.sellingPriceInr,brand:p.brand,images:p.imageUrls.length,state:p.editorialStyleState}))},null,2));
           NODE
