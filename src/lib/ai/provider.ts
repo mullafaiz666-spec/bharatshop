@@ -8,12 +8,12 @@ const baseUrl = () => (process.env.AI_BASE_URL || process.env.LOCAL_AI_BASE_URL 
 const apiKey = () => process.env.AI_API_KEY || process.env.LOCAL_AI_API_KEY || "";
 const geminiApiKey = () => process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || "";
 const configuredProvider = () => String(process.env.AI_PROVIDER || "").trim().toLowerCase();
-const useGemini = () => configuredProvider() === "gemini" || (!configuredProvider() && !!geminiApiKey());
+const shouldUseGemini = () => configuredProvider() === "gemini" || (!configuredProvider() && !!geminiApiKey());
 
-export const aiProviderName = () => useGemini() ? "gemini" : (process.env.AI_PROVIDER || "local-openai-compatible");
-export const aiConfigured = () => useGemini() ? !!geminiApiKey() : !!baseUrl();
+export const aiProviderName = () => shouldUseGemini() ? "gemini" : (process.env.AI_PROVIDER || "local-openai-compatible");
+export const aiConfigured = () => shouldUseGemini() ? !!geminiApiKey() : !!baseUrl();
 export const aiModels = () => ({
-  text: useGemini()
+  text: shouldUseGemini()
     ? (process.env.GEMINI_MODEL || process.env.AI_TEXT_MODEL || "gemini-3.7-flash")
     : (process.env.AI_TEXT_MODEL || process.env.LOCAL_AI_TEXT_MODEL || "gemma3:270m-it-qat"),
   vision: process.env.AI_VISION_MODEL || process.env.LOCAL_AI_VISION_MODEL || "local-evidence-v1",
@@ -137,7 +137,7 @@ async function requestGemini(messages: AIMessage[], options: ProviderOptions = {
 }
 
 export async function runAI(messages: AIMessage[], options: ProviderOptions = {}) {
-  if (useGemini()) return requestGemini(messages, options);
+  if (shouldUseGemini()) return requestGemini(messages, options);
   const models = aiModels();
   return request("/chat/completions", {
     model: options.model || models.text,
@@ -170,7 +170,7 @@ export async function verifyImagesWithAI() {
 export async function checkAI(deep = false) {
   const provider = aiProviderName();
   const models = aiModels();
-  if (useGemini()) {
+  if (shouldUseGemini()) {
     const key = geminiApiKey();
     if (!key) return { configured: false, ready: false, reason: "missing", provider, models };
     try {
