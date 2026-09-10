@@ -3,6 +3,7 @@ export type OperationalAgentId =
   | "source-discovery"
   | "source-verification"
   | "seller-discovery"
+  | "image-media"
   | "listing"
   | "marketing"
   | "advertising"
@@ -62,12 +63,12 @@ export const AGENT_CONTRACTS: Record<OperationalAgentId, AgentContract> = {
   },
   "source-verification": {
     id: "source-verification", name: "Source Verification Agent", endpoint: "/api/agents/source-verify",
-    mission: "Verify title, live price, stock, shipping, policy and economics before persisting a source.",
-    tools: ["source-page evidence", "source-policy", "economics gate", "PostgreSQL persistence"],
+    mission: "Verify title, live price, stock, shipping, policy, freshness and economics before persisting a source.",
+    tools: ["source-page evidence", "source-policy", "evidence freshness", "economics gate", "PostgreSQL persistence"],
     requiredInputs: ["candidate URLs", "selling price", "minimum margin"],
-    successCriteria: ["title match", "price verified", "stock verified", "shipping verified", "fulfillment policy allowed", "margin passes"],
+    successCriteria: ["title match", "price verified", "stock verified", "shipping verified", "fresh evidence", "fulfillment policy allowed", "margin passes"],
     approvalBoundary: "Verification persists evidence but never purchases inventory.",
-    prompt: prompt("BharatShop Source Verification Agent", "Select only a candidate whose live evidence and source policy pass. Benchmark-only retail marketplace evidence is not fulfillment evidence. If no candidate passes, selectedIndex must be null."),
+    prompt: prompt("BharatShop Source Verification Agent", "Select only a candidate whose live evidence, freshness, source policy and economics pass. Benchmark-only retail marketplace evidence is not fulfillment evidence. If no candidate passes, selectedIndex must be null. Stale evidence is not current evidence."),
   },
   "seller-discovery": {
     id: "seller-discovery", name: "Seller Discovery Agent", endpoint: "/api/agents/seller-discovery",
@@ -78,11 +79,20 @@ export const AGENT_CONTRACTS: Record<OperationalAgentId, AgentContract> = {
     approvalBoundary: "Lead discovery does not contact or contract a seller automatically.",
     prompt: prompt("BharatShop Seller Discovery Agent", "Prefer direct manufacturers/wholesalers and independent brands that can beat retail-marketplace landed cost. Never invent phone, email, MOQ or wholesale terms."),
   },
+  "image-media": {
+    id: "image-media", name: "Image & Media Agent", endpoint: "/api/agents/image-media",
+    mission: "Find, technically validate, deduplicate and persist truthful product media without placeholders or fabricated vision results.",
+    tools: ["SearXNG image search", "HTTPS media fetch", "technical image validation", "duplicate hashing", "verified media persistence"],
+    requiredInputs: ["product ID or title", "verified product identity", "source-backed image candidates"],
+    successCriteria: ["reachable raster media", "valid content type", "bounded file size", "minimum dimensions", "duplicates removed", "source/title evidence present", "no placeholders"],
+    approvalBoundary: "May verify and stage media; cannot fabricate AI-vision verification, bypass source rights policy, or publish a product around failed media gates.",
+    prompt: prompt("BharatShop Image & Media Agent", "Use actual fetched image bytes and source metadata. Reject placeholders, malformed/non-raster responses, unsafe redirects, tiny/corrupt media and exact duplicates. If semantic vision is unavailable, say so; technical/source evidence is not AI vision."),
+  },
   listing: {
     id: "listing", name: "Listing & Creative Agent", endpoint: "/api/agents/listing",
     mission: "Publish only verified, competitive, profitable products with complete customer-safe content.",
     tools: ["market benchmark", "verified media", "local Gemma copy", "catalog persistence"],
-    requiredInputs: ["CEO approval", "verified source/production mapping", "4-8 valid media", "specifications", "economics"],
+    requiredInputs: ["CEO approval", "verified source/production mapping", "required valid media", "specifications", "economics"],
     successCriteria: ["market ceiling respected", "positive margin", "customer-safe copy", "published media resolves"],
     approvalBoundary: "Cannot bypass CEO/source/media/economics gates.",
     prompt: prompt("BharatShop Listing Agent", "Write customer-facing copy only from verified facts. Do not expose supplier names, costs, internal verification or AI. Keep titles clean and searchable; never claim licensed characters, certifications or benefits without evidence."),
@@ -155,5 +165,5 @@ export const AGENT_CONTRACTS: Record<OperationalAgentId, AgentContract> = {
 export function agentPrompt(id: OperationalAgentId) { return AGENT_CONTRACTS[id].prompt; }
 
 export function publicAgentContracts() {
-  return Object.values(AGENT_CONTRACTS).map(({ prompt: _prompt, ...contract }) => ({ ...contract, promptVersion: "agent-suite-v2" }));
+  return Object.values(AGENT_CONTRACTS).map(({ prompt: _prompt, ...contract }) => ({ ...contract, promptVersion: "agent-suite-v4" }));
 }
