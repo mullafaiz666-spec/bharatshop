@@ -52,6 +52,7 @@ type StudioData = {
   products: Product[];
   priceBands: Record<string, { min: number; max: number }>;
   policy: string;
+  audit: Array<{ id: number; action_type: string; message: string; status: string; created_at: string }>;
 };
 type Placement = { x: number; y: number; scale: number; rotate: number };
 type StudioTab = "inspiration" | "uploads" | "text" | "layers";
@@ -194,6 +195,7 @@ export default function FashionDesignerStudio() {
     const r = await fetch("/api/admin/fashion-studio", { cache: "no-store" }).catch(() => null);
     const d = r?.ok ? await r.json().catch(() => null) : null;
     if (d) setData(d);
+    else setNotice("Fashion Studio could not load. Refresh or sign in again.");
     setLoading(false);
   }, []);
   useEffect(() => { void load(); }, [load]);
@@ -230,7 +232,7 @@ export default function FashionDesignerStudio() {
       setLastResult(d);
       if (!r.ok) { setNotice(d.error || "Fashion studio action was blocked."); return null; }
       return d;
-    } finally { setBusy(null); }
+    } catch { setNotice("Connection failed. Check recent designs before retrying a save."); return null; } finally { setBusy(null); }
   }
 
   async function makeConcept() {
@@ -336,7 +338,8 @@ export default function FashionDesignerStudio() {
             <div className="rounded-xl bg-orange-500/10 p-2.5 text-orange-300"><Shirt size={20} /></div>
             <div className="min-w-0"><h1 className="truncate text-lg font-black md:text-xl">BharatShop Fashion Studio</h1><p className="hidden text-xs text-slate-500 sm:block">Trend → design → Qikink → media → CEO gate</p></div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <a href="/dashboard/marketing" className="rounded-xl border border-slate-700 px-3 py-2 text-xs">Marketing cockpit</a>
             <button onClick={() => void makeConcept()} disabled={!!busy} className="rounded-xl border border-orange-400/30 bg-orange-500/10 px-3 py-2 text-xs font-black text-orange-200 hover:bg-orange-500/20 disabled:opacity-50"><WandSparkles size={14} className="mr-1.5 inline" />AI redesign</button>
             <button onClick={() => void queueDesign()} disabled={!!busy} className="rounded-xl bg-orange-500 px-4 py-2 text-xs font-black text-slate-950 hover:bg-orange-400 disabled:opacity-50">{busy === "create" ? <Loader2 size={14} className="mr-1.5 inline animate-spin" /> : <Save size={14} className="mr-1.5 inline" />}Queue product</button>
           </div>
@@ -420,6 +423,23 @@ export default function FashionDesignerStudio() {
         <section className={`${panel} mt-3 p-4`}>
           <div className="flex flex-wrap items-end justify-between gap-3"><div><div className="text-sm font-black">Recent Fashion Studio products</div><p className="mt-1 text-xs text-slate-500">Select any design to attach a normal product photo, or send it through the CEO/listing workflow.</p></div><div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">{data?.products?.length || 0} recent records</div></div>
           <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">{(data?.products || []).slice(0, 10).map(product => <button key={product.id} onClick={() => { setSelectedProductId(product.id); setTab("uploads"); }} className={`overflow-hidden rounded-xl border bg-slate-950 text-left transition hover:border-orange-400/50 ${selectedProductId === product.id ? "border-orange-400" : "border-slate-800"}`}><div className="aspect-[4/3] overflow-hidden bg-slate-900"><img src={`/api/fashion-photo/${product.id}/0`} alt={product.title} className="h-full w-full object-cover" /></div><div className="p-3"><div className="flex items-center justify-between gap-2"><span className="text-[9px] font-black uppercase tracking-[.16em] text-orange-300">{product.brand}</span><span className="text-[9px] text-slate-500">{product.status}</span></div><div className="mt-1 line-clamp-2 text-xs font-black text-slate-200">{product.title}</div><div className="mt-2 flex items-center justify-between text-[10px]"><span className="text-slate-500">₹{product.sellingPriceInr}</span><span className="font-bold text-emerald-400">{Math.round(product.marginPct)}% margin</span></div><div className="mt-2 flex items-center text-[10px] font-bold text-slate-400"><ImagePlus size={11} className="mr-1" />Attach normal photo<ChevronRight size={11} className="ml-auto" /></div></div></button>)}</div>
+        </section>
+
+        {selectedProductId && data?.products.find(p => p.id === selectedProductId) ? (() => {
+          const selected = data.products.find(p => p.id === selectedProductId)!;
+          return <section className={`${panel} mt-3 p-4`}>
+            <h2 className="text-sm font-black">Saved tech pack & approval</h2>
+            <p className="mt-2 text-sm">{selected.title} · {selected.status} · ₹{selected.sellingPriceInr}</p>
+            <p className="mt-2 text-xs text-slate-400">Supplier estimate, design brief, sizes and placements below are saved specifications. Production artwork and supplier confirmation are still required before manufacture.</p>
+            <a className="mt-3 inline-block rounded-xl border border-orange-400/40 px-4 py-2 text-xs text-orange-200" href={`/dashboard/marketing?productId=${selected.id}`}>Plan marketing for this design</a>
+            <p className="mt-2 text-xs text-slate-500">Campaign creation remains subject to the existing publication and profitability gates.</p>
+            <details className="mt-3"><summary className="cursor-pointer text-xs">View saved tech pack</summary><pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap text-xs">{JSON.stringify(selected.specifications, null, 2)}</pre></details>
+          </section>;
+        })() : null}
+        <section className={`${panel} mt-3 p-4`}>
+          <h2 className="text-sm font-black">Design audit · last 20 events</h2>
+          <div className="mt-3 overflow-x-auto"><table className="w-full text-left text-xs"><thead><tr><th className="p-2">Time</th><th className="p-2">Action</th><th className="p-2">Result</th><th className="p-2">Details</th></tr></thead><tbody>{(data?.audit || []).map(event => <tr key={event.id} className="border-t border-slate-800"><td className="p-2">{new Date(event.created_at).toLocaleString("en-IN")}</td><td className="p-2">{event.action_type}</td><td className="p-2">{event.status}</td><td className="p-2">{event.message}</td></tr>)}</tbody></table></div>
+          {!data?.audit?.length ? <p className="mt-2 text-xs text-slate-500">No saved design events yet.</p> : null}
         </section>
 
         {lastResult ? <details className="mt-3 rounded-xl border border-slate-800 bg-slate-950 p-3"><summary className="cursor-pointer text-xs font-bold text-slate-400">Last backend response</summary><pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap text-[10px] leading-5 text-slate-500">{JSON.stringify(lastResult, null, 2)}</pre></details> : null}

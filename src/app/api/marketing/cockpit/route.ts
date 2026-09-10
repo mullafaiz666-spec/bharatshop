@@ -104,8 +104,11 @@ export async function GET() {
     }, { impressions: 0, clicks: 0, conversions: 0, revenue: 0 });
 
     const orderTotals = orderRows.reduce((acc, order) => {
-      acc.revenue += Number(order.customerPaidInr || 0);
-      acc.profit += Number(order.netProfitInr || 0);
+      // TOKEN_PAID may only be a COD deposit; it is not full order revenue.
+      if (order.paymentStatus === "PAID" && !["CANCELLED", "REFUNDED", "RETURNED"].includes(order.fulfillmentStatus || "")) {
+        acc.revenue += Number(order.customerPaidInr || 0);
+        acc.profit += Number(order.netProfitInr || 0);
+      }
       acc.orders += 1;
       return acc;
     }, { revenue: 0, profit: 0, orders: 0 });
