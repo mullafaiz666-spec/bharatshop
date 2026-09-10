@@ -26,6 +26,18 @@ function upstreamPath(path) {
   return path;
 }
 
+function adaptiveContextLength(messages, tools) {
+  const configuredRaw = Number(process.env.OLLAMA_CONTEXT_LENGTH || 2048);
+  const configured = Number.isFinite(configuredRaw) ? Math.max(512, Math.min(8192, Math.floor(configuredRaw))) : 2048;
+  const hasTools = Array.isArray(tools) && tools.length > 0;
+  const promptChars = Array.isArray(messages)
+    ? messages.reduce((sum, message) => sum + String(message?.role || '').length + String(message?.content || '').length, 0)
+    : 0;
+  if (!hasTools && promptChars <= 1200) return Math.min(configured, 512);
+  if (!hasTools && promptChars <= 3000) return Math.min(configured, 1024);
+  return configured;
+}
+
 function toOllamaPayload(body) {
   const json = JSON.parse(body.toString('utf8'));
   const messages = Array.isArray(json.messages) ? json.messages.map((message) => {
@@ -36,19 +48,21 @@ function toOllamaPayload(body) {
       .join('\n');
     return { ...message, content: text };
   }) : [];
+  const tools = Array.isArray(json.tools) ? json.tools : [];
   const requestedTokens = Number(json.max_tokens ?? json.max_completion_tokens ?? 256);
   const numPredict = Number.isFinite(requestedTokens) ? Math.max(1, Math.min(1024, Math.floor(requestedTokens))) : 256;
   return Buffer.from(JSON.stringify({
     model,
     messages,
     stream: false,
-    ...(Array.isArray(json.tools) && json.tools.length ? { tools: json.tools } : {}),
+    ...(tools.length ? { tools } : {}),
     options: {
       temperature: Number(json.temperature ?? 0.2),
-      // 1024 tokens was too small once tool schemas, memory and observations were
-      // included. 2048 stays conservative for the 270M free-tier model while
-      // allowing a genuine multi-step agent exchange.
-      num_ctx: Number(process.env.OLLAMA_CONTEXT_LENGTH || 2048),
+      // Short synthesis/health prompts do not need the same context allocation as
+      // tool-heavy agent turns. Keeping them at 512/1024 materially reduces CPU
+      // and memory pressure on Render's 512 MB free instance while preserving the
+      // 2048 default for genuine multi-step/tool exchanges.
+      num_ctx: adaptiveContextLength(messages, tools),
       num_predict: numPredict,
     },
   }));
