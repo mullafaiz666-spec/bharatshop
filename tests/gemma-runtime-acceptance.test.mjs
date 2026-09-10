@@ -98,37 +98,40 @@ test("CEO cycle activates human order gating only for genuine client orders", ()
   assert.match(src, /Human order gating starts only when a genuine client order exists/);
 });
 
-test("CEO uses a tiny Gemma decision protocol suitable for free CPU", () => {
-  const src = read("src/app/api/ceo-chat/route.ts");
-  assert.match(src, /TOOL:<name>/);
-  assert.match(src, /ANSWER:<max 16 words>/);
-  assert.match(src, /maxTokens: 20/);
-  assert.match(src, /tinyFacts/);
-  assert.match(src, /gemma-compact-plan-act/);
-  assert.match(src, /modelStatus: "live"/);
-  assert.doesNotMatch(src, /evidenceDigest/);
-  assert.doesNotMatch(src, /maxTokens: 36/);
-  assert.doesNotMatch(src, /maxTokens: 240/);
-  assert.doesNotMatch(src, /maxTokens: 280/);
+test("Gemma agent runtime uses bounded multi-step plan-tool-observe rather than tiny one-shot replies", () => {
+  const src = read("src/lib/agents/runtime.ts");
+  assert.match(src, /agent-runtime-v4-plan-tool-observe/);
+  assert.match(src, /for \(let step = 1; step <= maxSteps; step\+\+\)/);
+  assert.match(src, /tools: nativeTools\(agentId\)/);
+  assert.match(src, /maxTokens: step === maxSteps \? 650 : 420/);
+  assert.match(src, /weakAnswer/);
+  assert.match(src, /shallow-answer repair/);
+  assert.match(src, /delegate_agent/);
+  assert.doesNotMatch(src, /ANSWER:<max 16 words>/);
+  assert.doesNotMatch(src, /maxTokens: 20/);
   assert.doesNotMatch(src, /humanFallback/);
 });
 
-test("CEO parser accepts compact approval tool variants without bypassing Gemma", () => {
-  const src = read("src/app/api/ceo-chat/route.ts");
-  assert.match(src, /function normalizeModelTool/);
-  assert.match(src, /JSON\.parse\(cleaned\)/);
-  assert.match(src, /p: "create_approval"/);
-  assert.match(src, /createapproval: "create_approval"/);
-  assert.match(src, /requestapproval: "create_approval"/);
-  assert.match(src, /TOOL\\s\*:\\s\*\(\[\^\\n\]\+\)/);
+test("runtime supports both native tool calls and structured text fallback with arguments", () => {
+  const src = read("src/lib/agents/runtime.ts");
+  assert.match(src, /normalizeNativeToolCall/);
+  assert.match(src, /parseTextToolCall/);
+  assert.match(src, /parsed\?\.arguments \?\? parsed\?\.args \?\? parsed\?\.input/);
+  assert.match(src, /toolInputError/);
+  assert.match(src, /TOOL\\s\*:\\s\*/);
 });
 
-test("approval arguments are extracted only after Gemma chooses the approval tool", () => {
-  const src = read("src/app/api/ceo-chat/route.ts");
-  const plannerPos = src.indexOf("const decision = await planWithGemma");
-  const normalizePos = src.indexOf("const args = normalizeToolArgs", plannerPos);
-  assert.ok(plannerPos >= 0);
-  assert.ok(normalizePos > plannerPos);
-  assert.match(src, /tool === "create_approval"/);
-  assert.match(src, /parseApprovalIntent\(question\)/);
+test("runtime persists agent conversation memory without altering production source-of-truth tables", () => {
+  const src = read("src/lib/agents/runtime.ts");
+  assert.match(src, /CREATE TABLE IF NOT EXISTS agent_chat_messages/);
+  assert.match(src, /loadMemory/);
+  assert.match(src, /saveMemory/);
+  assert.match(src, /postgres\+request/);
+  assert.doesNotMatch(src, /DROP TABLE|TRUNCATE TABLE|DELETE FROM products/i);
+});
+
+test("local Gemma gateway allows a larger but still bounded free-tier context", () => {
+  const src = read("local-ai/proxy.mjs");
+  assert.match(src, /OLLAMA_CONTEXT_LENGTH \|\| 2048/);
+  assert.match(src, /Math\.min\(1024/);
 });
