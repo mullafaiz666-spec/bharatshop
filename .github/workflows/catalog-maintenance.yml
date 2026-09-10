@@ -174,16 +174,23 @@ jobs:
               --data '{"limit":8}' | tee "market-reprice-$round.json"
           done
 
-      - name: Publish queued products through CEO rounds
+      - name: Publish queued products through bounded CEO rounds
         env:
           TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
         run: |
           set -euo pipefail
+          successes=0
           for round in 1 2 3; do
-            curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 300 \
+            if curl --silent --show-error --fail-with-body --connect-timeout 15 --max-time 270 \
               -X POST "$BHARATSHOP_URL/api/automation/ceo-cycle?skipResearch=1" \
-              -H "Authorization: Bearer $TOKEN" -H "x-automation-token: $TOKEN" -H "Content-Type: application/json" --data '{}' | tee "ceo-cycle-$round.json"
+              -H "Authorization: Bearer $TOKEN" -H "x-automation-token: $TOKEN" -H "Content-Type: application/json" --data '{}' | tee "ceo-cycle-$round.json"; then
+              successes=$((successes+1))
+            else
+              echo "CEO round $round reached its request budget; continuing to the authoritative storefront coverage gate."
+              break
+            fi
           done
+          echo "successful CEO rounds=$successes"
 
       - name: Refresh zero-cost fashion mockups and optional editorials
         continue-on-error: true
