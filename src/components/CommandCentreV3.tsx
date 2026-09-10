@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity,
-  Bot,
   BrainCircuit,
   CheckCircle2,
   CircleAlert,
@@ -18,6 +17,7 @@ import {
   Users,
   Workflow,
   Zap,
+  type LucideIcon,
 } from "lucide-react";
 
 type Agent = {
@@ -31,6 +31,7 @@ type Agent = {
 };
 
 type Goal = { id: string; title: string; objective: string; status: string; priority: number; updated_at: string };
+type ToolReceipt = { tool?: string; status?: string; durationMs?: number; auditId?: number | null };
 type WorkItem = {
   id: string;
   goal_id: string | null;
@@ -40,14 +41,13 @@ type WorkItem = {
   status: string;
   priority: number;
   run_id?: string | null;
-  output?: { reply?: string; error?: string; toolExecutions?: Array<{ tool?: string; status?: string; durationMs?: number; auditId?: number | null }> };
+  output?: { reply?: string; error?: string; toolExecutions?: ToolReceipt[] };
   created_at: string;
   updated_at: string;
 };
 type SharedEvent = { id: number; goal_id?: string | null; work_item_id?: string | null; agent_id: string; event_type: string; status: string; summary: string; created_at: string };
 type Latest = { agent_id: string; id: string; title: string; status: string; updated_at: string };
 type Count = { status: string; count: number };
-
 type CompanyData = {
   status: string;
   operator?: { id: number; name: string; role: string };
@@ -61,12 +61,12 @@ type CompanyData = {
   policy?: { sourceOfTruth?: string; evidenceRule?: string; approvalGates?: string[]; sharedData?: string };
   inspectedAt?: string;
 };
-
 type ServiceData = {
   services?: Record<string, { status?: string; [key: string]: unknown }>;
   actions?: Array<{ id: string; label: string }>;
   automationConfigured?: boolean;
 };
+type Metric = { label: string; value: number; Icon: LucideIcon };
 
 const panel = "rounded-2xl border border-slate-800 bg-slate-950/70 shadow-xl shadow-black/10";
 const button = "rounded-xl border border-slate-700 bg-slate-900 px-3.5 py-2.5 text-sm font-bold transition hover:border-slate-500 disabled:cursor-not-allowed disabled:opacity-40";
@@ -97,7 +97,7 @@ export default function CommandCentreV3() {
   const [growthObjective, setGrowthObjective] = useState("Grow BharatShop profitably using verified products, strong organic demand, low operating cost and strict contribution-margin protection.");
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
-  const [lastRun, setLastRun] = useState<any>(null);
+  const [lastRun, setLastRun] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async (quiet = false) => {
@@ -108,9 +108,9 @@ export default function CommandCentreV3() {
         fetch("/api/admin/command-centre", { cache: "no-store" }).catch(() => null),
       ]);
       const company = await companyResponse.json().catch(() => null);
-      if (companyResponse.ok && company) setData(company);
-      else if (!quiet) setNotice(company?.error || "Shared company state could not be loaded.");
-      if (serviceResponse?.ok) setServices(await serviceResponse.json().catch(() => null));
+      if (companyResponse.ok && company) setData(company as CompanyData);
+      else if (!quiet) setNotice(String(company?.error || "Shared company state could not be loaded."));
+      if (serviceResponse?.ok) setServices(await serviceResponse.json().catch(() => null) as ServiceData | null);
     } finally {
       setLoading(false);
     }
@@ -128,7 +128,15 @@ export default function CommandCentreV3() {
   const activeGoal = data?.goals?.find((goal) => goal.status === "ACTIVE") || data?.goals?.[0];
   const agentWork = useMemo(() => (data?.workItems || []).filter((item) => item.agent_id === selectedId).slice(0, 12), [data, selectedId]);
   const agentEvents = useMemo(() => (data?.sharedEvents || []).filter((item) => item.agent_id === selectedId).slice(0, 10), [data, selectedId]);
-  const pendingApprovals = Array.isArray(data?.pendingApprovals) ? data!.pendingApprovals!.length : 0;
+  const pendingApprovals = Array.isArray(data?.pendingApprovals) ? data.pendingApprovals.length : 0;
+  const metrics: Metric[] = [
+    { label: "Active goals", value: data?.goals?.filter((x) => x.status === "ACTIVE").length || 0, Icon: Target },
+    { label: "Queued", value: counts.get("QUEUED") || 0, Icon: Clock3 },
+    { label: "Running", value: counts.get("RUNNING") || 0, Icon: Zap },
+    { label: "Ready", value: counts.get("READY") || 0, Icon: CheckCircle2 },
+    { label: "Holds / blocked", value: (counts.get("HOLD") || 0) + (counts.get("BLOCKED") || 0) + (counts.get("FAILED") || 0), Icon: CircleAlert },
+    { label: "Approvals", value: pendingApprovals, Icon: ShieldCheck },
+  ];
 
   async function companyCommand(payload: Record<string, unknown>, key: string) {
     if (busy) return null;
@@ -142,8 +150,10 @@ export default function CommandCentreV3() {
       });
       const result = await response.json().catch(() => ({}));
       setLastRun(result);
-      if (!response.ok || result.ok === false) setNotice(result.error || `Command returned HTTP ${response.status}.`);
-      else setNotice(key === "growth" ? "Growth cycle created: CEO direction ran and specialist work was queued on the shared company bus." : key === "queue" ? `Processed ${result.claimed || 0} queued specialist task(s).` : `${agent?.name || "Agent"} completed/attempted a real runtime cycle; the receipt is stored below.`);
+      if (!response.ok || result.ok === false) setNotice(String(result.error || `Command returned HTTP ${response.status}.`));
+      else if (key === "growth") setNotice("Growth cycle created: CEO direction ran and specialist work was queued on the shared company bus.");
+      else if (key === "queue") setNotice(`Processed ${Number(result.claimed || 0)} queued specialist task(s).`);
+      else setNotice(`${agent?.name || "Agent"} completed/attempted a real runtime cycle; the receipt is stored below.`);
       await load(true);
       return result;
     } catch (error) {
@@ -169,8 +179,10 @@ export default function CommandCentreV3() {
       const response = await fetch("/api/admin/command-centre", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }) });
       const result = await response.json().catch(() => ({}));
       setLastRun(result);
-      setNotice(response.ok && result.ok !== false ? `${result.label || action} completed.` : result.error || `${result.label || action} returned a blocker.`);
+      setNotice(response.ok && result.ok !== false ? `${String(result.label || action)} completed.` : String(result.error || `${String(result.label || action)} returned a blocker.`));
       await load(true);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "System command failed");
     } finally {
       setBusy(null);
     }
@@ -186,7 +198,7 @@ export default function CommandCentreV3() {
         <div>
           <div className="mb-2 flex flex-wrap items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-orange-300"><Network size={15}/> BharatShop AI Company OS <span className={`rounded-full border px-2 py-1 ${tone(data?.status)}`}>{data?.status || "UNKNOWN"}</span></div>
           <h1 className="text-3xl font-black tracking-tight md:text-4xl">Command Centre</h1>
-          <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-400">Every registered operational agent has its own workspace, but they work from one PostgreSQL company goal/task/event bus. Statuses below come from real queued/running/completed work—not decorative “online” badges.</p>
+          <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-400">Every registered operational agent has its own workspace, but they work from one PostgreSQL company goal/task/event bus. Statuses below come from real queued, running and completed work—not decorative online badges.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button className={button} disabled={!!busy} onClick={() => void load()}><RefreshCw size={15} className="mr-2 inline"/>Refresh</button>
@@ -197,14 +209,7 @@ export default function CommandCentreV3() {
       {notice && <div className="mb-4 rounded-xl border border-orange-500/20 bg-orange-500/10 px-4 py-3 text-sm text-orange-100">{notice}</div>}
 
       <section className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-        {[
-          ["Active goals", data?.goals?.filter((x) => x.status === "ACTIVE").length || 0, Target],
-          ["Queued", counts.get("QUEUED") || 0, Clock3],
-          ["Running", counts.get("RUNNING") || 0, Zap],
-          ["Ready", counts.get("READY") || 0, CheckCircle2],
-          ["Holds / blocked", (counts.get("HOLD") || 0) + (counts.get("BLOCKED") || 0) + (counts.get("FAILED") || 0), CircleAlert],
-          ["Approvals", pendingApprovals, ShieldCheck],
-        ].map(([label, value, Icon]) => <div key={String(label)} className={`${panel} p-4`}><div className="flex items-center justify-between"><span className="text-xs font-bold uppercase tracking-wider text-slate-500">{String(label)}</span><Icon size={17} className="text-slate-500"/></div><div className="mt-2 text-2xl font-black">{String(value)}</div></div>)}
+        {metrics.map(({ label, value, Icon }) => <div key={label} className={`${panel} p-4`}><div className="flex items-center justify-between"><span className="text-xs font-bold uppercase tracking-wider text-slate-500">{label}</span><Icon size={17} className="text-slate-500"/></div><div className="mt-2 text-2xl font-black">{value}</div></div>)}
       </section>
 
       <section className={`${panel} mb-5 p-4`}>
@@ -232,7 +237,7 @@ export default function CommandCentreV3() {
           </div>
         </aside>
 
-        <section className="space-y-5 min-w-0">
+        <section className="min-w-0 space-y-5">
           <div className={`${panel} overflow-hidden`}>
             <div className="border-b border-slate-800 p-5">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between"><div><div className="text-xs font-bold uppercase tracking-wider text-orange-300">Personal agent dashboard</div><h2 className="mt-1 text-2xl font-black">{agent?.name || "Agent"}</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">{agent?.mission}</p></div><span className={`self-start rounded-full border px-3 py-1.5 text-xs font-black ${tone(latestMap.get(selectedId)?.status || "IDLE")}`}>{latestMap.get(selectedId)?.status || "IDLE"}</span></div>
@@ -249,12 +254,12 @@ export default function CommandCentreV3() {
 
           <div className={`${panel} p-5`}>
             <div className="mb-3 flex items-center justify-between"><div><div className="font-black">Work ledger</div><div className="text-xs text-slate-500">Persistent jobs and receipts for {agent?.name}</div></div><Database size={18} className="text-slate-600"/></div>
-            <div className="space-y-2">{agentWork.length ? agentWork.map((work) => <details key={work.id} className="rounded-xl border border-slate-800 bg-slate-900/60 p-3"><summary className="cursor-pointer list-none"><div className="flex items-center justify-between gap-3"><div className="min-w-0"><div className="truncate text-sm font-bold">{work.title}</div><div className="mt-1 text-xs text-slate-500">priority {work.priority} · {timeAgo(work.updated_at)}</div></div><span className={`rounded-full border px-2 py-1 text-[10px] font-black ${tone(work.status)}`}>{work.status}</span></div></summary><div className="mt-3 border-t border-slate-800 pt-3 text-xs leading-5 text-slate-400"><div className="font-bold text-slate-300">Objective</div><p className="mt-1 whitespace-pre-wrap">{work.objective}</p>{work.output?.reply && <><div className="mt-3 font-bold text-slate-300">Agent result</div><p className="mt-1 whitespace-pre-wrap text-slate-300">{work.output.reply}</p></>}{Array.isArray(work.output?.toolExecutions) && work.output!.toolExecutions!.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{work.output!.toolExecutions!.map((trace, index) => <span key={`${trace.tool}-${index}`} className="rounded-full border border-slate-700 px-2 py-1">{trace.tool || "runtime"} · {trace.status || "UNKNOWN"}</span>)}</div>}</div></details>) : <div className="rounded-xl border border-dashed border-slate-800 p-6 text-center text-sm text-slate-500">No company-bus work has been assigned to this agent yet.</div>}</div>
+            <div className="space-y-2">{agentWork.length ? agentWork.map((work) => <details key={work.id} className="rounded-xl border border-slate-800 bg-slate-900/60 p-3"><summary className="cursor-pointer list-none"><div className="flex items-center justify-between gap-3"><div className="min-w-0"><div className="truncate text-sm font-bold">{work.title}</div><div className="mt-1 text-xs text-slate-500">priority {work.priority} · {timeAgo(work.updated_at)}</div></div><span className={`rounded-full border px-2 py-1 text-[10px] font-black ${tone(work.status)}`}>{work.status}</span></div></summary><div className="mt-3 border-t border-slate-800 pt-3 text-xs leading-5 text-slate-400"><div className="font-bold text-slate-300">Objective</div><p className="mt-1 whitespace-pre-wrap">{work.objective}</p>{work.output?.reply && <><div className="mt-3 font-bold text-slate-300">Agent result</div><p className="mt-1 whitespace-pre-wrap text-slate-300">{work.output.reply}</p></>}{work.output?.toolExecutions?.length ? <div className="mt-3 flex flex-wrap gap-2">{work.output.toolExecutions.map((trace, index) => <span key={`${trace.tool}-${index}`} className="rounded-full border border-slate-700 px-2 py-1">{trace.tool || "runtime"} · {trace.status || "UNKNOWN"}</span>)}</div> : null}</div></details>) : <div className="rounded-xl border border-dashed border-slate-800 p-6 text-center text-sm text-slate-500">No company-bus work has been assigned to this agent yet.</div>}</div>
           </div>
         </section>
 
         <aside className="space-y-5">
-          <div className={`${panel} p-4`}><div className="flex items-center gap-2 font-black"><BrainCircuit size={18}/> Shared company brain</div><p className="mt-2 text-xs leading-5 text-slate-500">{data?.policy?.sharedData}</p><div className="mt-3 space-y-2 max-h-[310px] overflow-y-auto">{(data?.sharedEvents || []).slice(0, 16).map((event) => <div key={event.id} className="rounded-xl border border-slate-800 bg-slate-900/60 p-3"><div className="flex items-center justify-between gap-2"><span className="text-[10px] font-black uppercase tracking-wider text-slate-500">{event.agent_id}</span><span className={`rounded-full border px-2 py-0.5 text-[9px] font-black ${tone(event.status)}`}>{event.status}</span></div><p className="mt-2 text-xs leading-5 text-slate-300">{event.summary}</p><div className="mt-1 text-[10px] text-slate-600">{timeAgo(event.created_at)}</div></div>)}</div></div>
+          <div className={`${panel} p-4`}><div className="flex items-center gap-2 font-black"><BrainCircuit size={18}/> Shared company brain</div><p className="mt-2 text-xs leading-5 text-slate-500">{data?.policy?.sharedData}</p><div className="mt-3 max-h-[310px] space-y-2 overflow-y-auto">{(data?.sharedEvents || []).slice(0, 16).map((event) => <div key={event.id} className="rounded-xl border border-slate-800 bg-slate-900/60 p-3"><div className="flex items-center justify-between gap-2"><span className="text-[10px] font-black uppercase tracking-wider text-slate-500">{event.agent_id}</span><span className={`rounded-full border px-2 py-0.5 text-[9px] font-black ${tone(event.status)}`}>{event.status}</span></div><p className="mt-2 text-xs leading-5 text-slate-300">{event.summary}</p><div className="mt-1 text-[10px] text-slate-600">{timeAgo(event.created_at)}</div></div>)}</div></div>
 
           <div className={`${panel} p-4`}><div className="flex items-center gap-2 font-black"><ShieldCheck size={18}/> Company constitution</div><div className="mt-3 space-y-2 text-xs leading-5 text-slate-400"><p><span className="font-bold text-slate-200">Source of truth:</span> {data?.policy?.sourceOfTruth}</p><p><span className="font-bold text-slate-200">Evidence:</span> {data?.policy?.evidenceRule}</p><p><span className="font-bold text-slate-200">Human-only gates:</span> {(data?.policy?.approvalGates || []).join(", ")}</p></div></div>
 
