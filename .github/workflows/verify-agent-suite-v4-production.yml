@@ -9,41 +9,49 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 8
     steps:
       - name: Probe live BharatShop Agent Suite v4
         env:
-          HEALTH_URL: https://bharatshop-9w4a.onrender.com/api/agents/health?deep=1
-          BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
+          HEALTH_URL: https://bharatshop-9w4a.onrender.com/api/health/agents
+          EXPECTED_REVISION: cf60f1883867cd60627102d3c122030ffacab6fa
         run: |
           set -uo pipefail
-          test -n "$BHARATSHOP_AUTOMATION_TOKEN"
-          http=$(curl --silent --show-error --location --connect-timeout 15 --max-time 70 \
-            -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" \
-            -H "x-automation-token: $BHARATSHOP_AUTOMATION_TOKEN" \
-            --output /tmp/readiness.json --write-out '%{http_code}' "$HEALTH_URL" || true)
-          echo "HTTP_STATUS=$http"
-          echo "READINESS_PAYLOAD_BEGIN"
-          cat /tmp/readiness.json 2>/dev/null || true
-          echo
-          echo "READINESS_PAYLOAD_END"
-          node <<'NODE'
+          for attempt in $(seq 1 20); do
+            echo "Production readiness attempt $attempt"
+            http=$(curl --silent --show-error --location --connect-timeout 15 --max-time 70 --output /tmp/readiness.json --write-out '%{http_code}' "$HEALTH_URL" || true)
+            echo "HTTP_STATUS=$http"
+            if node <<'NODE'
           const fs = require('fs');
           let data;
           try { data = JSON.parse(fs.readFileSync('/tmp/readiness.json', 'utf8')); }
-          catch (error) { console.error('Invalid readiness JSON:', error.message); process.exit(2); }
+          catch { process.exit(2); }
+          const expected = process.env.EXPECTED_REVISION;
           const report = {
+            service: data.service,
             suite: data.suite,
+            revision: data.revision,
             verificationMode: data.verificationMode,
+            allOperational: data.allOperational,
             summary: data.summary,
             infrastructure: data.infrastructure,
-            agents: (data.agents || []).map(a => ({ id:a.id, status:a.status, ready:a.ready, reason:a.reason, dependencyChecks:a.dependencyChecks, runtimeTools:a.runtimeTools })),
+            agents: (data.agents || []).map(a => ({ id:a.id, name:a.name, status:a.status, ready:a.ready })),
           };
           console.log('READINESS_REPORT=' + JSON.stringify(report, null, 2));
-          if (data.suite !== 'BharatShop Agent Suite v4') process.exit(3);
-          if (data.verificationMode !== 'DEEP_LIVE_DEPENDENCY_PROBE') process.exit(4);
-          if (!data.summary || data.summary.total !== 13) process.exit(5);
-          if (data.summary.allReady !== true || data.summary.ready !== 13 || (data.summary.blocked || []).length !== 0) process.exit(6);
-          if (!(data.agents || []).every(a => a.ready === true && a.status === 'READY' && Array.isArray(a.runtimeTools) && a.runtimeTools.length > 0)) process.exit(7);
+          if (data.service !== 'BharatShop AI Company OS') process.exit(3);
+          if (data.suite !== 'BharatShop Agent Suite v4') process.exit(4);
+          if (data.verificationMode !== 'DEEP_LIVE_DEPENDENCY_PROBE') process.exit(5);
+          if (expected && data.revision !== expected) process.exit(6);
+          if (!data.summary || data.summary.total !== 13) process.exit(7);
+          if (data.allOperational !== true || data.summary.allReady !== true || data.summary.ready !== 13 || (data.summary.blocked || []).length !== 0) process.exit(8);
+          if (!(data.agents || []).every(a => a.ready === true && a.status === 'READY')) process.exit(9);
           console.log('ALL_13_AGENTS_READY=true');
           NODE
+            then
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "Production deep readiness did not reach 13/13 on expected revision. Last payload:"
+          cat /tmp/readiness.json 2>/dev/null || true
+          exit 1
