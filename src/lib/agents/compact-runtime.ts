@@ -36,6 +36,24 @@ function compactContext(value: Record<string, unknown> | undefined) {
   return trim(safe, 650);
 }
 
+function recordLike(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function tinyCeoBusinessEvidence(value: unknown) {
+  const business = recordLike(value);
+  const products = recordLike(business.products);
+  const storefrontOrders = recordLike(business.storefrontOrders);
+  const internalOrders = recordLike(business.internalOrders);
+  const approvals = Array.isArray(business.pendingApprovals) ? business.pendingApprovals.length : 0;
+  return [
+    `products total=${Number(products.total || 0)} published=${Number(products.published || 0)} ceoPending=${Number(products.ceo_pending || 0)} staged=${Number(products.staged || 0)} blocked=${Number(products.rejected || 0)} missingImages=${Number(products.missing_images || 0)}`,
+    `storeOrders total=${Number(storefrontOrders.total || 0)} revenueINR=${Number(storefrontOrders.revenue || 0)} pending=${Number(storefrontOrders.pending || 0)}`,
+    `internalOrders total=${Number(internalOrders.total || 0)} revenueINR=${Number(internalOrders.revenue || 0)} pending=${Number(internalOrders.pending || 0)}`,
+    `pendingApprovals=${approvals}`,
+  ].join("; ");
+}
+
 async function observe(
   trace: CompactTrace[],
   agentName: string,
@@ -83,16 +101,20 @@ export async function runCompactAgentRuntime(input: {
   const trace: CompactTrace[] = [];
   const evidence: string[] = [];
   const contract = AGENT_CONTRACTS[input.agentId];
+  const provider = aiProviderName();
+  const model = aiModels().text;
+  const tinyModel = isTinyGemmaModel(model);
+  const tinyPrimaryCeo = Boolean(input.primary && input.agentId === "ceo" && tinyModel);
 
   if (BUSINESS_AGENTS.has(input.agentId)) {
     const data = await observe(trace, contract.name, "inspect_business_data", {}, () => inspectLiveBusinessData());
-    evidence.push(`BUSINESS=${trim(data, 650)}`);
+    evidence.push(tinyPrimaryCeo ? tinyCeoBusinessEvidence(data) : `BUSINESS=${trim(data, 650)}`);
   }
-  if (CATALOG_AGENTS.has(input.agentId)) {
+  if (CATALOG_AGENTS.has(input.agentId) && !tinyPrimaryCeo) {
     const data = await observe(trace, contract.name, "catalog_query", { limit: 6 }, () => catalogQuery(6));
     evidence.push(`CATALOG=${trim(data, 750)}`);
   }
-  if (FRESH_RESEARCH.test(input.objective) && input.agentId !== "tracking") {
+  if (FRESH_RESEARCH.test(input.objective) && input.agentId !== "tracking" && !tinyPrimaryCeo) {
     const query = input.objective.slice(0, 220);
     const data = await observe(trace, contract.name, "research_web", { query }, () => researchWeb(query));
     evidence.push(`WEB=${trim(data, 700)}`);
@@ -102,23 +124,24 @@ export async function runCompactAgentRuntime(input: {
     evidence.push(`CATALOG=${trim(data, 750)}`);
   }
 
-  const provider = aiProviderName();
-  const model = aiModels().text;
-  const tinyModel = isTinyGemmaModel(model);
   const maxAttempts = Math.max(1, Math.min(2, Number(input.maxAttempts ?? (tinyModel ? 1 : 2))));
-  const system = [
-    `You are ${contract.name}, a BharatShop operational agent.`,
-    `Mission: ${contract.mission}`,
-    "Answer only from the verified observations below. Be specific, useful and concise.",
-    "Do not invent facts or claim actions that were not executed. Mention uncertainty briefly when evidence is incomplete.",
-    `Approval boundary: ${contract.approvalBoundary}`,
-    "Give the current finding, biggest issue, and next practical action when relevant.",
-  ].join("\n");
-  const user = [
-    `USER GOAL: ${trim(input.objective, tinyModel ? 360 : 500)}`,
-    compactContext(input.context) ? `REQUEST CONTEXT: ${compactContext(input.context)}` : "",
-    `VERIFIED OBSERVATIONS:\n${evidence.map((item) => trim(item, tinyModel ? 480 : 750)).join("\n")}`,
-  ].filter(Boolean).join("\n\n");
+  const system = tinyPrimaryCeo
+    ? "You are BharatShop CEO. Use only EVIDENCE. Reply in one short line: Live: ... Problem: ... Next: ... Never invent."
+    : [
+        `You are ${contract.name}, a BharatShop operational agent.`,
+        `Mission: ${contract.mission}`,
+        "Answer only from the verified observations below. Be specific, useful and concise.",
+        "Do not invent facts or claim actions that were not executed. Mention uncertainty briefly when evidence is incomplete.",
+        `Approval boundary: ${contract.approvalBoundary}`,
+        "Give the current finding, biggest issue, and next practical action when relevant.",
+      ].join("\n");
+  const user = tinyPrimaryCeo
+    ? `GOAL: ${trim(input.objective, 150)}\nEVIDENCE: ${trim(evidence.join(" | "), 420)}`
+    : [
+        `USER GOAL: ${trim(input.objective, tinyModel ? 360 : 500)}`,
+        compactContext(input.context) ? `REQUEST CONTEXT: ${compactContext(input.context)}` : "",
+        `VERIFIED OBSERVATIONS:\n${evidence.map((item) => trim(item, tinyModel ? 480 : 750)).join("\n")}`,
+      ].filter(Boolean).join("\n\n");
 
   let reply = "";
   let modelError = "";
@@ -130,8 +153,8 @@ export async function runCompactAgentRuntime(input: {
       ], {
         model,
         temperature: 0.1,
-        maxTokens: tinyModel ? 180 : attempt === 1 ? 260 : 180,
-        timeoutMs: tinyModel ? 35_000 : 45_000,
+        maxTokens: tinyPrimaryCeo ? 48 : tinyModel ? 180 : attempt === 1 ? 260 : 180,
+        timeoutMs: tinyPrimaryCeo ? 50_000 : tinyModel ? 35_000 : 45_000,
       });
       reply = String(response.content || "").trim().replace(/^ANSWER\s*:\s*/i, "");
       if (reply.length >= (tinyModel ? 12 : 25)) break;

@@ -130,8 +130,14 @@ test("runtime persists agent conversation memory without altering production sou
   assert.doesNotMatch(src, /DROP TABLE|TRUNCATE TABLE|DELETE FROM products/i);
 });
 
-test("local Gemma gateway allows a larger but still bounded free-tier context", () => {
+test("local Gemma gateway adapts context while preserving the bounded tool-heavy default", () => {
   const src = read("local-ai/proxy.mjs");
+  assert.match(src, /function adaptiveContextLength/);
   assert.match(src, /OLLAMA_CONTEXT_LENGTH \|\| 2048/);
+  assert.match(src, /promptChars <= 1200/);
+  assert.match(src, /Math\.min\(configured, 512\)/);
+  assert.match(src, /promptChars <= 3000/);
+  assert.match(src, /Math\.min\(configured, 1024\)/);
+  assert.match(src, /return configured/);
   assert.match(src, /Math\.min\(1024/);
 });
