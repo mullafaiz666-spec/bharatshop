@@ -1,22 +1,61 @@
 import { pool } from "@/db";
-export const dynamic="force-dynamic";
-const esc=(s:unknown)=>String(s||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&apos;"}[c]||c));
-const safeHex=(v:unknown,fallback:string)=>/^#[0-9a-f]{6}$/i.test(String(v||""))?String(v):fallback;
-function garmentPath(kind:string){const k=kind.toLowerCase();if(k.includes("hood"))return"M286 222 374 176 412 126 488 126 526 176 614 222 586 365 530 340 530 800 370 800 370 340 314 365Z M412 126Q450 70 488 126L474 218H426Z";if(k.includes("dress"))return"M300 220 378 178 420 145 480 145 522 178 600 220 570 360 530 342 602 818H298L370 342 330 360Z";if(k.includes("crop"))return"M292 222 376 176 420 145 480 145 524 176 608 222 580 362 528 340 528 555H372V340L320 362Z";if(k.includes("oversized")||k.includes("terry"))return"M250 230 360 168 414 138 486 138 540 168 650 230 610 382 540 354 540 815H360V354L290 382Z";return"M292 222 376 176 420 145 480 145 524 176 608 222 580 362 528 340 528 800H372V340L320 362Z";}
-function motif(code:string,a:string,b:string,c:string,x=450,y=390,scale=1){const s=`transform="translate(${x} ${y}) scale(${scale})"`;switch(code){
-case"M-ESSENTIAL":return`<g ${s}><rect x="-58" y="-32" width="116" height="64" rx="14" fill="${c}"/><path d="M-34 10 4-18H40L4 18H-28Z" fill="${b}"/><circle cx="-33" cy="-12" r="6" fill="${a}"/></g>`;
-case"W-AURALINE":return`<g ${s} fill="none" stroke="${c}" stroke-width="6" stroke-linecap="round"><path d="M0 44V-10M0-8Q-42-44-54-2Q-18 10 0-8ZM0-8Q42-44 54-2Q18 10 0-8Z"/><path d="M-22 30Q0 10 22 30" stroke="${b}"/></g>`;
-case"K-CLOUD":return`<g ${s}><path d="M-52 12Q-46-22-14-18Q4-52 30-26Q58-22 56 10Q54 36 24 38H-28Q-55 36-52 12Z" fill="${c}"/><circle cx="-44" cy="-36" r="7" fill="${b}"/><circle cx="54" cy="-22" r="6" fill="${b}"/><circle cx="22" cy="54" r="7" fill="${b}"/></g>`;
-case"M-MONSOON":return`<g ${s} fill="none" stroke-linecap="round"><path d="M-50 26Q-8-40 36 8T70 22" stroke="${c}" stroke-width="7"/><path d="M-42 45Q4-16 58 28" stroke="${b}" stroke-width="6"/></g>`;
-case"W-INKWAVE":return`<g ${s} fill="none" stroke-linecap="round"><path d="M-62 12Q-25-42 10 4T72-8" stroke="${c}" stroke-width="9"/><path d="M-54 35Q-12-4 24 28T68 20" stroke="${b}" stroke-width="6"/></g>`;
-case"K-COMET":return`<g ${s}><circle cx="28" cy="-12" r="23" fill="${b}"/><path d="M8 0Q-24 20-58 42M4-12Q-32-4-70 8" fill="none" stroke="${c}" stroke-width="8" stroke-linecap="round"/><path d="M55-46 60-34 73-30 62-22 63-9 53-16 42-10 45-23 36-32 49-34Z" fill="${c}"/></g>`;
-case"BD-VOIDRONIN":return`<g ${s}><path d="M-48-48 0-74 48-48 38 18 0 58-38 18Z" fill="none" stroke="${c}" stroke-width="8"/><path d="M-28-12H-4L-18 8M28-12H4L18 8" fill="none" stroke="${b}" stroke-width="8" stroke-linecap="round"/><path d="M0 18V42" stroke="${c}" stroke-width="7"/><path d="M-62 66Q-20 34 0 62Q20 34 62 66" fill="none" stroke="${b}" stroke-width="7"/></g>`;
-case"BD-NEONONI":return`<g ${s}><path d="M-42-45Q-66-88-76-42L-58-6M42-45Q66-88 76-42L58-6" fill="none" stroke="${b}" stroke-width="10"/><path d="M-56-28Q0-74 56-28L42 42 0 72-42 42Z" fill="none" stroke="${c}" stroke-width="9"/><path d="M-34 0 0 20 34 0M-22 38H22" fill="none" stroke="${b}" stroke-width="8"/><path d="M-48 74V112M-14 70V124M20 70V114M48 64V102" stroke="${b}" stroke-width="8" stroke-linecap="round"/></g>`;
-case"BD-KITSUNE":return`<g ${s}><path d="M0-80 54-54 70 2 40 64 0 84-40 64-70 2-54-54Z" fill="none" stroke="${c}" stroke-width="8"/><path d="M-52-46-78-82-62-8M52-46 78-82 62-8" fill="none" stroke="${b}" stroke-width="8"/><path d="M-38 8Q-16-8-2 8M38 8Q16-8 2 8M0 18 0 56" fill="none" stroke="${b}" stroke-width="8"/></g>`;
-case"BD-GHOSTCIRCUIT":return`<g ${s}><path d="M0-74Q58-66 66-8V64L40 42 18 66 0 42-20 68-42 44-66 66V-8Q-58-66 0-74Z" fill="none" stroke="${c}" stroke-width="8"/><circle cx="-24" cy="-8" r="8" fill="${b}"/><circle cx="24" cy="-8" r="8" fill="${b}"/><path d="M-90-46H-58M58-46H90M-96 0H-66M66 0H96M-84 48H-54M54 48H84" stroke="${b}" stroke-width="7"/></g>`;
-case"BD-KOISTATIC":return`<g ${s}><path d="M-72 10Q-24-60 38-20Q64 0 28 36Q-12 70-58 30Z" fill="none" stroke="${c}" stroke-width="8"/><circle cx="25" cy="-14" r="6" fill="${b}"/><path d="M-72 10-104-22M-72 10-108 40M-20-34Q0 0-18 38" fill="none" stroke="${b}" stroke-width="8"/><path d="M50-66Q80-38 92-6M56 62Q84 42 98 12" fill="none" stroke="${c}" stroke-width="6"/></g>`;
-case"BD-VOIDBLOOM":return`<g ${s}><circle r="20" fill="${b}"/><path d="M0-72Q32-44 20-12Q56-38 70-4Q32 12 18 2Q46 36 16 60Q0 26 0 14Q-18 52-52 34Q-30 2-16-4Q-58 4-64-34Q-22-42-8-18Q-20-58 0-72Z" fill="none" stroke="${c}" stroke-width="8"/><path d="M-60 78V112M-20 70V124M22 74V116M56 68V106" stroke="${b}" stroke-width="8" stroke-linecap="round"/></g>`;
-default:return`<g ${s}><circle r="40" fill="none" stroke="${b}" stroke-width="7"/><path d="M-42 20Q0-30 45 12" fill="none" stroke="${c}" stroke-width="7"/></g>`;}}
-function backFrame(code:string,a:string,b:string,c:string){return`<g><rect x="308" y="255" width="284" height="390" rx="20" fill="none" stroke="${c}" stroke-width="5" opacity=".8"/><path d="M292 286H608M292 612H608" stroke="${b}" stroke-width="9"/><path d="M325 238 292 286 332 278M575 656 608 612 566 620" fill="none" stroke="${b}" stroke-width="8"/>${motif(code,a,b,c,450,445,2.05)}<path d="M335 690Q360 654 382 690T430 690M465 690Q492 646 520 690T568 690" fill="none" stroke="${b}" stroke-width="8" stroke-linecap="round"/><text x="450" y="735" text-anchor="middle" font-family="Arial Black,Arial" font-size="28" letter-spacing="5" fill="${c}">BHARATDRIP</text></g>`;}
-export async function GET(_req:Request,{params}:{params:Promise<{productId:string;view:string}>}){const{productId,view}=await params,id=Number(productId),v=Math.max(0,Math.min(3,Number(view)||0));if(!Number.isFinite(id))return new Response("Invalid product",{status:400});const r=await pool.query(`SELECT p.title,p.category,p.brand,d.specifications_json FROM products p LEFT JOIN product_details d ON d.product_id=p.id WHERE p.id=$1 AND p.status='Published' LIMIT 1`,[id]);if(!r.rows[0])return new Response("Not found",{status:404});const row=r.rows[0],specs=row.specifications_json&&typeof row.specifications_json==="object"?row.specifications_json:{},palette=Array.isArray(specs.palette)?specs.palette:[],a=safeHex(palette[0],"#111827"),b=safeHex(palette[1],"#f97316"),c=safeHex(palette[2],"#f8fafc"),garment=String(specs.qikinkProductName||row.category||"T-Shirt"),code=String(specs.designCode||""),brand=String(specs.designOrigin||row.brand||"BharatShop Studio"),designer=String(specs.designLine||"")==="DESIGNER"||brand==="BharatDrip",title=esc(row.title),path=garmentPath(garment),isBack=v===2,frontY=designer?350:390,frontScale=designer?0.72:1,mainMotif=isBack?(designer?backFrame(code,a,b,c):""):motif(code,a,b,c,450,v===1?420:frontY,v===1?(designer?1.8:1.45):frontScale),detail=v===3?`<g transform="translate(450 395)"><rect x="-240" y="-170" width="480" height="340" rx="42" fill="#fff" filter="url(#card)"/><text x="0" y="-105" text-anchor="middle" font-family="Arial" font-size="22" font-weight="800" fill="#0f172a">${designer?"BHARATDRIP DESIGN SYSTEM":"COLOUR STORY"}</text><circle cx="-100" cy="-25" r="48" fill="${a}"/><circle cx="0" cy="-25" r="48" fill="${b}"/><circle cx="100" cy="-25" r="48" fill="${c}" stroke="#cbd5e1" stroke-width="3"/><text x="0" y="78" text-anchor="middle" font-family="Arial" font-size="28" font-weight="900" fill="#0f172a">${title}</text><text x="0" y="122" text-anchor="middle" font-family="Arial" font-size="18" fill="#64748b">Original ${esc(brand)} • ${designer?"front + back streetwear":"made to order"}</text></g>`:"";
-const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1100" viewBox="0 0 900 1100"><defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f8fafc"/><stop offset="1" stop-color="${designer?"#e4e4e7":"#eef2f7"}"/></linearGradient><filter id="shadow" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="24" stdDeviation="22" flood-color="#0f172a" flood-opacity=".22"/></filter><filter id="card"><feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#0f172a" flood-opacity=".12"/></filter><filter id="fabric"><feTurbulence baseFrequency=".8" numOctaves="2" seed="8" type="fractalNoise" result="noise"/><feBlend in="SourceGraphic" in2="noise" mode="soft-light"/></filter></defs><rect width="900" height="1100" fill="url(#bg)"/><ellipse cx="450" cy="842" rx="225" ry="42" fill="#94a3b8" opacity=".18"/><g filter="url(#shadow)"><path d="${path}" fill="${a}" stroke="#111827" stroke-width="4" filter="url(#fabric)"/><path d="M420 145Q450 184 480 145" fill="none" stroke="#e2e8f0" stroke-width="8" opacity=".9"/><path d="M360 354H540" stroke="#ffffff" stroke-opacity=".12" stroke-width="3"/>${mainMotif}</g>${detail}<g transform="translate(70 930)"><rect width="760" height="112" rx="28" fill="#fff" filter="url(#card)"/><text x="34" y="46" font-family="Arial Black,Arial" font-size="20" font-weight="900" fill="${designer?b:"#f97316"}" letter-spacing="2">${esc(brand).toUpperCase()}</text><text x="34" y="82" font-family="Arial" font-size="25" font-weight="800" fill="#0f172a">${title}</text><text x="710" y="68" text-anchor="end" font-family="Arial" font-size="16" fill="#64748b">${["FRONT","DETAIL","BACK","PALETTE"][v]}</text></g></svg>`;return new Response(svg,{headers:{"Content-Type":"image/svg+xml; charset=utf-8","Cache-Control":"public, max-age=300, stale-while-revalidate=3600","X-Content-Type-Options":"nosniff"}});}
+import { generateLocalEditorialRaster } from "@/lib/fashion/local-editorial-raster";
+
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+function jsonObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+export async function GET(
+  _req: Request,
+  { params }: { params: Promise<{ productId: string; view: string }> },
+) {
+  const { productId, view } = await params;
+  const id = Number(productId);
+  const parsedView = Number(view);
+  const selectedView = Math.max(0, Math.min(3, Number.isFinite(parsedView) ? parsedView : 0));
+
+  if (!Number.isFinite(id) || id <= 0) {
+    return new Response("Invalid product", { status: 400 });
+  }
+
+  const result = await pool.query(
+    `SELECT p.title, p.category, p.brand, d.specifications_json
+       FROM products p
+       LEFT JOIN product_details d ON d.product_id = p.id
+      WHERE p.id = $1 AND p.status = 'Published'
+      LIMIT 1`,
+    [id],
+  );
+
+  if (!result.rows[0]) {
+    return new Response("Not found", { status: 404 });
+  }
+
+  const row = result.rows[0];
+  const specs = jsonObject(row.specifications_json);
+  const palette = Array.isArray(specs.palette) ? specs.palette : [];
+  const image = generateLocalEditorialRaster({
+    productId: id,
+    title: String(row.title || row.category || row.brand || `Fashion ${id}`),
+    view: selectedView,
+    palette,
+    width: 480,
+    height: 600,
+  });
+
+  return new Response(new Uint8Array(image.bytes), {
+    headers: {
+      "Content-Type": image.mimeType,
+      "Content-Length": String(image.bytes.length),
+      "Cache-Control": "public, max-age=86400, stale-while-revalidate=604800",
+      "X-Content-Type-Options": "nosniff",
+      "X-BharatShop-Fashion-Provider": image.provider,
+      "X-BharatShop-Fashion-View": String(selectedView),
+    },
+  });
+}
