@@ -6,6 +6,7 @@
     "build": "next build",
     "db:push": "node scripts/safe-db-push.mjs",
     "db:check": "drizzle-kit check",
+    "db:verify-supabase": "node scripts/verify-supabase-copy.mjs",
     "start": "next start -H 0.0.0.0 -p ${PORT:-10000}",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
