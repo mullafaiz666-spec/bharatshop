@@ -59,9 +59,9 @@ export async function POST(req: Request) {
     SELECT p.id,p.title,p.status,p.brand,d.specifications_json
     FROM products p
     LEFT JOIN product_details d ON d.product_id=p.id
-    WHERE p.id=$1
+    WHERE p.id=$1 AND p.user_id=$2
     LIMIT 1
-  `, [productId]);
+  `, [productId, admin.id]);
   const row = product.rows[0];
   if (!row) return NextResponse.json({ error: "Product not found" }, { status: 404 });
   const specs = row.specifications_json && typeof row.specifications_json === "object" ? row.specifications_json : {};
@@ -75,69 +75,77 @@ export async function POST(req: Request) {
   if (!mimeType) return NextResponse.json({ error: "Only genuine JPG, PNG, and WebP raster images are accepted" }, { status: 415 });
 
   await ensureCacheTable();
-  const prompt = `manual-product-photo; uploaded-by=${admin.id}; original-name=${String(file.name || "upload").slice(0, 120)}`;
-  await pool.query(`
-    INSERT INTO fashion_media_cache (product_id,view,mime_type,image_bytes,provider,prompt,source_url,created_at)
-    VALUES ($1,$2,$3,$4,$5,$6,'manual-upload',NOW())
-    ON CONFLICT (product_id,view) DO UPDATE SET
-      mime_type=EXCLUDED.mime_type,
-      image_bytes=EXCLUDED.image_bytes,
-      provider=EXCLUDED.provider,
-      prompt=EXCLUDED.prompt,
-      source_url=EXCLUDED.source_url,
-      created_at=NOW()
-  `, [productId, view, mimeType, bytes, MANUAL_PROVIDER, prompt]);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const prompt = `manual-product-photo; uploaded-by=${admin.id}; original-name=${String(file.name || "upload").slice(0, 120)}`;
+    await client.query(`
+      INSERT INTO fashion_media_cache (product_id,view,mime_type,image_bytes,provider,prompt,source_url,created_at)
+      VALUES ($1,$2,$3,$4,$5,$6,'manual-upload',NOW())
+      ON CONFLICT (product_id,view) DO UPDATE SET
+        mime_type=EXCLUDED.mime_type,
+        image_bytes=EXCLUDED.image_bytes,
+        provider=EXCLUDED.provider,
+        prompt=EXCLUDED.prompt,
+        source_url=EXCLUDED.source_url,
+        created_at=NOW()
+    `, [productId, view, mimeType, bytes, MANUAL_PROVIDER, prompt]);
 
-  const origin = publicOrigin(req);
-  const imageUrl = `${origin}/api/fashion-photo/${productId}/${view}?source=manual`;
-  const metadata = JSON.stringify({
-    representation: "manual-raster-product-photo",
-    manuallyUploaded: true,
-    uploadedBy: { id: admin.id, name: admin.name, role: admin.role },
-    mimeType,
-    bytes: bytes.length,
-    source: "fashion-studio",
-  });
+    const origin = publicOrigin(req);
+    const imageUrl = `${origin}/api/fashion-photo/${productId}/${view}?source=manual`;
+    const metadata = JSON.stringify({
+      representation: "manual-raster-product-photo",
+      manuallyUploaded: true,
+      uploadedBy: { id: admin.id, name: admin.name, role: admin.role },
+      mimeType,
+      bytes: bytes.length,
+      source: "fashion-studio",
+    });
 
-  const updated = await pool.query(`
-    UPDATE product_images
-    SET image_url=$3,
-        verification_status='MANUAL_STUDIO_UPLOAD',
-        verification_confidence=1,
-        verification_model='manual-raster-v1',
-        verification_provider=$4,
-        verification_metadata=$5,
-        verified_at=NOW()
-    WHERE product_id=$1 AND sort_order=$2
-  `, [productId, view, imageUrl, MANUAL_PROVIDER, metadata]);
+    const updated = await client.query(`
+      UPDATE product_images
+      SET image_url=$3,
+          verification_status='MANUAL_STUDIO_UPLOAD',
+          verification_confidence=1,
+          verification_model='manual-raster-v1',
+          verification_provider=$4,
+          verification_metadata=$5,
+          verified_at=NOW()
+      WHERE product_id=$1 AND sort_order=$2
+    `, [productId, view, imageUrl, MANUAL_PROVIDER, metadata]);
 
-  if (!updated.rowCount) {
-    await pool.query(`
-      INSERT INTO product_images (
-        product_id,image_url,source_url,sort_order,alt_text,
-        verification_status,verification_confidence,verification_model,
-        verification_provider,verification_metadata,verified_at
-      ) VALUES ($1,$2,'manual-upload',$3,$4,'MANUAL_STUDIO_UPLOAD',1,'manual-raster-v1',$5,$6,NOW())
-    `, [productId, imageUrl, view, `${row.title} ${view === 2 ? "back" : "product"} photo`, MANUAL_PROVIDER, metadata]);
-  }
+    if (!updated.rowCount) {
+      await client.query(`
+        INSERT INTO product_images (
+          product_id,image_url,source_url,sort_order,alt_text,
+          verification_status,verification_confidence,verification_model,
+          verification_provider,verification_metadata,verified_at
+        ) VALUES ($1,$2,'manual-upload',$3,$4,'MANUAL_STUDIO_UPLOAD',1,'manual-raster-v1',$5,$6,NOW())
+      `, [productId, imageUrl, view, `${row.title} ${view === 2 ? "back" : "product"} photo`, MANUAL_PROVIDER, metadata]);
+    }
 
-  if (view === 0) await pool.query(`UPDATE products SET image_url=$2,updated_at=NOW() WHERE id=$1`, [productId, imageUrl]);
+    if (view === 0) await client.query(`UPDATE products SET image_url=$2,updated_at=NOW() WHERE id=$1`, [productId, imageUrl]);
 
-  await pool.query(`
-    INSERT INTO ai_activity_logs (user_id,agent_name,action_type,message,metadata_json,status)
-    VALUES (1,'Fashion Designer Studio','MANUAL_PRODUCT_PHOTO_UPLOAD',$1,$2,'SUCCESS')
-  `, [
-    `${row.title} received a manually uploaded ${mimeType.replace("image/", "").toUpperCase()} product photo.`,
-    JSON.stringify({ productId, view, mimeType, bytes: bytes.length, uploadedBy: admin.id }),
-  ]);
+    await client.query(`
+      INSERT INTO ai_activity_logs (user_id,agent_name,action_type,message,metadata_json,status)
+      VALUES ($3,'Fashion Designer Studio','MANUAL_PRODUCT_PHOTO_UPLOAD',$1,$2,'SUCCESS')
+    `, [
+      `${row.title} received a manually uploaded ${mimeType.replace("image/", "").toUpperCase()} product photo.`,
+      JSON.stringify({ productId, view, mimeType, bytes: bytes.length, uploadedBy: admin.id }), admin.id,
+    ]);
 
-  return NextResponse.json({
-    status: "UPLOADED",
-    productId,
-    view,
-    mimeType,
-    bytes: bytes.length,
-    imageUrl,
-    priority: view === 0 ? "PRIMARY_PRODUCT_IMAGE" : "GALLERY_IMAGE",
-  });
+    await client.query("COMMIT");
+    return NextResponse.json({
+      status: "UPLOADED",
+      productId,
+      view,
+      mimeType,
+      bytes: bytes.length,
+      imageUrl,
+      priority: view === 0 ? "PRIMARY_PRODUCT_IMAGE" : "GALLERY_IMAGE",
+    });
+  } catch {
+    await client.query("ROLLBACK");
+    return NextResponse.json({ error: "Photo could not be saved. Please retry." }, { status: 500 });
+  } finally { client.release(); }
 }

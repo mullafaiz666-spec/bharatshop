@@ -225,7 +225,9 @@ export default function MarketingAgentCockpit() {
       const loaded = body.workspace && typeof body.workspace === "object" ? body.workspace : emptyWorkspace();
       setWorkspace({ ...emptyWorkspace(), ...loaded, routines: loaded.routines?.length ? loaded.routines : DEFAULT_ROUTINES });
       if (!launch.productId && body.products?.length) {
-        const p = body.products.find((item) => item.status === "Published") || body.products[0];
+        const requestedId = new URLSearchParams(window.location.search).get("productId");
+        const p = body.products.find((item) => String(item.id) === requestedId) || body.products.find((item) => item.status === "Published") || body.products[0];
+        if (requestedId) setTab("Pipeline");
         setLaunch((current) => ({ ...current, productId: String(p.id), bodyText: p.aiMarketingCopy || "", targetAudience: p.aiTargetAudience || "" }));
       }
       hydrated.current = true;
@@ -439,6 +441,7 @@ export default function MarketingAgentCockpit() {
           <button className={btn} onClick={exportWorkspace}>Export</button>
           <button className={btn} onClick={() => importRef.current?.click()}>Import</button>
           <input ref={importRef} type="file" accept="application/json,.json" className="hidden" onChange={(event) => void importWorkspaceFile(event)} />
+          <Link className={btn} href="/dashboard/fashion">Fashion Studio</Link>
           <Link className={btn} href="/dashboard">Dashboard</Link>
         </div>
       </div>
@@ -453,8 +456,8 @@ export default function MarketingAgentCockpit() {
       {tab === "Overview" && <div className="space-y-5">
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {[
-            ["Store revenue", inr(data?.summary.orderRevenueInr || 0), `${data?.summary.orderCount || 0} orders`],
-            ["Store profit", inr(data?.summary.orderProfitInr || 0), "from operational orders"],
+            ["Fully paid order value", inr(data?.summary.orderRevenueInr || 0), `Latest ${data?.summary.orderCount || 0} orders · excludes COD deposits`],
+            ["Estimated paid-order profit", inr(data?.summary.orderProfitInr || 0), "Latest orders marked PAID; excludes COD deposits"],
             ["Campaign conversions", String(data?.summary.conversions || 0), `${pct(data?.summary.clicks || 0, data?.summary.impressions || 0)} CTR`],
             ["Campaign revenue", inr(totalCampaignRevenue), `${activeCampaigns.length} active/local campaigns`],
           ].map(([label, value, note]) => <div key={label} className={`${card} p-5`}><div className="text-2xl font-black tracking-tight">{value}</div><div className="mt-1 text-xs font-bold uppercase tracking-wider text-slate-400">{label}</div><div className="mt-3 text-xs text-slate-500">{note}</div></div>)}
