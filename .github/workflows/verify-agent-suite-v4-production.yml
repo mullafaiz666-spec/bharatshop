@@ -9,23 +9,25 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 3
     steps:
-      - name: Probe live BharatShop Agent Suite v4
+      - name: Capture live BharatShop Agent Suite v4 readiness
         env:
           HEALTH_URL: https://bharatshop-9w4a.onrender.com/api/health/agents
           EXPECTED_REVISION: cf60f1883867cd60627102d3c122030ffacab6fa
         run: |
           set -uo pipefail
-          for attempt in $(seq 1 20); do
-            echo "Production readiness attempt $attempt"
-            http=$(curl --silent --show-error --location --connect-timeout 15 --max-time 70 --output /tmp/readiness.json --write-out '%{http_code}' "$HEALTH_URL" || true)
-            echo "HTTP_STATUS=$http"
-            if node <<'NODE'
+          http=$(curl --silent --show-error --location --connect-timeout 15 --max-time 90 --output /tmp/readiness.json --write-out '%{http_code}' "$HEALTH_URL" || true)
+          echo "HTTP_STATUS=$http"
+          echo "READINESS_PAYLOAD_BEGIN"
+          cat /tmp/readiness.json 2>/dev/null || true
+          echo
+          echo "READINESS_PAYLOAD_END"
+          node <<'NODE'
           const fs = require('fs');
           let data;
           try { data = JSON.parse(fs.readFileSync('/tmp/readiness.json', 'utf8')); }
-          catch { process.exit(2); }
+          catch (error) { console.error('Invalid readiness JSON:', error.message); process.exit(2); }
           const expected = process.env.EXPECTED_REVISION;
           const report = {
             service: data.service,
@@ -47,11 +49,3 @@ jobs:
           if (!(data.agents || []).every(a => a.ready === true && a.status === 'READY')) process.exit(9);
           console.log('ALL_13_AGENTS_READY=true');
           NODE
-            then
-              exit 0
-            fi
-            sleep 15
-          done
-          echo "Production deep readiness did not reach 13/13 on expected revision. Last payload:"
-          cat /tmp/readiness.json 2>/dev/null || true
-          exit 1
