@@ -50,26 +50,78 @@ async function probeDatabase(): Promise<DependencyProbe> {
   }
 }
 
+type SearchAttempt = {
+  ready: boolean;
+  reason: string;
+  httpStatus?: number;
+  resultCount?: number;
+  contentType?: string;
+};
+
+async function probeSearchAttempt(url: string, timeoutMs: number): Promise<SearchAttempt> {
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      cache: "no-store",
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: { Accept: "application/json", "User-Agent": "BharatShop-Agent-Readiness/1.0" },
+    });
+    const contentType = response.headers.get("content-type") || "";
+    if (!response.ok) return { ready: false, reason: `SearXNG returned HTTP ${response.status}`, httpStatus: response.status, contentType };
+    if (!contentType.includes("application/json")) return { ready: false, reason: "SearXNG search did not return JSON", httpStatus: response.status, contentType };
+    const body = await response.json().catch(() => null) as { results?: unknown[] } | null;
+    return { ready: true, reason: "SearXNG JSON search succeeded", httpStatus: response.status, resultCount: Array.isArray(body?.results) ? body.results.length : 0, contentType };
+  } catch (error) {
+    return { ready: false, reason: error instanceof Error ? error.message : "SearXNG probe failed" };
+  }
+}
+
 async function probeSearch(): Promise<DependencyProbe> {
   const started = Date.now();
   const base = String(process.env.SEARXNG_URL || "").replace(/\/+$/, "");
   if (!base) return { ready: false, configured: false, reason: "SEARXNG_URL is not configured" };
-  try {
-    const url = `${base}/search?` + new URLSearchParams({ q: "BharatShop readiness probe", categories: "general", format: "json", language: "en" }).toString();
-    const response = await fetch(url, {
-      method: "GET",
-      cache: "no-store",
-      signal: AbortSignal.timeout(12_000),
-      headers: { Accept: "application/json", "User-Agent": "BharatShop-Agent-Readiness/1.0" },
-    });
-    const contentType = response.headers.get("content-type") || "";
-    if (!response.ok) return { ready: false, configured: true, reason: `SearXNG returned HTTP ${response.status}`, latencyMs: Date.now() - started, detail: { httpStatus: response.status } };
-    if (!contentType.includes("application/json")) return { ready: false, configured: true, reason: "SearXNG search did not return JSON", latencyMs: Date.now() - started, detail: { contentType } };
-    const body = await response.json().catch(() => null) as { results?: unknown[] } | null;
-    return { ready: true, configured: true, reason: "SearXNG JSON search succeeded", latencyMs: Date.now() - started, detail: { resultCount: Array.isArray(body?.results) ? body.results.length : 0 } };
-  } catch (error) {
-    return { ready: false, configured: true, reason: error instanceof Error ? error.message : "SearXNG probe failed", latencyMs: Date.now() - started };
+  const url = `${base}/search?` + new URLSearchParams({ q: "BharatShop readiness probe", categories: "general", format: "json", language: "en" }).toString();
+
+  // Render free services can take ~30 seconds to wake. The first bounded request doubles
+  // as the wake-up signal; only timeout/network failures get one longer retry. HTTP or
+  // content errors remain truthful failures instead of being hidden by retries.
+  const first = await probeSearchAttempt(url, 12_000);
+  if (first.ready) {
+    return {
+      ready: true,
+      configured: true,
+      reason: first.reason,
+      latencyMs: Date.now() - started,
+      detail: { attempts: 1, httpStatus: first.httpStatus, resultCount: first.resultCount },
+    };
   }
+
+  const retryable = first.httpStatus === undefined;
+  if (!retryable) {
+    return {
+      ready: false,
+      configured: true,
+      reason: first.reason,
+      latencyMs: Date.now() - started,
+      detail: { attempts: 1, httpStatus: first.httpStatus, contentType: first.contentType },
+    };
+  }
+
+  const second = await probeSearchAttempt(url, 38_000);
+  return {
+    ready: second.ready,
+    configured: true,
+    reason: second.ready ? "SearXNG JSON search succeeded after free-tier cold-start retry" : second.reason,
+    latencyMs: Date.now() - started,
+    detail: {
+      attempts: 2,
+      coldStartRetry: true,
+      httpStatus: second.httpStatus,
+      resultCount: second.resultCount,
+      firstFailure: first.reason,
+      ...(second.contentType ? { contentType: second.contentType } : {}),
+    },
+  };
 }
 
 function depsForAgent(id: OperationalAgentId) {
