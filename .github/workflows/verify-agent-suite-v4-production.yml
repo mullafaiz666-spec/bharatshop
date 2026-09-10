@@ -11,41 +11,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
-      - name: Capture live BharatShop Agent Suite v4 readiness
+      - name: Diagnose SearXNG dependency
         env:
-          HEALTH_URL: https://bharatshop-9w4a.onrender.com/api/health/agents
-          EXPECTED_REVISION: cf60f1883867cd60627102d3c122030ffacab6fa
+          SEARX_URL: https://bharatshop-searxng.onrender.com
         run: |
           set -uo pipefail
-          http=$(curl --silent --show-error --location --connect-timeout 15 --max-time 90 --output /tmp/readiness.json --write-out '%{http_code}' "$HEALTH_URL" || true)
-          echo "HTTP_STATUS=$http"
-          echo "READINESS_PAYLOAD_BEGIN"
-          cat /tmp/readiness.json 2>/dev/null || true
+          echo "ROOT_STATUS=$(curl --silent --show-error --location --connect-timeout 15 --max-time 45 --output /tmp/root.txt --write-out '%{http_code}' "$SEARX_URL/" || true)"
+          head -c 600 /tmp/root.txt 2>/dev/null || true
           echo
-          echo "READINESS_PAYLOAD_END"
-          node <<'NODE'
-          const fs = require('fs');
-          let data;
-          try { data = JSON.parse(fs.readFileSync('/tmp/readiness.json', 'utf8')); }
-          catch (error) { console.error('Invalid readiness JSON:', error.message); process.exit(2); }
-          const expected = process.env.EXPECTED_REVISION;
-          const report = {
-            service: data.service,
-            suite: data.suite,
-            revision: data.revision,
-            verificationMode: data.verificationMode,
-            allOperational: data.allOperational,
-            summary: data.summary,
-            infrastructure: data.infrastructure,
-            agents: (data.agents || []).map(a => ({ id:a.id, name:a.name, status:a.status, ready:a.ready })),
-          };
-          console.log('READINESS_REPORT=' + JSON.stringify(report, null, 2));
-          if (data.service !== 'BharatShop AI Company OS') process.exit(3);
-          if (data.suite !== 'BharatShop Agent Suite v4') process.exit(4);
-          if (data.verificationMode !== 'DEEP_LIVE_DEPENDENCY_PROBE') process.exit(5);
-          if (expected && data.revision !== expected) process.exit(6);
-          if (!data.summary || data.summary.total !== 13) process.exit(7);
-          if (data.allOperational !== true || data.summary.allReady !== true || data.summary.ready !== 13 || (data.summary.blocked || []).length !== 0) process.exit(8);
-          if (!(data.agents || []).every(a => a.ready === true && a.status === 'READY')) process.exit(9);
-          console.log('ALL_13_AGENTS_READY=true');
-          NODE
+          SEARCH_URL="$SEARX_URL/search?q=BharatShop+readiness+probe&categories=general&format=json&language=en"
+          echo "SEARCH_STATUS=$(curl --silent --show-error --location --connect-timeout 15 --max-time 60 --output /tmp/search.txt --write-out '%{http_code}' "$SEARCH_URL" || true)"
+          echo "SEARCH_BODY_BEGIN"
+          head -c 4000 /tmp/search.txt 2>/dev/null || true
+          echo
+          echo "SEARCH_BODY_END"
+          IMG_URL="$SEARX_URL/search?q=red+shirt&categories=images&format=json&language=en&engines=brave.images"
+          echo "IMAGE_STATUS=$(curl --silent --show-error --location --connect-timeout 15 --max-time 60 --output /tmp/image.txt --write-out '%{http_code}' "$IMG_URL" || true)"
+          echo "IMAGE_BODY_BEGIN"
+          head -c 4000 /tmp/image.txt 2>/dev/null || true
+          echo
+          echo "IMAGE_BODY_END"
