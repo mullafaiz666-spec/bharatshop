@@ -45,7 +45,10 @@ function toOllamaPayload(body) {
     ...(Array.isArray(json.tools) && json.tools.length ? { tools: json.tools } : {}),
     options: {
       temperature: Number(json.temperature ?? 0.2),
-      num_ctx: Number(process.env.OLLAMA_CONTEXT_LENGTH || 1024),
+      // 1024 tokens was too small once tool schemas, memory and observations were
+      // included. 2048 stays conservative for the 270M free-tier model while
+      // allowing a genuine multi-step agent exchange.
+      num_ctx: Number(process.env.OLLAMA_CONTEXT_LENGTH || 2048),
       num_predict: numPredict,
     },
   }));
