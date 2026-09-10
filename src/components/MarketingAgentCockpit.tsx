@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type Product = {
   id: number;
@@ -198,6 +198,7 @@ export default function MarketingAgentCockpit() {
   const [error, setError] = useState("");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const hydrated = useRef(false);
+  const importRef = useRef<HTMLInputElement>(null);
 
   const [launch, setLaunch] = useState({ productId: "", platform: "Instagram Reels", campaignType: "NEW_LAUNCH", headline: "", bodyText: "", ctaText: "Shop now", targetAudience: "", budgetInr: "0" });
   const [editing, setEditing] = useState<Campaign | null>(null);
@@ -368,6 +369,40 @@ export default function MarketingAgentCockpit() {
 
   function copy(text: string) { void navigator.clipboard?.writeText(text); }
 
+  function exportWorkspace() {
+    const blob = new Blob([JSON.stringify(workspace, null, 2)], { type: "application/json" });
+    const href = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = href;
+    anchor.download = `bharatshop-marketing-cockpit-${today()}.json`;
+    anchor.click();
+    URL.revokeObjectURL(href);
+  }
+
+  async function importWorkspaceFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      const parsed = JSON.parse(await file.text()) as Partial<Workspace>;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Invalid backup file");
+      setWorkspace({
+        ...emptyWorkspace(),
+        ...parsed,
+        version: 2,
+        calendar: Array.isArray(parsed.calendar) ? parsed.calendar : [],
+        library: Array.isArray(parsed.library) ? parsed.library : [],
+        routines: Array.isArray(parsed.routines) && parsed.routines.length ? parsed.routines : DEFAULT_ROUTINES,
+        pillarScores: parsed.pillarScores && typeof parsed.pillarScores === "object" ? parsed.pillarScores : {},
+        reviewNotes: parsed.reviewNotes && typeof parsed.reviewNotes === "object" ? parsed.reviewNotes : {},
+        agentRuns: Array.isArray(parsed.agentRuns) ? parsed.agentRuns.slice(0, 20) : [],
+      });
+      setError("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not import cockpit backup");
+    }
+  }
+
   function addCalendar() {
     if (!calendarDraft.title.trim()) return;
     setWorkspace((current) => ({ ...current, calendar: [...current.calendar, { id: uid(), ...calendarDraft, title: calendarDraft.title.trim(), done: false }].sort((a, b) => a.date.localeCompare(b.date)) }));
@@ -401,6 +436,9 @@ export default function MarketingAgentCockpit() {
           <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300">{saveState === "saving" ? "Saving…" : saveState === "error" ? "Save error" : "Synced"}</span>
           <span className="rounded-full border border-lime-300/30 bg-lime-300/10 px-3 py-1 text-xs font-bold text-lime-200">Spend: OFF</span>
           <button className={btn} onClick={() => void refreshAll()} disabled={busy === "refresh"}>↻ Refresh</button>
+          <button className={btn} onClick={exportWorkspace}>Export</button>
+          <button className={btn} onClick={() => importRef.current?.click()}>Import</button>
+          <input ref={importRef} type="file" accept="application/json,.json" className="hidden" onChange={(event) => void importWorkspaceFile(event)} />
           <Link className={btn} href="/dashboard">Dashboard</Link>
         </div>
       </div>
