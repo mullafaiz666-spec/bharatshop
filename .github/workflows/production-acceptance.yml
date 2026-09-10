@@ -67,7 +67,26 @@ jobs:
           set -euo pipefail
           test -n "$BHARATSHOP_AUTOMATION_TOKEN"
           AUTH=(-H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" -H "x-automation-token: $BHARATSHOP_AUTOMATION_TOKEN" -H "Content-Type: application/json")
-          curl --silent --show-error --fail-with-body --max-time 300 -X POST "$BHARATSHOP_URL/api/automation/deodap-bootstrap" "${AUTH[@]}" --data '{"limit":30,"maxPages":16}' | tee /tmp/deodap.json
+
+          deodap_code=$(curl --silent --show-error --max-time 300 -o /tmp/deodap.json -w '%{http_code}' -X POST "$BHARATSHOP_URL/api/automation/deodap-bootstrap" "${AUTH[@]}" --data '{"limit":30,"maxPages":16}' || true)
+          cat /tmp/deodap.json || true
+          if [ "$deodap_code" != "200" ]; then
+            deodap_rate_limited=$(node - <<'NODE'
+          const fs=require('fs');
+          try{
+            const d=JSON.parse(fs.readFileSync('/tmp/deodap.json','utf8'));
+            process.stdout.write(d.status==='BLOCKED_SUPPLIER_POLICY_EVIDENCE'&&Number(d.policy?.status)===429?'1':'0');
+          }catch{process.stdout.write('0');}
+          NODE
+            )
+            if [ "$deodap_code" = "503" ] && [ "$deodap_rate_limited" = "1" ]; then
+              echo "DeoDap policy endpoint is rate-limited. Catalog was left unchanged; continuing core production acceptance without inventing supplier evidence."
+            else
+              echo "Unexpected DeoDap bootstrap failure: HTTP=$deodap_code"
+              exit 1
+            fi
+          fi
+
           curl --silent --show-error --fail-with-body --max-time 45 -X POST "$BHARATSHOP_URL/api/automation/order-gate-status" "${AUTH[@]}" --data '{}' | tee /tmp/order-gate.json
           curl --silent --show-error --fail-with-body --max-time 60 -X POST "$BHARATSHOP_URL/api/automation/ceo-delegation" "${AUTH[@]}" --data '{}' | tee /tmp/ceo-delegation.json
 
