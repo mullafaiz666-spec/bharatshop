@@ -13,9 +13,10 @@ const DEFAULT_TABLES = [
   "storefront_orders",
   "marketing_campaigns",
   "ai_activity_logs",
-  "company_goals",
-  "company_work_items",
-  "company_events",
+  "agent_company_goals",
+  "agent_work_items",
+  "agent_shared_events",
+  "agent_chat_messages",
   "admin_sessions",
 ];
 
