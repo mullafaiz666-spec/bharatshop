@@ -7,6 +7,8 @@ type Msg = { role: "user" | "assistant"; content: string };
 type Approval = { id:number; title:string; action_type:string; reason:string; risk_level:string; status:string; created_at:string; payload?:unknown };
 type RuntimeState = { status:"idle"|"ready"|"unavailable"; model?:string };
 
+const SESSION_KEY = "bharatshop-ceo-agent-session-v4";
+
 export default function CEOChat() {
   const [open, setOpen] = useState(false);
   const [question, setQuestion] = useState("");
@@ -14,14 +16,19 @@ export default function CEOChat() {
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [context, setContext] = useState<any>({});
   const [runtime, setRuntime] = useState<RuntimeState>({ status:"idle" });
+  const [sessionId, setSessionId] = useState("");
   const [messages, setMessages] = useState<Msg[]>([
-    { role: "assistant", content: "BharatShop CEO console is ready. Send a message to start the local Gemma CEO. If the model runtime is unavailable, I’ll show that clearly instead of substituting a scripted CEO answer." },
+    { role: "assistant", content: "BharatShop CEO is ready. It can inspect live business data, use permitted tools across multiple steps, delegate focused work to specialists, remember this session, and prepare approval requests for gated actions." },
   ]);
 
   async function refreshApprovals() {
     const d = await fetch("/api/ceo-approvals", { cache: "no-store" }).then(r => r.json()).catch(() => ({}));
     setApprovals(Array.isArray(d.approvals) ? d.approvals.filter((x:Approval) => x.status === "PENDING") : []);
   }
+
+  useEffect(() => {
+    try { setSessionId(window.localStorage.getItem(SESSION_KEY) || ""); } catch {}
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -36,10 +43,10 @@ export default function CEOChat() {
 
   const storefrontUrl = useMemo(() => typeof window === "undefined" ? "/store" : `${window.location.origin}/store`, []);
   const runtimeLabel = runtime.status === "ready"
-    ? `${runtime.model || "Local Gemma"} • model-driven CEO`
+    ? `${runtime.model || "Local Gemma"} • multi-step agent runtime`
     : runtime.status === "unavailable"
-      ? "Local Gemma unavailable • no canned fallback"
-      : "Local Gemma CEO • human approval protected";
+      ? "Local Gemma unavailable • no fabricated fallback"
+      : "Local Gemma • tool use • specialist handoffs • approval protected";
   const runtimeClass = runtime.status === "unavailable" ? "text-rose-400" : "text-emerald-400";
 
   async function ask() {
@@ -48,15 +55,20 @@ export default function CEOChat() {
     const next = [...messages, { role: "user" as const, content: q }];
     setMessages(next); setQuestion(""); setBusy(true);
     try {
-      const r = await fetch("/api/ceo-chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: q, messages: next, context }) });
+      const r = await fetch("/api/ceo-chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: q, messages: next, context, sessionId: sessionId || undefined }) });
       const d = await r.json();
+      if (d.sessionId) {
+        const nextSession = String(d.sessionId);
+        setSessionId(nextSession);
+        try { window.localStorage.setItem(SESSION_KEY, nextSession); } catch {}
+      }
       if (d.modelStatus === "live" || d.modelStatus === "completed") setRuntime({ status:"ready", model:String(d.model || "Local Gemma") });
       else if (d.modelStatus === "unavailable" || d.mode === "ai-agent-unavailable") setRuntime({ status:"unavailable", model:String(d.model || "Local Gemma") });
       setMessages(v => [...v, { role: "assistant", content: d.reply || d.error || "Local Gemma CEO is unavailable." }]);
       void refreshApprovals();
     } catch {
       setRuntime({ status:"unavailable" });
-      setMessages(v => [...v, { role: "assistant", content: "Local Gemma CEO is unavailable right now. No scripted CEO answer was substituted." }]);
+      setMessages(v => [...v, { role: "assistant", content: "Local Gemma CEO is unavailable right now. No fabricated CEO answer was substituted." }]);
     } finally { setBusy(false); }
   }
 
@@ -70,8 +82,8 @@ export default function CEOChat() {
       {open && <div className="w-[min(94vw,460px)] h-[min(78vh,700px)] rounded-2xl border border-orange-500/30 bg-slate-950/95 shadow-2xl backdrop-blur overflow-hidden flex flex-col">
         <div className="px-4 py-3 border-b border-slate-800 flex items-center gap-3"><div className="h-10 w-10 rounded-xl bg-orange-500/15 border border-orange-500/30 flex items-center justify-center text-xl">🧠</div><div className="flex-1"><div className="font-bold">BHARATSHOP AI CEO</div><div className={`text-[11px] flex items-center gap-1 ${runtimeClass}`}><ShieldCheck size={12}/>{runtimeLabel}</div></div><button onClick={() => setOpen(false)} className="text-slate-400 hover:text-white"><X size={18}/></button></div>
         {approvals.length > 0 && <div className="border-b border-orange-500/20 bg-orange-500/5 p-3 max-h-48 overflow-y-auto"><div className="flex items-center justify-between mb-2"><div className="text-xs font-bold text-orange-300">{approvals.length} ACTION{approvals.length === 1 ? "" : "S"} AWAITING APPROVAL</div><button onClick={() => void refreshApprovals()} className="text-slate-400"><RefreshCw size={13}/></button></div>{approvals.map(a => <div key={a.id} className="rounded-xl bg-slate-900 border border-slate-800 p-3 mb-2 last:mb-0"><div className="text-sm font-semibold">{a.title}</div><div className="text-[11px] text-slate-400 mt-1">{a.reason}</div><div className="flex items-center justify-between mt-2"><span className="text-[10px] uppercase text-orange-300">{a.risk_level} • {a.action_type}</span><div className="flex gap-1"><button onClick={() => void decide(a.id,"reject")} className="rounded-lg border border-slate-700 px-2 py-1 text-xs"><XCircle size={13}/></button><button onClick={() => void decide(a.id,"approve")} className="rounded-lg bg-emerald-500 text-slate-950 px-2 py-1 text-xs font-bold"><Check size={13}/></button></div></div></div>)}</div>}
-        <div className="flex-1 overflow-y-auto p-3 space-y-3">{messages.map((m,i) => <div key={i} className={`rounded-xl p-3 text-sm whitespace-pre-wrap ${m.role === "assistant" ? "bg-slate-900 border border-slate-800 mr-5" : "bg-orange-500 text-slate-950 ml-5"}`}>{m.content}</div>)}{busy && <div className="rounded-xl p-3 text-sm bg-slate-900 border border-slate-800 mr-5">Gemma is deciding what evidence it needs and reasoning over the result…</div>}</div>
-        <div className="p-3 border-t border-slate-800"><div className="flex gap-2"><input value={question} onChange={e => setQuestion(e.target.value)} onKeyDown={e => { if (e.key === "Enter") void ask(); }} placeholder="Ask the Gemma CEO about BharatShop…" className="flex-1 min-w-0 rounded-xl bg-slate-900 border border-slate-700 px-3 py-3 text-sm outline-none focus:border-orange-500"/><button disabled={busy || !question.trim()} onClick={() => void ask()} className="rounded-xl bg-orange-500 text-slate-950 px-4 disabled:opacity-40"><Send size={17}/></button></div><div className="text-[10px] text-slate-500 mt-2">Gemma can choose permitted evidence tools and prepare actions. Purchases, spending, risky publishing and other irreversible actions require your approval.</div></div>
+        <div className="flex-1 overflow-y-auto p-3 space-y-3">{messages.map((m,i) => <div key={i} className={`rounded-xl p-3 text-sm whitespace-pre-wrap ${m.role === "assistant" ? "bg-slate-900 border border-slate-800 mr-5" : "bg-orange-500 text-slate-950 ml-5"}`}>{m.content}</div>)}{busy && <div className="rounded-xl p-3 text-sm bg-slate-900 border border-slate-800 mr-5">CEO is gathering evidence, using tools and continuing until it has a useful answer…</div>}</div>
+        <div className="p-3 border-t border-slate-800"><div className="flex gap-2"><input value={question} onChange={e => setQuestion(e.target.value)} onKeyDown={e => { if (e.key === "Enter") void ask(); }} placeholder="Ask the BharatShop CEO…" className="flex-1 min-w-0 rounded-xl bg-slate-900 border border-slate-700 px-3 py-3 text-sm outline-none focus:border-orange-500"/><button disabled={busy || !question.trim()} onClick={() => void ask()} className="rounded-xl bg-orange-500 text-slate-950 px-4 disabled:opacity-40"><Send size={17}/></button></div><div className="text-[10px] text-slate-500 mt-2">Multi-step tool results are audited. Purchases, spending, risky publishing and other irreversible actions still require your approval.</div></div>
       </div>}
       <div className="flex gap-2"><a href={storefrontUrl} target="_blank" rel="noreferrer" className="rounded-full bg-slate-800 border border-slate-700 px-4 py-3 text-xs font-bold flex items-center gap-2 shadow-xl"><ExternalLink size={15}/> Open Storefront</a><button onClick={() => setOpen(v => !v)} className="rounded-full bg-orange-500 text-slate-950 px-5 py-3 font-bold text-sm shadow-xl flex items-center gap-2"><MessageCircle size={18}/> {open ? "Close CEO" : "Ask CEO"}{approvals.length > 0 && <span className="rounded-full bg-slate-950 text-orange-300 px-1.5 text-[10px]">{approvals.length}</span>}</button></div>
     </div>
