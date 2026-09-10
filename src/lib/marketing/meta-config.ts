@@ -14,7 +14,7 @@ export function metaConfiguration() {
   if (!value("META_DATASET_ID") && browser && legacyServerPixel && browser !== legacyServerPixel) {
     issues.push("META_PIXEL_ID and NEXT_PUBLIC_META_PIXEL_ID must match unless META_DATASET_ID is explicitly configured");
   }
-  const token = value("META_CONVERSIONS_API_TOKEN") || value("META_ACCESS_TOKEN");
+  const token = value("META_CONVERSIONS_API_TOKEN") || value("META_CAPI_TOKEN") || value("META_ACCESS_TOKEN");
   return {
     status: issues.length ? "INVALID" : browser || dataset || value("META_ACCESS_TOKEN") ? "NOT_VERIFIED" : "NOT_CONFIGURED",
     issues,
@@ -26,7 +26,7 @@ export function metaConfiguration() {
     testMode: Boolean(value("META_TEST_EVENT_CODE")),
     graphApiVersion: /^v\d+\.\d+$/.test(version) ? version : null,
     requiredForBrowserTracking: ["NEXT_PUBLIC_META_PIXEL_ID"],
-    requiredForServerTracking: ["META_DATASET_ID or META_PIXEL_ID or NEXT_PUBLIC_META_PIXEL_ID", "META_CONVERSIONS_API_TOKEN or META_ACCESS_TOKEN"],
+    requiredForServerTracking: ["META_DATASET_ID or META_PIXEL_ID or NEXT_PUBLIC_META_PIXEL_ID", "META_CONVERSIONS_API_TOKEN or META_CAPI_TOKEN or META_ACCESS_TOKEN"],
     rebuildRequiredForPublicSettings: true,
     verificationEndpoint: "/api/marketing/connections",
     catalogFeed: "/api/feeds/meta-catalog",
