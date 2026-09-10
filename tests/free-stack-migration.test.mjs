@@ -52,3 +52,34 @@ test("free-stack environment contract keeps current production paths reversible"
   assert.match(netlify, /NODE_VERSION = "24"/);
   assert.doesNotMatch(netlify, /publish\s*=/);
 });
+
+test("Supabase adapters keep customer auth public-key based and storage signing server-only", () => {
+  const supabase = read("src/lib/supabase/rest.ts");
+  assert.match(supabase, /\/auth\/v1\/user/);
+  assert.match(supabase, /NEXT_PUBLIC_SUPABASE_ANON_KEY/);
+  assert.match(supabase, /SUPABASE_SERVICE_ROLE_KEY/);
+  assert.match(supabase, /\/storage\/v1\/object\/sign/);
+  assert.match(supabase, /expiresIn/);
+  assert.match(supabase, /normalizedPath\.includes\("\.\."\)/);
+  assert.doesNotMatch(supabase, /NEXT_PUBLIC_SUPABASE_SERVICE_ROLE/);
+});
+
+test("Supabase copy verification is read-only and blocks cutover on count mismatch", () => {
+  const verification = read("scripts/verify-supabase-copy.mjs");
+  const pkg = JSON.parse(read("package.json"));
+  assert.equal(pkg.scripts["db:verify-supabase"], "node scripts/verify-supabase-copy.mjs");
+  assert.match(verification, /information_schema\.tables/);
+  assert.match(verification, /select count\(\*\)::bigint/);
+  assert.match(verification, /No cutover should occur/);
+  assert.doesNotMatch(verification, /\b(insert|update|delete|drop|truncate|alter|create)\b/i);
+});
+
+test("free-stack readiness endpoint never exposes secret values", () => {
+  const health = read("src/app/api/health/free-stack/route.ts");
+  assert.match(health, /readyForNetlifyDeploy/);
+  assert.match(health, /readyForSupabaseCutover/);
+  assert.match(health, /DATABASE_URL remains authoritative/);
+  assert.match(health, /supabaseRuntimeStatus/);
+  assert.doesNotMatch(health, /SUPABASE_SERVICE_ROLE_KEY\s*:/);
+  assert.doesNotMatch(health, /GEMINI_API_KEY\s*:/);
+});
