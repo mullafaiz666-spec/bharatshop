@@ -37,7 +37,7 @@ function acceptanceCompatibleTrace(items: unknown[]) {
   });
 }
 
-function useBoundedFreeTierCeo(question: string, runtimeAgent: string, incoming: RuntimeMessage[], explicitMaxSteps?: number) {
+function shouldUseBoundedFreeTierCeo(question: string, runtimeAgent: string, incoming: RuntimeMessage[], explicitMaxSteps?: number) {
   if (String(runtimeAgent).toLowerCase() !== "ceo") return false;
   if (!isTinyGemmaModel(aiModels().text)) return false;
   if (incoming.length > 0 || explicitMaxSteps !== undefined) return false;
@@ -68,7 +68,7 @@ export async function POST(req: Request) {
     const browserSession = existingBrowserSession || crypto.randomUUID();
     const derivedSessionId = `${browserSession}:${String(runtimeAgent).toLowerCase().replace(/[^a-z0-9-]+/g, "-")}`.slice(0, 160);
     const sessionId = String(body.sessionId || derivedSessionId).slice(0, 160);
-    const compactPrimary = useBoundedFreeTierCeo(question, runtimeAgent, incoming, body.maxSteps);
+    const compactPrimary = shouldUseBoundedFreeTierCeo(question, runtimeAgent, incoming, body.maxSteps);
 
     const primary = compactPrimary
       ? await runCompactAgentRuntime({
