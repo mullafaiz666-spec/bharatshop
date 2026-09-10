@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { runAgentRuntime, type RuntimeMessage } from "@/lib/agents/runtime";
+import { runCompactAgentFallback } from "@/lib/agents/compact-runtime";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,6 +25,13 @@ const DASHBOARD_AGENT_MAP: Record<string, string> = {
 function cookieValue(cookieHeader: string, key: string) {
   const encoded = cookieHeader.split(";").map((item) => item.trim()).find((item) => item.startsWith(`${key}=`));
   return encoded ? decodeURIComponent(encoded.slice(key.length + 1)) : "";
+}
+
+function acceptanceCompatibleTrace(items: unknown[]) {
+  return items.map((item) => {
+    const trace = item && typeof item === "object" ? item as Record<string, unknown> : { result: item };
+    return { ...trace, result: trace.result !== undefined ? trace.result : trace.output };
+  });
 }
 
 export async function POST(req: Request) {
@@ -51,7 +59,7 @@ export async function POST(req: Request) {
     const derivedSessionId = `${browserSession}:${String(runtimeAgent).toLowerCase().replace(/[^a-z0-9-]+/g, "-")}`.slice(0, 160);
     const sessionId = String(body.sessionId || derivedSessionId).slice(0, 160);
 
-    const result = await runAgentRuntime({
+    const primary = await runAgentRuntime({
       agent: runtimeAgent,
       objective: question,
       history: incoming,
@@ -61,12 +69,34 @@ export async function POST(req: Request) {
       maxSteps: body.maxSteps,
     });
 
+    let result: Record<string, unknown> = primary as unknown as Record<string, unknown>;
+    if (primary.modelStatus === "unavailable") {
+      const compact = await runCompactAgentFallback({
+        agentId: primary.agentId,
+        objective: question,
+        sessionId,
+        context: { ...context, requestedPersona, runtimeAgent },
+        priorError: primary.modelError,
+      });
+      result = {
+        ...compact,
+        toolExecutions: [
+          ...acceptanceCompatibleTrace(primary.toolExecutions as unknown[]),
+          ...acceptanceCompatibleTrace(compact.toolExecutions as unknown[]),
+        ],
+        fullRuntimeStatus: primary.status,
+        compactRecovery: compact.modelStatus === "live" ? "RECOVERED" : "FAILED",
+      };
+    }
+
+    const modelStatus = String(result.modelStatus || "unavailable");
     const response = NextResponse.json({
       ...result,
+      toolExecutions: acceptanceCompatibleTrace(Array.isArray(result.toolExecutions) ? result.toolExecutions : []),
       requestedPersona,
       runtimeAgent,
-      mode: result.modelStatus === "live" ? "ai-agent-live" : "ai-agent-unavailable",
-    }, { status: result.modelStatus === "unavailable" ? 503 : 200 });
+      mode: modelStatus === "live" ? "ai-agent-live" : "ai-agent-unavailable",
+    }, { status: modelStatus === "unavailable" ? 503 : 200 });
 
     if (!existingBrowserSession && !body.sessionId) {
       response.cookies.set("bharatshop_agent_session", browserSession, {
