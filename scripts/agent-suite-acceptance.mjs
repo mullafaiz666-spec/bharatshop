@@ -7,7 +7,7 @@ async function json(path,init={}){const r=await fetch(`${BASE}${path}`,{...init,
 console.log(`Agent suite acceptance target: ${BASE}`);
 const health=await json("/api/agents/health");
 const agents=Array.isArray(health.agents)?health.agents:[];
-const expected=["ceo","source-discovery","source-verification","seller-discovery","listing","marketing","advertising","order-recheck","tracking","learning","automation","web-design"];
+const expected=["ceo","source-discovery","source-verification","seller-discovery","image-media","listing","marketing","advertising","order-recheck","tracking","learning","automation","web-design"];
 let failed=false;
 for(const id of expected){const a=agents.find(x=>x.id===id);const pass=Boolean(a?.ready);console.log(`${pass?"PASS":"FAIL"}  agent ${id}  ${a?.reason||"missing from registry"}`);if(!pass)failed=true;}
 if(agents.length!==expected.length){console.log(`FAIL  agent registry count  expected=${expected.length} actual=${agents.length}`);failed=true;}else console.log(`PASS  agent registry count  ${agents.length}`);

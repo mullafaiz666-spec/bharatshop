@@ -58,6 +58,10 @@ test("deep health probes live dependencies and evaluates every agent runtime map
   assert.match(readiness, /checkAI\(true\)/);
   assert.match(readiness, /probeDatabase/);
   assert.match(readiness, /probeSearch/);
+  assert.match(readiness, /probeSearchAttempt\(url, 12_000\)/);
+  assert.match(readiness, /probeSearchAttempt\(url, 38_000\)/);
+  assert.match(readiness, /coldStartRetry: true/);
+  assert.match(readiness, /retryable = first\.httpStatus === undefined/);
   assert.match(readiness, /to_regclass\('public\.agent_work_items'\)/);
   assert.match(readiness, /agentRuntimeCatalog\(\)/);
   assert.match(readiness, /case "image-media"/);
