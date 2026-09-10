@@ -269,7 +269,7 @@ export default function CommandCentreV3() {
         </aside>
       </div>
 
-      {lastRun && <details className={`${panel} mt-5 p-4`}><summary className="cursor-pointer text-sm font-black">Latest command receipt</summary><pre className="mt-3 max-h-[480px] overflow-auto whitespace-pre-wrap rounded-xl bg-black/30 p-3 text-[11px] leading-5 text-slate-400">{JSON.stringify(lastRun, null, 2)}</pre></details>}
+      {lastRun !== null && <details className={`${panel} mt-5 p-4`}><summary className="cursor-pointer text-sm font-black">Latest command receipt</summary><pre className="mt-3 max-h-[480px] overflow-auto whitespace-pre-wrap rounded-xl bg-black/30 p-3 text-[11px] leading-5 text-slate-400">{JSON.stringify(lastRun, null, 2)}</pre></details>}
     </div>
   </main>;
 }
