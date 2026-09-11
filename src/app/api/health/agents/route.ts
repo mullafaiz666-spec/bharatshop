@@ -17,7 +17,7 @@ function publicInfrastructure(readiness: Awaited<ReturnType<typeof deepAgentRead
       ready: source.ai.ready,
       configured: source.ai.configured,
       status: source.ai.ready ? "READY" : "BLOCKED",
-      message: source.ai.ready ? "The configured local AI model responded to the live readiness probe." : "The configured local AI model did not pass the live readiness probe.",
+      message: source.ai.ready ? "The configured AI provider chain passed the live model readiness probe." : "The configured AI provider chain did not pass the live model readiness probe.",
     },
     search: {
       ready: source.search.ready,
@@ -45,12 +45,13 @@ export async function GET() {
       status: agent.status,
     }));
     const allOperational = readiness.summary.allReady === true;
-    const revision = process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT_SHA || process.env.COMMIT_SHA || "unknown";
+    const revision = process.env.BHARATSHOP_BUILD_REVISION || process.env.COMMIT_REF || process.env.GITHUB_SHA || process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT_SHA || process.env.COMMIT_SHA || "unknown";
 
     return Response.json({
       service: "BharatShop AI Company OS",
       suite: readiness.suite,
       revision,
+      provider: readiness.provider,
       verificationMode: "DEEP_LIVE_DEPENDENCY_PROBE",
       allOperational,
       summary: readiness.summary,
@@ -67,6 +68,7 @@ export async function GET() {
     return Response.json({
       service: "BharatShop AI Company OS",
       suite: "BharatShop Agent Suite v4",
+      revision: process.env.BHARATSHOP_BUILD_REVISION || process.env.COMMIT_REF || process.env.GITHUB_SHA || "unknown",
       verificationMode: "DEEP_LIVE_DEPENDENCY_PROBE",
       allOperational: false,
       summary: { total: 13, ready: 0, blocked: ["readiness-probe"], allReady: false },
