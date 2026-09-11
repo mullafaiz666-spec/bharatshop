@@ -1,0 +1,39 @@
+name: Bootstrap Netlify MCP Runtime
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/netlify-mcp-bootstrap.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install official Netlify MCP runtime
+        shell: bash
+        run: |
+          mkdir -p netlify-mcp-runtime
+          cd netlify-mcp-runtime
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund @netlify/mcp@1.15.1
+
+      - name: Archive runtime
+        run: tar -czf netlify-mcp-runtime.tgz netlify-mcp-runtime
+
+      - name: Upload runtime artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: netlify-mcp-runtime
+          path: netlify-mcp-runtime.tgz
+          if-no-files-found: error
+          retention-days: 1
