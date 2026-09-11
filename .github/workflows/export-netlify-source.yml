@@ -16,7 +16,8 @@ jobs:
       - name: Pack source
         run: |
           set -euo pipefail
-          tar --exclude='.git' --exclude='node_modules' --exclude='.next' -czf bharatshop-source.tgz .
+          tar --exclude='.git' --exclude='node_modules' --exclude='.next' -czf /tmp/bharatshop-source.tgz .
+          cp /tmp/bharatshop-source.tgz ./bharatshop-source.tgz
       - uses: actions/upload-artifact@v4
         with:
           name: bharatshop-source
