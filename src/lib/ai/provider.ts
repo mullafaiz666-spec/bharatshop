@@ -4,18 +4,31 @@ type ProviderOptions = { model?: string; temperature?: number; maxTokens?: numbe
 
 type GeminiPart = { text?: string; functionCall?: { name?: string; args?: unknown } };
 
+type ProviderProbe = {
+  configured: boolean;
+  ready: boolean;
+  status?: number;
+  reason: string;
+  error?: string;
+  route: "gemini" | "openai-compatible";
+};
+
 const baseUrl = () => (process.env.AI_BASE_URL || process.env.LOCAL_AI_BASE_URL || "").replace(/\/+$/, "");
 const apiKey = () => process.env.AI_API_KEY || process.env.LOCAL_AI_API_KEY || "";
 const geminiApiKey = () => process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || "";
 const configuredProvider = () => String(process.env.AI_PROVIDER || "").trim().toLowerCase();
 const shouldUseGemini = () => configuredProvider() === "gemini" || (!configuredProvider() && !!geminiApiKey());
+const localTextModel = () => process.env.AI_TEXT_MODEL || process.env.LOCAL_AI_TEXT_MODEL || "gemma3:270m-it-qat";
+const geminiTextModel = () => process.env.GEMINI_MODEL || process.env.AI_TEXT_MODEL || "gemini-3.7-flash";
+const hasOpenAICompatibleFallback = () => shouldUseGemini() && !!baseUrl();
 
-export const aiProviderName = () => shouldUseGemini() ? "gemini" : (process.env.AI_PROVIDER || "local-openai-compatible");
-export const aiConfigured = () => shouldUseGemini() ? !!geminiApiKey() : !!baseUrl();
+export const aiProviderName = () => shouldUseGemini()
+  ? (hasOpenAICompatibleFallback() ? "gemini+openai-compatible-fallback" : "gemini")
+  : (process.env.AI_PROVIDER || "local-openai-compatible");
+export const aiConfigured = () => shouldUseGemini() ? (!!geminiApiKey() || !!baseUrl()) : !!baseUrl();
 export const aiModels = () => ({
-  text: shouldUseGemini()
-    ? (process.env.GEMINI_MODEL || process.env.AI_TEXT_MODEL || "gemini-3.7-flash")
-    : (process.env.AI_TEXT_MODEL || process.env.LOCAL_AI_TEXT_MODEL || "gemma3:270m-it-qat"),
+  text: shouldUseGemini() ? geminiTextModel() : localTextModel(),
+  fallbackText: hasOpenAICompatibleFallback() ? localTextModel() : undefined,
   vision: process.env.AI_VISION_MODEL || process.env.LOCAL_AI_VISION_MODEL || "local-evidence-v1",
 });
 
@@ -79,7 +92,7 @@ function geminiToolConfig(toolChoice: any) {
 async function requestGemini(messages: AIMessage[], options: ProviderOptions = {}) {
   const key = geminiApiKey();
   if (!key) throw new Error("GEMINI_API_KEY is not configured");
-  const model = options.model || aiModels().text;
+  const model = options.model || geminiTextModel();
   const systemText = messages.filter((message) => message.role === "system").map((message) => messageText(message.content)).join("\n\n");
   const contents = messages
     .filter((message) => message.role !== "system")
@@ -136,17 +149,40 @@ async function requestGemini(messages: AIMessage[], options: ProviderOptions = {
   };
 }
 
-export async function runAI(messages: AIMessage[], options: ProviderOptions = {}) {
-  if (shouldUseGemini()) return requestGemini(messages, options);
-  const models = aiModels();
+async function requestOpenAICompatible(messages: AIMessage[], options: ProviderOptions = {}) {
   return request("/chat/completions", {
-    model: options.model || models.text,
+    model: options.model || localTextModel(),
     messages,
     temperature: options.temperature ?? 0.2,
     max_tokens: options.maxTokens ?? 1024,
     stream: false,
     ...(options.tools ? { tools: options.tools, tool_choice: options.toolChoice ?? "auto" } : {}),
   }, options.timeoutMs ?? 120000);
+}
+
+function safeProviderError(error: unknown) {
+  return (error instanceof Error ? error.message : String(error)).slice(0, 400);
+}
+
+export async function runAI(messages: AIMessage[], options: ProviderOptions = {}) {
+  if (shouldUseGemini()) {
+    try {
+      return await requestGemini(messages, options);
+    } catch (primaryError) {
+      if (!baseUrl()) throw primaryError;
+      const fallback = await requestOpenAICompatible(messages, { ...options, model: localTextModel() });
+      return {
+        ...fallback,
+        provider_route: {
+          primary: "gemini",
+          active: "openai-compatible",
+          fallbackUsed: true,
+          primaryError: safeProviderError(primaryError),
+        },
+      };
+    }
+  }
+  return requestOpenAICompatible(messages, options);
 }
 
 export async function runText(messages: AIMessage[], options: ProviderOptions = {}) {
@@ -167,46 +203,87 @@ export async function verifyImagesWithAI() {
   throw new Error("Remote multimodal verification is disabled in the default free-stack policy; use the evidence verifier");
 }
 
+async function probeGeminiProvider(model: string): Promise<ProviderProbe> {
+  const key = geminiApiKey();
+  if (!key) return { configured: false, ready: false, reason: "missing_gemini_key", route: "gemini" };
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}`, {
+      headers: { "x-goog-api-key": key },
+      cache: "no-store",
+      signal: AbortSignal.timeout(12_000),
+    });
+    return { configured: true, ready: res.ok, status: res.status, reason: res.ok ? "reachable" : "provider_rejected", route: "gemini" };
+  } catch (error) {
+    return { configured: true, ready: false, reason: "provider_unreachable", error: safeProviderError(error), route: "gemini" };
+  }
+}
+
+async function probeOpenAICompatibleProvider(): Promise<ProviderProbe> {
+  if (!baseUrl()) return { configured: false, ready: false, reason: "missing_openai_compatible_url", route: "openai-compatible" };
+  try {
+    const res = await fetch(providerUrl("/models"), { headers: headers(), cache: "no-store", signal: AbortSignal.timeout(12_000) });
+    return { configured: true, ready: res.ok, status: res.status, reason: res.ok ? "reachable" : "provider_rejected", route: "openai-compatible" };
+  } catch (error) {
+    return { configured: true, ready: false, reason: "provider_unreachable", error: safeProviderError(error), route: "openai-compatible" };
+  }
+}
+
 export async function checkAI(deep = false) {
   const provider = aiProviderName();
   const models = aiModels();
-  if (shouldUseGemini()) {
-    const key = geminiApiKey();
-    if (!key) return { configured: false, ready: false, reason: "missing", provider, models };
-    try {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(models.text)}`, {
-        headers: { "x-goog-api-key": key },
-        cache: "no-store",
-        signal: AbortSignal.timeout(12_000),
-      });
-      if (!res.ok) return { configured: true, ready: false, status: res.status, reason: "provider_rejected", provider, models };
-      if (!deep) return { configured: true, ready: true, status: res.status, reason: "reachable", provider, models };
-    } catch (error) {
-      return { configured: true, ready: false, reason: "provider_unreachable", error: error instanceof Error ? error.message : String(error), provider, models };
+  const geminiPrimary = shouldUseGemini();
+  let activeProbe = geminiPrimary ? await probeGeminiProvider(geminiTextModel()) : await probeOpenAICompatibleProvider();
+  let fallbackUsed = false;
+  let primaryFailure: ProviderProbe | null = null;
+
+  if (!activeProbe.ready && geminiPrimary && baseUrl()) {
+    primaryFailure = activeProbe;
+    const fallbackProbe = await probeOpenAICompatibleProvider();
+    if (fallbackProbe.ready) {
+      activeProbe = fallbackProbe;
+      fallbackUsed = true;
+    } else {
+      return {
+        configured: activeProbe.configured || fallbackProbe.configured,
+        ready: false,
+        reason: "primary_and_fallback_unavailable",
+        provider,
+        models,
+        primary: primaryFailure,
+        fallback: fallbackProbe,
+      };
     }
-  } else {
-    const base = baseUrl();
-    if (!base) return { configured: false, ready: false, reason: "missing", provider, models };
-    try {
-      const res = await fetch(providerUrl("/models"), { headers: headers(), cache: "no-store", signal: AbortSignal.timeout(12_000) });
-      if (!res.ok) return { configured: true, ready: false, status: res.status, reason: "provider_rejected", provider, models };
-      if (!deep) return { configured: true, ready: true, status: res.status, reason: "reachable", provider, models };
-    } catch (error) {
-      return { configured: true, ready: false, reason: "provider_unreachable", error: error instanceof Error ? error.message : String(error), provider, models };
-    }
+  }
+
+  if (!activeProbe.ready) {
+    return { configured: activeProbe.configured, ready: false, status: activeProbe.status, reason: activeProbe.reason, error: activeProbe.error, provider, models };
+  }
+
+  if (!deep) {
+    return {
+      configured: true,
+      ready: true,
+      status: activeProbe.status,
+      reason: fallbackUsed ? "fallback_reachable" : "reachable",
+      provider,
+      models,
+      activeRoute: activeProbe.route,
+      fallbackUsed,
+      ...(primaryFailure ? { primaryFailure } : {}),
+    };
   }
 
   const recentlyVerified = lastVerifiedModelReadyAt > 0 && Date.now() - lastVerifiedModelReadyAt < MODEL_READY_CACHE_TTL_MS;
   if (recentlyVerified) {
-    return { configured: true, ready: true, modelReady: true, reason: "model_ready_recently_verified", verifiedAt: new Date(lastVerifiedModelReadyAt).toISOString(), provider, models };
+    return { configured: true, ready: true, modelReady: true, reason: "model_ready_recently_verified", verifiedAt: new Date(lastVerifiedModelReadyAt).toISOString(), provider, models, activeRoute: activeProbe.route, fallbackUsed };
   }
 
   try {
     const probe = await runText([{ role: "user", content: "Reply with exactly OK." }], { maxTokens: 8, timeoutMs: 15_000 });
     const modelReady = probe.content.trim().length > 0;
     if (modelReady) lastVerifiedModelReadyAt = Date.now();
-    return { configured: true, ready: modelReady, modelReady, reason: modelReady ? "model_ready" : "model_empty_response", provider, models };
+    return { configured: true, ready: modelReady, modelReady, reason: modelReady ? "model_ready" : "model_empty_response", provider, models, activeRoute: activeProbe.route, fallbackUsed };
   } catch (error) {
-    return { configured: true, ready: true, modelReady: false, degraded: true, reason: "provider_ready_model_probe_timed_out", error: error instanceof Error ? error.message : String(error), provider, models };
+    return { configured: true, ready: true, modelReady: false, degraded: true, reason: "provider_ready_model_probe_timed_out", error: safeProviderError(error), provider, models, activeRoute: activeProbe.route, fallbackUsed };
   }
 }
