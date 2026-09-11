@@ -1,0 +1,25 @@
+name: Export Netlify Source
+
+on:
+  push:
+    branches: [ops/netlify-source-artifact]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pack source
+        run: |
+          set -euo pipefail
+          tar --exclude='.git' --exclude='node_modules' --exclude='.next' -czf bharatshop-source.tgz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bharatshop-source
+          path: bharatshop-source.tgz
+          if-no-files-found: error
+          retention-days: 1
