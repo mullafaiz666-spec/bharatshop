@@ -14,8 +14,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
-      BASE_URL: https://bharatshop-9w4a.onrender.com
-      BHARATSHOP_URL: https://bharatshop-9w4a.onrender.com
+      # During the migration, set the repository variable
+      # BHARATSHOP_PRODUCTION_URL to the approved Netlify production origin.
+      # The old Render URL is only a temporary fallback until cutover.
+      BASE_URL: ${{ vars.BHARATSHOP_PRODUCTION_URL || 'https://bharatshop-9w4a.onrender.com' }}
+      BHARATSHOP_URL: ${{ vars.BHARATSHOP_PRODUCTION_URL || 'https://bharatshop-9w4a.onrender.com' }}
       BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
     steps:
       - uses: actions/checkout@v4
@@ -23,7 +26,10 @@ jobs:
         with:
           node-version: 24
 
-      - name: Wait for exact Render deployment
+      - name: Show production acceptance target
+        run: echo "Production acceptance target=$BHARATSHOP_URL"
+
+      - name: Wait for exact production deployment
         run: |
           set -euo pipefail
           for i in $(seq 1 42); do
@@ -32,13 +38,13 @@ jobs:
             echo "shallow health HTTP=$code revision=$revision expected=$GITHUB_SHA"
             if [ "$code" = "200" ] && [ "$revision" = "$GITHUB_SHA" ]; then break; fi
             if [ "$i" = "42" ]; then
-              echo "Render did not expose the exact commit $GITHUB_SHA within the acceptance wait window"
+              echo "Production did not expose the exact commit $GITHUB_SHA within the acceptance wait window"
               exit 1
             fi
             sleep 10
           done
 
-      - name: Wait for dependent providers and Gemma model
+      - name: Wait for dependent providers and AI model
         run: |
           set -euo pipefail
           for i in $(seq 1 18); do
