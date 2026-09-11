@@ -14,11 +14,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
-      # During the migration, set the repository variable
-      # BHARATSHOP_PRODUCTION_URL to the approved Netlify production origin.
-      # The old Render URL is only a temporary fallback until cutover.
-      BASE_URL: ${{ vars.BHARATSHOP_PRODUCTION_URL || 'https://bharatshop-9w4a.onrender.com' }}
-      BHARATSHOP_URL: ${{ vars.BHARATSHOP_PRODUCTION_URL || 'https://bharatshop-9w4a.onrender.com' }}
+      # Netlify is the primary production host. A repository variable can override
+      # this later for an approved custom domain without changing the workflow.
+      BASE_URL: ${{ vars.BHARATSHOP_PRODUCTION_URL || 'https://bharatshop-35fd.netlify.app' }}
+      BHARATSHOP_URL: ${{ vars.BHARATSHOP_PRODUCTION_URL || 'https://bharatshop-35fd.netlify.app' }}
       BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
     steps:
       - uses: actions/checkout@v4
@@ -36,13 +35,45 @@ jobs:
             code=$(curl -sS -o /tmp/health.json -w '%{http_code}' --max-time 20 "$BHARATSHOP_URL/api/health" || true)
             revision=$(node -e "try{const d=require('/tmp/health.json');process.stdout.write(String(d.revision||''))}catch{}")
             echo "shallow health HTTP=$code revision=$revision expected=$GITHUB_SHA"
-            if [ "$code" = "200" ] && [ "$revision" = "$GITHUB_SHA" ]; then break; fi
+            # A deployed revision can truthfully return 503 while dependencies are
+            # not ready. Treat exact revision visibility separately from readiness.
+            if [ "$revision" = "$GITHUB_SHA" ] && { [ "$code" = "200" ] || [ "$code" = "503" ]; }; then break; fi
             if [ "$i" = "42" ]; then
               echo "Production did not expose the exact commit $GITHUB_SHA within the acceptance wait window"
+              cat /tmp/health.json || true
               exit 1
             fi
             sleep 10
           done
+
+      - name: Verify administrator runtime prerequisites
+        run: |
+          set -euo pipefail
+          code=$(curl -sS -o /tmp/free-stack.json -w '%{http_code}' --max-time 30 "$BHARATSHOP_URL/api/health/free-stack?deep=1" || true)
+          state=$(node - <<'NODE'
+          const fs=require('fs');
+          try {
+            const d=JSON.parse(fs.readFileSync('/tmp/free-stack.json','utf8'));
+            process.stdout.write(JSON.stringify({
+              http:Number(process.env.HTTP_CODE||0),
+              adminReady:d.admin?.ready===true,
+              databaseConfigured:d.admin?.databaseConfigured===true,
+              sessionSecretConfigured:d.admin?.sessionSecretConfigured===true,
+              configuredAdminLogin:d.admin?.configuredAdminLogin===true,
+              aiConfigured:d.ai?.configured===true,
+              aiProvider:d.ai?.provider||'',
+              automationTokenConfigured:d.automation?.tokenConfigured===true,
+            }));
+          } catch { process.stdout.write(JSON.stringify({parseError:true})); }
+          NODE
+          )
+          echo "admin runtime HTTP=$code $state"
+          ready=$(printf '%s' "$state" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const d=JSON.parse(s);process.stdout.write(d.adminReady&&d.databaseConfigured&&d.sessionSecretConfigured?'1':'0')}catch{process.stdout.write('0')}})")
+          if [ "$ready" != "1" ]; then
+            echo "Administrator runtime prerequisites are not ready on production"
+            cat /tmp/free-stack.json || true
+            exit 1
+          fi
 
       - name: Wait for dependent providers and AI model
         run: |
@@ -55,7 +86,19 @@ jobs:
             const d=JSON.parse(fs.readFileSync('/tmp/deep-health.json','utf8'));
             const r=d.readiness||{};
             const ready=Boolean(r.postgres?.ready&&r.ai?.ready&&r.ai?.modelReady&&r.vision?.ready&&r.searxng?.ready);
-            process.stdout.write(JSON.stringify({ready,postgres:r.postgres?.ready===true,ai:r.ai?.ready===true,modelReady:r.ai?.modelReady===true,vision:r.vision?.ready===true,searxng:r.searxng?.ready===true,reason:r.ai?.reason||''}));
+            process.stdout.write(JSON.stringify({
+              ready,
+              revision:d.revision||'',
+              postgres:r.postgres?.ready===true,
+              postgresReason:r.postgres?.reason||'',
+              ai:r.ai?.ready===true,
+              modelReady:r.ai?.modelReady===true,
+              aiReason:r.ai?.reason||'',
+              vision:r.vision?.ready===true,
+              visionReason:r.vision?.reason||'',
+              searxng:r.searxng?.ready===true,
+              searxngReason:r.searxng?.reason||''
+            }));
           }catch{process.stdout.write(JSON.stringify({ready:false,parseError:true}));}
           NODE
             )
