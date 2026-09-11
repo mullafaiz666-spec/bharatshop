@@ -1,0 +1,55 @@
+name: Deploy BharatShop to Netlify
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "netlify.toml"
+      - ".github/workflows/netlify-production-deploy.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: netlify-production
+  cancel-in-progress: true
+
+env:
+  NETLIFY_SITE_ID: 75b5c168-6679-479d-b3a6-244e393fe1b0
+  NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN || secrets.NETLIFY_PERSONAL_ACCESS_TOKEN || secrets.NETLIFY_TOKEN }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout validated main
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Verify existing Netlify credential
+        shell: bash
+        run: |
+          if [ -z "${NETLIFY_AUTH_TOKEN:-}" ]; then
+            echo "::error::No existing Netlify deployment token is configured in GitHub Secrets. Expected NETLIFY_AUTH_TOKEN, NETLIFY_PERSONAL_ACCESS_TOKEN, or NETLIFY_TOKEN."
+            exit 1
+          fi
+
+      - name: Install project dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Deploy production to existing Netlify site
+        shell: bash
+        run: |
+          npx -y netlify-cli@27.5.2 deploy \
+            --build \
+            --prod \
+            --site "$NETLIFY_SITE_ID" \
+            --auth "$NETLIFY_AUTH_TOKEN" \
+            --message "BharatShop production ${GITHUB_SHA}"
