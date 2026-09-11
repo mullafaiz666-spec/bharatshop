@@ -12,6 +12,16 @@ function databaseSource() {
   return "missing";
 }
 
+function adminRuntimeStatus(dbSource: string) {
+  const sessionSecretConfigured = String(process.env.ADMIN_SESSION_SECRET || "").length >= 32;
+  return {
+    ready: dbSource !== "missing" && sessionSecretConfigured,
+    databaseConfigured: dbSource !== "missing",
+    sessionSecretConfigured,
+    configuredAdminLogin: Boolean(process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD),
+  };
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const deep = url.searchParams.get("deep") === "1";
@@ -25,7 +35,8 @@ export async function GET(request: Request) {
 
   const netlifyDetected = Boolean(process.env.NETLIFY || process.env.DEPLOY_ID || process.env.SITE_ID);
   const dbSource = databaseSource();
-  const readyForNetlifyDeploy = dbSource !== "missing" && Boolean(process.env.ADMIN_SESSION_SECRET);
+  const admin = adminRuntimeStatus(dbSource);
+  const readyForNetlifyDeploy = admin.ready && aiConfigured();
   const readyForSupabaseCutover = Boolean(process.env.SUPABASE_DB_URL) && supabase.authConfigured && supabase.storageConfigured;
 
   return NextResponse.json({
@@ -40,6 +51,7 @@ export async function GET(request: Request) {
       source: dbSource,
       cutoverPolicy: "DATABASE_URL remains authoritative until the Supabase copy passes the read-only verification command and cutover is explicitly approved.",
     },
+    admin,
     supabase,
     ai,
     automation: {
@@ -48,6 +60,7 @@ export async function GET(request: Request) {
     },
     readiness: {
       netlifyDeploy: readyForNetlifyDeploy,
+      admin: admin.ready,
       supabaseCutover: readyForSupabaseCutover,
       gemini: aiConfigured() && aiProviderName() === "gemini",
     },
