@@ -1,0 +1,15 @@
+{
+  "title": "BharatShop Local Workstation",
+  "description": "Optional local development and Gemma workstation for the BharatShop AI commerce platform.",
+  "links": [
+    {
+      "title": "Project",
+      "links": [
+        {
+          "title": "BharatShop GitHub",
+          "value": "https://github.com/mullafaiz666-spec/bharatshop"
+        }
+      ]
+    }
+  ]
+}
