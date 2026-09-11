@@ -8,6 +8,17 @@
 [functions]
   node_bundler = "esbuild"
 
+# Production mirror mode:
+# Netlify keeps the public Netlify URL while proxying every request to the
+# currently working Render BharatShop runtime. Render remains the source of
+# truth for PostgreSQL-backed products, dashboards, agents, auth and APIs.
+# This avoids copying or exposing production database credentials.
+[[redirects]]
+  from = "/*"
+  to = "https://bharatshop-9w4a.onrender.com/:splat"
+  status = 200
+  force = true
+
 [[headers]]
   for = "/*"
   [headers.values]
@@ -15,5 +26,6 @@
     Referrer-Policy = "strict-origin-when-cross-origin"
     Permissions-Policy = "camera=(), microphone=(), geolocation=()"
 
-# Next.js App Router, route handlers, SSR and Server Actions are handled by
-# Netlify's current OpenNext integration. Do not set a static publish directory.
+# The Next.js build remains deployable on Netlify. The forced production
+# rewrite above is intentionally the active path until the authoritative
+# Render database/runtime credentials are available directly to Netlify.
