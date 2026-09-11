@@ -7,14 +7,14 @@ const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf
 test("Marketing Agent cockpit is authenticated and uses real BharatShop sources", () => {
   const page = read("src/app/dashboard/marketing/page.tsx");
   const api = read("src/app/api/marketing/cockpit/route.ts");
-  const middleware = read("src/middleware.ts");
+  const proxy = read("src/proxy.ts");
   assert.match(page, /getAdminUser/);
   assert.match(page, /MarketingAgentCockpit/);
   assert.match(api, /marketingCampaigns/);
   assert.match(api, /orders/);
   assert.match(api, /products/);
   assert.match(api, /aiActivityLogs/);
-  assert.match(middleware, /"\/api\/marketing"/);
+  assert.match(proxy, /"\/api\/marketing"/);
 });
 
 test("cockpit exposes operational marketing actions without silently enabling spend", () => {
