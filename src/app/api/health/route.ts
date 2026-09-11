@@ -23,7 +23,7 @@ async function checkSearXNG(deep: boolean) {
     }
 
     // Exercise the JSON search endpoint once, without the normal production
-    // fallback/retry queue. Upstream engines can throttle shared Render IPs;
+    // fallback/retry queue. Upstream engines can throttle shared hosting IPs;
     // that is reported as degraded while the self-hosted SearXNG service itself
     // remains ready. This keeps deep health bounded and truthful.
     try {
@@ -79,22 +79,27 @@ async function checkImageVerifier(deep: boolean) {
   return { ready: false, exercised: deep, provider: mode, model: aiModels().vision, reason: "unsupported_verifier_mode" };
 }
 
+function configuredDatabaseSource() {
+  if (process.env.DATABASE_URL) return { source: "DATABASE_URL", raw: process.env.DATABASE_URL };
+  if (process.env.SUPABASE_DB_URL) return { source: "SUPABASE_DB_URL", raw: process.env.SUPABASE_DB_URL };
+  return { source: "missing", raw: "" };
+}
+
 async function checkPostgres() {
+  const configured = configuredDatabaseSource();
+  if (!configured.raw) return { ready: false as const, configured: false, source: configured.source, reason: "missing_database_url" };
   try {
     await db.execute(sql`select 1`);
-    return { ready: true as const };
+    return { ready: true as const, configured: true, source: configured.source };
   } catch (error) {
     const cause = error instanceof Error && "cause" in error ? (error as Error & { cause?: unknown }).cause : undefined;
     let dbTarget = "unknown";
     try {
-      const raw = process.env.DATABASE_URL;
-      if (raw) {
-        const parsed = new URL(raw);
-        dbTarget = `${parsed.hostname}:${parsed.port || "5432"}/${parsed.pathname.replace(/^\//, "")}`;
-      }
+      const parsed = new URL(configured.raw);
+      dbTarget = `${parsed.hostname}:${parsed.port || "5432"}/${parsed.pathname.replace(/^\//, "")}`;
     } catch { dbTarget = "invalid-database-url"; }
-    console.error("Production database health check failed", { message: error instanceof Error ? error.message : String(error), cause: cause instanceof Error ? cause.message : String(cause ?? ""), dbTarget });
-    return { ready: false as const, error: error instanceof Error ? error.message : String(error) };
+    console.error("Production database health check failed", { message: error instanceof Error ? error.message : String(error), cause: cause instanceof Error ? cause.message : String(cause ?? ""), dbTarget, source: configured.source });
+    return { ready: false as const, configured: true, source: configured.source, reason: "database_unreachable", error: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -108,15 +113,19 @@ export async function GET(req: Request) {
   ]);
 
   const ok = postgres.ready && ai.ready && vision.ready && searxng.ready;
-  const revision = process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT_SHA || process.env.COMMIT_SHA || "unknown";
+  const revision = process.env.COMMIT_REF || process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT_SHA || process.env.COMMIT_SHA || process.env.GITHUB_SHA || "unknown";
   return Response.json({
     ok,
     revision,
+    hosting: {
+      netlify: Boolean(process.env.NETLIFY || process.env.DEPLOY_ID || process.env.SITE_ID),
+      context: process.env.CONTEXT || null,
+    },
     readiness: { postgres, ai, vision, searxng },
     providers: { ai: ai.ready, vision: vision.ready, searxng: searxng.ready },
     models: ai.models,
     provider: ai.provider,
     imageVerifier: { provider: vision.provider, model: vision.model },
     deep,
-  }, { status: ok ? 200 : 503 });
+  }, { status: ok ? 200 : 503, headers: { "Cache-Control": "no-store" } });
 }

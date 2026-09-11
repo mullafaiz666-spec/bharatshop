@@ -8,6 +8,12 @@ export const dynamic = "force-dynamic";
 
 const configuredAdminEmail = () => (process.env.ADMIN_EMAIL || "").trim().toLowerCase();
 
+function adminRuntimeReady() {
+  const databaseConfigured = Boolean(process.env.DATABASE_URL || process.env.SUPABASE_DB_URL);
+  const sessionSecretConfigured = String(process.env.ADMIN_SESSION_SECRET || "").length >= 32;
+  return databaseConfigured && sessionSecretConfigured;
+}
+
 async function ensureConfiguredAdmin(email: string, password: string) {
   const adminEmail = configuredAdminEmail();
   const adminPassword = process.env.ADMIN_PASSWORD || "";
@@ -30,6 +36,13 @@ async function ensureConfiguredAdmin(email: string, password: string) {
 }
 
 export async function POST(req: Request) {
+  if (!adminRuntimeReady()) {
+    return NextResponse.json({
+      error: "Administrator service is not configured on this deployment yet",
+      code: "ADMIN_RUNTIME_NOT_READY",
+    }, { status: 503, headers: { "Cache-Control": "no-store" } });
+  }
+
   try {
     const body = await req.json();
     const email = String(body.email || "").trim().toLowerCase();
@@ -56,6 +69,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error("Admin login failed:", error instanceof Error ? error.message : error);
-    return NextResponse.json({ error: "Unable to sign in" }, { status: 503 });
+    return NextResponse.json({ error: "Unable to sign in", code: "ADMIN_LOGIN_FAILED" }, { status: 503 });
   }
 }
