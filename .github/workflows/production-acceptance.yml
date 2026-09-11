@@ -14,10 +14,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
-      # Netlify is the primary production host. A repository variable can override
-      # this later for an approved custom domain without changing the workflow.
-      BASE_URL: ${{ vars.BHARATSHOP_PRODUCTION_URL || 'https://bharatshop-35fd.netlify.app' }}
-      BHARATSHOP_URL: ${{ vars.BHARATSHOP_PRODUCTION_URL || 'https://bharatshop-35fd.netlify.app' }}
+      # Netlify is the approved production host for this deployment. Keep the
+      # acceptance target explicit so a stale repository variable cannot send
+      # production checks back to the retired Render application.
+      BASE_URL: https://bharatshop-35fd.netlify.app
+      BHARATSHOP_URL: https://bharatshop-35fd.netlify.app
       BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
     steps:
       - uses: actions/checkout@v4
