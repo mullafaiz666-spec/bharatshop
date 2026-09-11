@@ -4,6 +4,10 @@ on:
     branches: [main, feat/agent-suite]
   pull_request:
     branches: [main]
+
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -19,3 +23,33 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - run: npm run lint
+      - name: Package exact laptop workstation source
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          mkdir -p dist
+          git archive --format=zip --output=dist/BharatShop-Agent-Workstation-2026-09-11.zip HEAD
+          printf '%s\n' "$GITHUB_SHA" > dist/BUILD-REVISION.txt
+          zip -j dist/BharatShop-Agent-Workstation-2026-09-11.zip dist/BUILD-REVISION.txt
+          sha256sum dist/BharatShop-Agent-Workstation-2026-09-11.zip | tee dist/BharatShop-Agent-Workstation-2026-09-11.zip.sha256
+      - name: Upload workstation artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: BharatShop-Agent-Workstation-2026-09-11
+          path: |
+            dist/BharatShop-Agent-Workstation-2026-09-11.zip
+            dist/BharatShop-Agent-Workstation-2026-09-11.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish stable workstation release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="bharatshop-agent-workstation-20260911"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/BharatShop-Agent-Workstation-2026-09-11.zip dist/BharatShop-Agent-Workstation-2026-09-11.zip.sha256 --clobber
+            gh release edit "$TAG" --notes "Validated BharatShop laptop workstation bundle. Includes the complete tracked source, Pinokio launcher and local Gemma gateway. Built from commit $GITHUB_SHA after tests, typecheck, build and lint. Production remains https://bharatshop-35fd.netlify.app."
+          else
+            gh release create "$TAG" dist/BharatShop-Agent-Workstation-2026-09-11.zip dist/BharatShop-Agent-Workstation-2026-09-11.zip.sha256 --title "BharatShop Agent Workstation — 2026-09-11" --notes "Validated BharatShop laptop workstation bundle. Includes the complete tracked source, Pinokio launcher and local Gemma gateway. Built from commit $GITHUB_SHA after tests, typecheck, build and lint. Production remains https://bharatshop-35fd.netlify.app."
+          fi

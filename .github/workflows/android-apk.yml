@@ -8,6 +8,9 @@ on:
       - '.github/workflows/android-apk.yml'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-apk:
     runs-on: ubuntu-latest
@@ -27,11 +30,23 @@ jobs:
       - name: Prepare artifact
         run: |
           mkdir -p dist
-          cp android-app/app/build/outputs/apk/debug/app-debug.apk dist/BharatShop-v1.4.0.apk
-          sha256sum dist/BharatShop-v1.4.0.apk | tee dist/BharatShop-v1.4.0.apk.sha256
+          cp android-app/app/build/outputs/apk/debug/app-debug.apk dist/BharatShop-v1.5.0.apk
+          sha256sum dist/BharatShop-v1.5.0.apk | tee dist/BharatShop-v1.5.0.apk.sha256
       - uses: actions/upload-artifact@v4
         with:
-          name: BharatShop-Android-v1.4
+          name: BharatShop-Android-v1.5
           path: dist/*
           if-no-files-found: error
           retention-days: 30
+      - name: Publish stable v1.5 APK release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="bharatshop-android-v1.5.0"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/BharatShop-v1.5.0.apk dist/BharatShop-v1.5.0.apk.sha256 --clobber
+            gh release edit "$TAG" --notes "BharatShop Android v1.5.0. Live production: https://bharatshop-35fd.netlify.app. Built from commit $GITHUB_SHA."
+          else
+            gh release create "$TAG" dist/BharatShop-v1.5.0.apk dist/BharatShop-v1.5.0.apk.sha256 --title "BharatShop Android v1.5.0" --notes "BharatShop Android v1.5.0. Live production: https://bharatshop-35fd.netlify.app. Built from commit $GITHUB_SHA."
+          fi
