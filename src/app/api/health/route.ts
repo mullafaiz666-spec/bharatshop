@@ -22,10 +22,6 @@ async function checkSearXNG(deep: boolean) {
       return { configured: true, ready: false, exercised: true, serviceStatus: service.status, reason: "service_rejected" };
     }
 
-    // Exercise the JSON search endpoint once, without the normal production
-    // fallback/retry queue. Upstream engines can throttle shared hosting IPs;
-    // that is reported as degraded while the self-hosted SearXNG service itself
-    // remains ready. This keeps deep health bounded and truthful.
     try {
       const searchUrl = new URL(`${base}/search`);
       searchUrl.searchParams.set("q", "laptop product image");
@@ -113,7 +109,7 @@ export async function GET(req: Request) {
   ]);
 
   const ok = postgres.ready && ai.ready && vision.ready && searxng.ready;
-  const revision = process.env.COMMIT_REF || process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT_SHA || process.env.COMMIT_SHA || process.env.GITHUB_SHA || "unknown";
+  const revision = process.env.BHARATSHOP_BUILD_REVISION || process.env.COMMIT_REF || process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT_SHA || process.env.COMMIT_SHA || process.env.GITHUB_SHA || "unknown";
   return Response.json({
     ok,
     revision,
