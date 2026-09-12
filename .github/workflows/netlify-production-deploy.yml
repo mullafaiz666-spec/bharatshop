@@ -1,6 +1,8 @@
-name: Verify BharatShop Netlify Production
+name: Deploy BharatShop Netlify Production
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -10,26 +12,110 @@ env:
   NETLIFY_SITE_URL: https://bharatshops.netlify.app
 
 jobs:
-  verify:
+  deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
+    env:
+      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
     steps:
-      - name: Verify live storefront and catalogue
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Require the exact BharatShop Netlify target
         shell: bash
         run: |
           set -euo pipefail
+          if [ -z "${NETLIFY_AUTH_TOKEN:-}" ]; then
+            echo 'NETLIFY_AUTH_TOKEN is missing.' >&2
+            exit 21
+          fi
+          if [ -z "${NETLIFY_SITE_ID:-}" ]; then
+            echo 'NETLIFY_SITE_ID is missing.' >&2
+            exit 22
+          fi
+          curl -fsS \
+            -H "Authorization: Bearer ${NETLIFY_AUTH_TOKEN}" \
+            "https://api.netlify.com/api/v1/sites/${NETLIFY_SITE_ID}" \
+            -o /tmp/netlify-site.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const site = JSON.parse(fs.readFileSync('/tmp/netlify-site.json', 'utf8'));
+          if (site.name !== 'bharatshops') {
+            throw new Error(`Refusing deployment: expected Netlify site bharatshops, got ${site.name || 'unknown'}`);
+          }
+          const url = String(site.ssl_url || site.url || '');
+          if (!url.includes('bharatshops.netlify.app')) {
+            throw new Error(`Refusing deployment: unexpected Netlify production URL ${url || 'missing'}`);
+          }
+          console.log(`Verified Netlify target: ${site.name}`);
+          NODE
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run integration tests
+        run: npm run test:integrations
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        env:
+          BHARATSHOP_BUILD_REVISION: ${{ github.sha }}
+        run: npm run build
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Deploy exact build to bharatshops
+        env:
+          BHARATSHOP_BUILD_REVISION: ${{ github.sha }}
+        run: |
+          npx --yes netlify-cli@latest deploy \
+            --build \
+            --prod \
+            --site "$NETLIFY_SITE_ID" \
+            --auth "$NETLIFY_AUTH_TOKEN" \
+            --message "BharatShop ${GITHUB_SHA}"
+
+      - name: Verify exact live revision and core routes
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="$GITHUB_SHA"
+          for i in $(seq 1 24); do
+            body=$(curl -fsS --max-time 20 "$NETLIFY_SITE_URL/netlify-deploy-health" || true)
+            live=$(printf '%s' "$body" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log(JSON.parse(s).revision||'')}catch{console.log('')}})")
+            echo "attempt=$i expected=$expected live=$live"
+            if [ "$live" = "$expected" ]; then
+              break
+            fi
+            sleep 5
+          done
+          test "$live" = "$expected"
+
           home_code=$(curl -sS -o /tmp/home.html -w '%{http_code}' --max-time 30 "$NETLIFY_SITE_URL/" || true)
           store_code=$(curl -sS -o /tmp/store.html -w '%{http_code}' --max-time 30 "$NETLIFY_SITE_URL/store" || true)
           catalogue_code=$(curl -sS -o /tmp/catalogue.json -w '%{http_code}' --max-time 58 "$NETLIFY_SITE_URL/api/storefront/products?limit=1&page=1" || true)
-          echo "home=$home_code store=$store_code catalogue=$catalogue_code"
+          dashboard_code=$(curl -sS -o /tmp/dashboard.html -w '%{http_code}' --max-time 58 "$NETLIFY_SITE_URL/dashboard" || true)
+          command_code=$(curl -sS -o /tmp/command.html -w '%{http_code}' --max-time 58 "$NETLIFY_SITE_URL/dashboard/command-centre" || true)
+
+          echo "home=$home_code store=$store_code catalogue=$catalogue_code dashboard=$dashboard_code command=$command_code"
           test "$home_code" = "200"
           test "$store_code" = "200"
           test "$catalogue_code" = "200"
+          test "$dashboard_code" = "200"
+          test "$command_code" = "200"
           grep -q "BharatShop" /tmp/home.html
           node - <<'NODE'
           const fs = require('fs');
           const data = JSON.parse(fs.readFileSync('/tmp/catalogue.json', 'utf8'));
           if (!Array.isArray(data.products) || data.products.length < 1) throw new Error('catalogue is empty');
           if (!data.products[0]?.id || !data.products[0]?.title) throw new Error('catalogue product is incomplete');
-          console.log(`Netlify catalogue OK: total=${data.total ?? 'unknown'}, first=${data.products[0].title}`);
+          console.log(`Catalogue OK: total=${data.total ?? 'unknown'}, first=${data.products[0].title}`);
           NODE
