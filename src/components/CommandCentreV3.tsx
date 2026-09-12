@@ -88,9 +88,20 @@ type FashionProduct = { id: number; title: string; imageUrl?: string; status?: s
 type FashionData = { products?: FashionProduct[]; creative?: { provider?: string; finalModel?: string; batchModel?: string; mode?: string; note?: string } };
 type Metric = { label: string; value: number; Icon: LucideIcon };
 type InstallPromptEvent = Event & { prompt: () => Promise<void>; userChoice?: Promise<{ outcome: "accepted" | "dismissed" }> };
+type SafeJson<T> = { ok: boolean; status: number; data: T | null } | null;
 
 const panel = "rounded-3xl border border-white/10 bg-[linear-gradient(180deg,rgba(16,20,31,.96),rgba(7,10,17,.96))] shadow-[0_24px_80px_rgba(0,0,0,.28)]";
 const button = "rounded-xl border border-white/10 bg-white/[0.045] px-3.5 py-2.5 text-sm font-bold transition hover:border-white/25 hover:bg-white/[0.075] disabled:cursor-not-allowed disabled:opacity-40";
+
+async function safeJson<T>(url: string, timeoutMs = 8_000): Promise<SafeJson<T>> {
+  try {
+    const response = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(timeoutMs) });
+    const data = await response.json().catch(() => null) as T | null;
+    return { ok: response.ok, status: response.status, data };
+  } catch {
+    return null;
+  }
+}
 
 function tone(status: unknown) {
   const value = String(status || "IDLE").toUpperCase();
@@ -139,20 +150,29 @@ export default function CommandCentreV3() {
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
     try {
-      const [companyResponse, serviceResponse, healthResponse, agentHealthResponse, fashionResponse] = await Promise.all([
-        fetch("/api/agents/company", { cache: "no-store" }),
-        fetch("/api/admin/command-centre", { cache: "no-store" }).catch(() => null),
-        fetch("/api/health?deep=1", { cache: "no-store" }).catch(() => null),
-        fetch("/api/health/agents", { cache: "no-store" }).catch(() => null),
-        fetch("/api/admin/fashion-agent", { cache: "no-store" }).catch(() => null),
+      const companyPromise = safeJson<CompanyData>("/api/agents/company", 8_000);
+      const servicePromise = safeJson<ServiceData>("/api/admin/command-centre", 8_000);
+      const fashionPromise = safeJson<FashionData>("/api/admin/fashion-studio", 6_000);
+      const healthPromise = quiet ? Promise.resolve(null) : safeJson<HealthData>("/api/health?deep=1", 22_000);
+      const agentHealthPromise = quiet ? Promise.resolve(null) : safeJson<AgentHealthData>("/api/health/agents", 22_000);
+
+      const [company, service, fashionData, healthData, agentHealthData] = await Promise.all([
+        companyPromise,
+        servicePromise,
+        fashionPromise,
+        healthPromise,
+        agentHealthPromise,
       ]);
-      const company = await companyResponse.json().catch(() => null);
-      if (companyResponse.ok && company) setData(company as CompanyData);
-      else if (!quiet) setNotice(String(company?.error || "Shared company state could not be loaded."));
-      if (serviceResponse?.ok) setServices(await serviceResponse.json().catch(() => null) as ServiceData | null);
-      if (healthResponse) setHealth(await healthResponse.json().catch(() => null) as HealthData | null);
-      if (agentHealthResponse) setAgentHealth(await agentHealthResponse.json().catch(() => null) as AgentHealthData | null);
-      if (fashionResponse?.ok) setFashion(await fashionResponse.json().catch(() => null) as FashionData | null);
+
+      if (company?.ok && company.data) setData(company.data);
+      else if (!quiet) setNotice(company ? `Shared company state returned HTTP ${company.status}.` : "Shared company state could not be loaded.");
+
+      if (service?.ok && service.data) setServices(service.data);
+      if (fashionData?.ok && fashionData.data) setFashion(fashionData.data);
+      if (healthData?.data) setHealth(healthData.data);
+      if (agentHealthData?.data) setAgentHealth(agentHealthData.data);
+    } catch (error) {
+      if (!quiet) setNotice(error instanceof Error ? error.message : "Command Centre refresh failed.");
     } finally {
       setLoading(false);
     }
@@ -160,7 +180,7 @@ export default function CommandCentreV3() {
 
   useEffect(() => {
     void load();
-    const timer = setInterval(() => void load(true), 20_000);
+    const timer = setInterval(() => void load(true), 30_000);
     const onInstall = (event: Event) => { event.preventDefault(); setInstallPrompt(event as InstallPromptEvent); };
     window.addEventListener("beforeinstallprompt", onInstall);
     return () => { clearInterval(timer); window.removeEventListener("beforeinstallprompt", onInstall); };
@@ -288,7 +308,7 @@ export default function CommandCentreV3() {
 
       <section className={`${panel} mb-5 overflow-hidden`}>
         <div className="flex flex-col gap-3 border-b border-white/10 p-4 md:flex-row md:items-center md:justify-between md:p-5">
-          <div><div className="flex items-center gap-2 text-sm font-black"><ImageIcon size={17} className="text-violet-300"/>Live product media</div><p className="mt-1 text-xs text-slate-500">Actual product images attached to Fashion Agent records, not decorative stock placeholders.</p></div>
+          <div><div className="flex items-center gap-2 text-sm font-black"><ImageIcon size={17} className="text-violet-300"/>Live product media</div><p className="mt-1 text-xs text-slate-500">Actual product images attached to Fashion Studio records, not decorative stock placeholders.</p></div>
           <a href="/dashboard/fashion" className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-[0.12em] text-violet-300">Open visual studio<ExternalLink size={13}/></a>
         </div>
         {catalogMedia.length ? <div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-4 xl:grid-cols-8">
@@ -296,7 +316,7 @@ export default function CommandCentreV3() {
             <div className="aspect-[4/5] overflow-hidden bg-slate-900"><img src={product.imageUrl} alt={product.title} className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]"/></div>
             <div className="p-2.5"><div className="line-clamp-1 text-xs font-black text-white">{product.title}</div><div className="mt-1 flex items-center justify-between text-[10px] text-slate-500"><span>{product.status || "product"}</span>{typeof product.sellingPriceInr === "number" && <span>₹{Math.round(product.sellingPriceInr).toLocaleString("en-IN")}</span>}</div></div>
           </a>)}
-        </div> : <div className="m-4 grid min-h-36 place-items-center rounded-2xl border border-dashed border-white/10 bg-white/[0.02] text-center"><div><ImageIcon className="mx-auto text-slate-600"/><div className="mt-2 text-sm font-bold text-slate-300">No attached product media yet</div><p className="mt-1 text-xs text-slate-500">Open Fashion Studio and attach verified product media or a Higgsfield result. Empty media stays visibly empty instead of showing fake images.</p></div></div>}
+        </div> : <div className="m-4 grid min-h-36 place-items-center rounded-2xl border border-dashed border-white/10 bg-white/[0.02] text-center"><div><ImageIcon className="mx-auto text-slate-600"/><div className="mt-2 text-sm font-bold text-slate-300">No attached product media yet</div><p className="mt-1 text-xs text-slate-500">Open Fashion Studio to create or attach verified product media. Empty media stays visibly empty instead of showing fake customer images.</p></div></div>}
       </section>
 
       <section className={`${panel} mb-5 p-4`}>
