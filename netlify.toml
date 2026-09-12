@@ -1,3 +1,8 @@
+# BharatShop production transition configuration.
+# Netlify serves the storefront shell and static assets natively. Until the
+# guarded Render -> Supabase database copy is verified, database-backed API,
+# dashboard and SSR product-detail requests remain on the known-good Render
+# runtime. This avoids proxying the entire site through Render cold starts.
 [build]
   command = "npm run build"
 
@@ -8,14 +13,43 @@
 [functions]
   node_bundler = "esbuild"
 
-# Production mirror mode:
-# Netlify keeps the public Netlify URL while proxying every request to the
-# currently working Render BharatShop runtime. Render remains the source of
-# truth for PostgreSQL-backed products, dashboards, agents, auth and APIs.
-# This avoids copying or exposing production database credentials.
+# The catalogue is the first request a shopper makes. Route it through a
+# Netlify Function so it can wait up to the normal synchronous function limit
+# for a sleeping free Render instance to wake, rather than the shorter external
+# rewrite timeout.
 [[redirects]]
-  from = "/*"
-  to = "https://bharatshop-9w4a.onrender.com/:splat"
+  from = "/api/storefront/products"
+  to = "/.netlify/functions/storefront-products-proxy"
+  status = 200
+  force = true
+
+# Remaining backend endpoints stay on the authoritative Render runtime until
+# the Supabase copy and native acceptance pass. Query strings are preserved.
+[[redirects]]
+  from = "/api/*"
+  to = "https://bharatshop-9w4a.onrender.com/api/:splat"
+  status = 200
+  force = true
+
+# Dashboard middleware verifies the administrator against PostgreSQL, so keep
+# the dashboard on Render while the source database is authoritative.
+[[redirects]]
+  from = "/dashboard"
+  to = "https://bharatshop-9w4a.onrender.com/dashboard"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/dashboard/*"
+  to = "https://bharatshop-9w4a.onrender.com/dashboard/:splat"
+  status = 200
+  force = true
+
+# Product detail pages currently render server-side from the catalogue DB.
+# The main /store UI and its in-page product modal are native on Netlify.
+[[redirects]]
+  from = "/store/product/*"
+  to = "https://bharatshop-9w4a.onrender.com/store/product/:splat"
   status = 200
   force = true
 
@@ -26,8 +60,6 @@
     Referrer-Policy = "strict-origin-when-cross-origin"
     Permissions-Policy = "camera=(), microphone=(), geolocation=()"
 
-# The Next.js build remains deployable on Netlify. The forced production
-# rewrite above is intentionally the active path until the authoritative
-# Render database/runtime credentials are available directly to Netlify.
-# Migration architecture merged 2026-09-12; mirror mode intentionally retained
-# until guarded Render -> Supabase parity and native acceptance both pass.
+# There is intentionally no catch-all Render rewrite. Netlify's Next.js adapter
+# now serves /, /store, assets and non-database pages directly. Full native
+# backend cutover remains guarded by BHARATSHOP_MIGRATION_VERIFIED=true.
