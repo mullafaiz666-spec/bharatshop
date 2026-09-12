@@ -1,5 +1,4 @@
 # BharatShop production transition configuration.
-# Deployment retrigger: corrected catalogue routing after Netlify token setup.
 # Netlify serves the storefront shell and static assets natively. Until the
 # guarded Render -> Supabase database copy is verified, database-backed API,
 # dashboard and SSR product-detail requests remain on the known-good Render
@@ -14,12 +13,13 @@
 [functions]
   node_bundler = "esbuild"
 
-# The storefront catalogue is served by the authoritative Render database API
-# during the migration window. Keep the page shell native on Netlify; proxy only
-# the data request until Supabase parity is verified.
+# Keep the public catalogue on the authoritative Render data source, but route
+# through a plain Netlify Function instead of Netlify's Next server handler.
+# This preserves the existing /api/storefront/products browser contract while
+# avoiding the Next/OpenNext handler path that returned `nextHandler is not a function`.
 [[redirects]]
   from = "/api/storefront/products"
-  to = "https://bharatshop-9w4a.onrender.com/api/storefront/products"
+  to = "/.netlify/functions/storefront-products"
   status = 200
   force = true
 
