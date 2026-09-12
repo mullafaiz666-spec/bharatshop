@@ -21,7 +21,7 @@ jobs:
           head -c 4000 /tmp/render-body.txt || true
           echo
           echo '=== Netlify ==='
-          netlify_code=$(curl -sS -D /tmp/netlify-headers.txt -o /tmp/netlify-body.txt -w '%{http_code}' --max-time 58 'https://bharatshop-35fd.netlify.app/api/storefront/products?limit=1&page=1' || true)
+          netlify_code=$(curl -sS -D /tmp/netlify-headers.txt -o /tmp/netlify-body.txt -w '%{http_code}' --max-time 58 'https://bharatshops.netlify.app/api/storefront/products?limit=1&page=1' || true)
           echo "Netlify HTTP=$netlify_code"
           cat /tmp/netlify-headers.txt || true
           echo '--- body ---'
