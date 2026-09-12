@@ -18,8 +18,8 @@ test("production deploy safely fails over across existing Netlify credentials", 
   assert.match(workflow, /::add-mask::\$candidate/);
   assert.match(workflow, /No configured Netlify credential can trigger a production build/);
   assert.match(workflow, /sites\/\$\{NETLIFY_SITE_ID\}\/deploys\?branch=main&per_page=30/);
-  assert.match(workflow, /deploy\.commit_ref === expected/);
-  assert.match(workflow, /deploy\.context === 'production'/);
+  assert.match(workflow, /\.commit_ref\s*===\s*expected/);
+  assert.match(workflow, /\.context\s*===\s*["']production["']/);
   assert.doesNotMatch(workflow, /CHATGPT_NETLIFY_DEPLOY_PROXY/);
   assert.doesNotMatch(workflow, /netlify-mcp\.netlify\.app\/proxy\//);
   assert.doesNotMatch(workflow, /netlify-cli@27\.5\.2 deploy/);

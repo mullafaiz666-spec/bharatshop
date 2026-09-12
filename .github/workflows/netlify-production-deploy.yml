@@ -55,17 +55,7 @@ jobs:
             echo 'No configured Netlify token can read the BharatShop production site.' >&2
             exit 21
           fi
-          node - <<'NODE'
-          const fs = require('fs');
-          const site = JSON.parse(fs.readFileSync('/tmp/netlify-site.json', 'utf8'));
-          const expectedName = process.env.NETLIFY_SITE_NAME;
-          const expectedUrl = process.env.NETLIFY_SITE_URL;
-          if (site.id !== process.env.NETLIFY_SITE_ID) throw new Error(`Refusing deployment: unexpected Netlify site id ${site.id || 'missing'}`);
-          if (site.name !== expectedName) throw new Error(`Refusing deployment: expected Netlify site ${expectedName}, got ${site.name || 'unknown'}`);
-          const url = String(site.ssl_url || site.url || '').replace(/\/$/, '');
-          if (url !== expectedUrl) throw new Error(`Refusing deployment: expected ${expectedUrl}, got ${url || 'missing'}`);
-          console.log(`Verified Netlify target: ${site.name} (${site.id})`);
-          NODE
+          node -e 'const fs=require("fs");const site=JSON.parse(fs.readFileSync("/tmp/netlify-site.json","utf8"));const expectedName=process.env.NETLIFY_SITE_NAME;const expectedUrl=process.env.NETLIFY_SITE_URL;if(site.id!==process.env.NETLIFY_SITE_ID)throw new Error(`Refusing deployment: unexpected Netlify site id ${site.id||"missing"}`);if(site.name!==expectedName)throw new Error(`Refusing deployment: expected Netlify site ${expectedName}, got ${site.name||"unknown"}`);const url=String(site.ssl_url||site.url||"").replace(/\/$/,"");if(url!==expectedUrl)throw new Error(`Refusing deployment: expected ${expectedUrl}, got ${url||"missing"}`);console.log(`Verified Netlify target: ${site.name} (${site.id})`);'
 
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
@@ -104,11 +94,7 @@ jobs:
             if [ "$http" -ge 200 ] 2>/dev/null && [ "$http" -lt 300 ] 2>/dev/null; then
               echo "NETLIFY_READ_TOKEN=$candidate" >> "$GITHUB_ENV"
               success=1
-              node - <<'NODE'
-              const fs=require('fs');
-              const d=JSON.parse(fs.readFileSync('/tmp/netlify-build.json','utf8'));
-              console.log(`Netlify Git build accepted: ${d.id || d.deploy_id || 'queued'}`);
-              NODE
+              echo "Netlify Git build accepted."
               break
             fi
             echo "Credential #${attempt} could not trigger the Git-linked build (HTTP ${http})."
@@ -130,16 +116,7 @@ jobs:
               -H "Authorization: Bearer ${NETLIFY_READ_TOKEN}" \
               "https://api.netlify.com/api/v1/sites/${NETLIFY_SITE_ID}/deploys?branch=main&per_page=30" \
               -o /tmp/netlify-deploys.json
-            result=$(node - <<'NODE'
-          const fs = require('fs');
-          const deploys = JSON.parse(fs.readFileSync('/tmp/netlify-deploys.json', 'utf8'));
-          const expected = process.env.GITHUB_SHA;
-          const match = Array.isArray(deploys)
-            ? deploys.find((deploy) => deploy.commit_ref === expected && deploy.context === 'production')
-            : null;
-          if (match) process.stdout.write(`${match.id || ''}\t${match.state || ''}\t${match.error_message || ''}`);
-          NODE
-            )
+            result=$(node -e 'const fs=require("fs");const deploys=JSON.parse(fs.readFileSync("/tmp/netlify-deploys.json","utf8"));const expected=process.env.GITHUB_SHA;const match=Array.isArray(deploys)?deploys.find(d=>d.commit_ref===expected&&d.context==="production"):null;if(match)process.stdout.write([match.id||"",match.state||"",String(match.error_message||"").replace(/[\t\n]/g," ")].join("\t"));')
             if [ -n "$result" ]; then
               IFS=$'\t' read -r deploy_id state deploy_error <<< "$result"
               echo "Netlify deploy=${deploy_id} state=${state} attempt=${i}"
@@ -175,7 +152,7 @@ jobs:
           done
           test "$live" = "$expected"
 
-          for route in / /women /men /kids /electronics /store /api/storefront/products?limit=1&page=1 /dashboard /dashboard/command-centre /dashboard/fashion; do
+          for route in / /women /men /kids /electronics /store '/api/storefront/products?limit=1&page=1' /dashboard /dashboard/command-centre /dashboard/fashion; do
             code=$(curl -sS -o /tmp/route.out -w '%{http_code}' --max-time 58 "$NETLIFY_SITE_URL$route" || true)
             echo "$route -> $code"
             if [ "$route" = "/dashboard/fashion" ]; then
@@ -186,10 +163,4 @@ jobs:
           done
 
           curl -fsS --max-time 58 "$NETLIFY_SITE_URL/api/storefront/products?limit=1&page=1" -o /tmp/catalogue.json
-          node - <<'NODE'
-          const fs = require('fs');
-          const data = JSON.parse(fs.readFileSync('/tmp/catalogue.json', 'utf8'));
-          if (!Array.isArray(data.products) || data.products.length < 1) throw new Error('catalogue is empty');
-          if (!data.products[0]?.id || !data.products[0]?.title) throw new Error('catalogue product is incomplete');
-          console.log(`Catalogue OK: total=${data.total ?? 'unknown'}, first=${data.products[0].title}`);
-          NODE
+          node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync("/tmp/catalogue.json","utf8"));if(!Array.isArray(data.products)||data.products.length<1)throw new Error("catalogue is empty");if(!data.products[0]?.id||!data.products[0]?.title)throw new Error("catalogue product is incomplete");console.log(`Catalogue OK: total=${data.total??"unknown"}, first=${data.products[0].title}`);'
