@@ -29,13 +29,11 @@ function customerText(value:unknown){return String(value||"").split(/(?<=[.!?])\
 export async function GET(req:Request){
   const{searchParams}=new URL(req.url),origin=publicOrigin(req),category=searchParams.get("category")||"",search=searchParams.get("search")||searchParams.get("query")||"",sort=searchParams.get("sort")||"aiScore",limit=Math.min(Math.max(parseInt(searchParams.get("limit")||"24",10)||24,1),96),page=Math.max(parseInt(searchParams.get("page")||"1",10)||1,1),featured=searchParams.get("featured")==="true",requestedId=Math.max(parseInt(searchParams.get("id")||"0",10)||0,0);
 
-  // Shell/development preview may intentionally run without production database
-  // credentials. In that case only, proxy the customer-safe catalogue contract to
-  // the explicitly configured authoritative backend. Production deployments must
-  // still provide DATABASE_URL/SUPABASE_DB_URL and never silently proxy writes.
+  // Development preview intentionally keeps customer-safe catalogue reads on the
+  // authoritative backend even when the laptop has an isolated local PostgreSQL DB.
+  // Local admin/agent writes remain local; production deployments never use this proxy.
   const previewBackend=process.env.BHARATSHOP_PREVIEW_BACKEND?.trim();
-  const hasDatabase=Boolean(process.env.DATABASE_URL||process.env.SUPABASE_DB_URL);
-  if(!hasDatabase&&previewBackend&&process.env.NODE_ENV!=="production"){
+  if(previewBackend&&process.env.NODE_ENV!=="production"){
     const target=new URL("/api/storefront/products",previewBackend);
     target.search=new URL(req.url).search;
     const upstream=await fetch(target,{headers:{accept:"application/json"},cache:"no-store"});
