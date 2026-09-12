@@ -10,22 +10,37 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Probe direct Render and Netlify catalogue
+      - name: Probe BharatShop live routes
+        shell: bash
         run: |
           set -u
-          echo '=== Direct Render ==='
-          render_code=$(curl -sS -D /tmp/render-headers.txt -o /tmp/render-body.txt -w '%{http_code}' --max-time 58 'https://bharatshop-9w4a.onrender.com/api/storefront/products?limit=1&page=1' || true)
-          echo "Render HTTP=$render_code"
-          cat /tmp/render-headers.txt || true
-          echo '--- body ---'
-          head -c 4000 /tmp/render-body.txt || true
-          echo
-          echo '=== Netlify ==='
-          netlify_code=$(curl -sS -D /tmp/netlify-headers.txt -o /tmp/netlify-body.txt -w '%{http_code}' --max-time 58 'https://bharatshops.netlify.app/api/storefront/products?limit=1&page=1' || true)
-          echo "Netlify HTTP=$netlify_code"
-          cat /tmp/netlify-headers.txt || true
-          echo '--- body ---'
-          head -c 4000 /tmp/netlify-body.txt || true
-          echo
-          if [ "$render_code" != "200" ]; then exit 11; fi
-          if [ "$netlify_code" != "200" ]; then exit 12; fi
+          NETLIFY='https://bharatshops.netlify.app'
+          RENDER='https://bharatshop-9w4a.onrender.com'
+
+          probe() {
+            label="$1"
+            url="$2"
+            code=$(curl -sS -L -o "/tmp/${label}.body" -D "/tmp/${label}.headers" -w '%{http_code}' --max-time 58 "$url" || true)
+            echo "${label} HTTP=${code} URL=${url}"
+            grep -Ei '^(server|location|x-nf-request-id|content-type|x-render-origin-server):' "/tmp/${label}.headers" || true
+            echo "body: $(head -c 300 "/tmp/${label}.body" | tr '\n' ' ' || true)"
+            echo
+          }
+
+          echo '=== Authoritative Render ==='
+          probe render_catalogue "$RENDER/api/storefront/products?limit=1&page=1"
+
+          echo '=== BharatShop Netlify ==='
+          probe health "$NETLIFY/netlify-deploy-health"
+          probe home "$NETLIFY/"
+          probe store "$NETLIFY/store"
+          probe function "$NETLIFY/.netlify/functions/storefront-products?limit=1&page=1"
+          probe catalogue "$NETLIFY/api/storefront/products?limit=1&page=1"
+          probe dashboard "$NETLIFY/dashboard"
+          probe command_centre "$NETLIFY/dashboard/command-centre"
+          probe agents "$NETLIFY/agents"
+
+          render_code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 58 "$RENDER/api/storefront/products?limit=1&page=1" || true)
+          netlify_code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 58 "$NETLIFY/api/storefront/products?limit=1&page=1" || true)
+          echo "SUMMARY render_catalogue=$render_code netlify_catalogue=$netlify_code"
+          test "$render_code" = "200"
