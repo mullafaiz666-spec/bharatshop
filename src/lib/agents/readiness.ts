@@ -1,5 +1,5 @@
 import { pool } from "@/db";
-import { checkAI, aiModels, aiProviderName } from "@/lib/ai/provider";
+import { aiConfigured, checkAI, aiModels, aiProviderName } from "@/lib/ai/provider";
 import { publicAgentContracts, type OperationalAgentId } from "@/lib/agents/contracts";
 import { agentRuntimeCatalog } from "@/lib/agents/runtime";
 
@@ -24,29 +24,35 @@ function automationTokenConfigured() {
   return Boolean(String(process.env.BHARATSHOP_AUTOMATION_TOKEN || process.env.AUTOMATION_TOKEN || "").trim());
 }
 
+function databaseConfigured() {
+  return Boolean(String(process.env.DATABASE_URL || process.env.SUPABASE_DB_URL || "").trim());
+}
+
 async function probeDatabase(): Promise<DependencyProbe> {
   const started = Date.now();
   try {
     const result = await pool.query(`SELECT
       1 AS ok,
+      to_regclass('public.agent_company_goals')::text AS company_goals,
       to_regclass('public.agent_work_items')::text AS work_items,
       to_regclass('public.agent_shared_events')::text AS shared_events,
       to_regclass('public.agent_chat_messages')::text AS chat_memory`);
     const row = result.rows[0] || {};
-    const tablesReady = Boolean(row.work_items && row.shared_events && row.chat_memory);
+    const tablesReady = Boolean(row.company_goals && row.work_items && row.shared_events && row.chat_memory);
     return {
       ready: tablesReady,
       configured: true,
-      reason: tablesReady ? "production PostgreSQL query and shared agent tables succeeded" : "PostgreSQL is reachable but one or more shared agent tables are missing",
+      reason: tablesReady ? "PostgreSQL query and shared agent tables succeeded" : "PostgreSQL is reachable but one or more shared agent tables are missing",
       latencyMs: Date.now() - started,
       detail: {
+        companyGoalsTable: Boolean(row.company_goals),
         workBusTable: Boolean(row.work_items),
         sharedEventsTable: Boolean(row.shared_events),
         chatMemoryTable: Boolean(row.chat_memory),
       },
     };
   } catch (error) {
-    return { ready: false, configured: Boolean(process.env.DATABASE_URL), reason: error instanceof Error ? error.message : "PostgreSQL query failed", latencyMs: Date.now() - started };
+    return { ready: false, configured: databaseConfigured(), reason: error instanceof Error ? error.message : "PostgreSQL query failed", latencyMs: Date.now() - started };
   }
 }
 
@@ -69,7 +75,7 @@ async function probeSearchAttempt(url: string, timeoutMs: number): Promise<Searc
     const contentType = response.headers.get("content-type") || "";
     if (!response.ok) return { ready: false, reason: `SearXNG returned HTTP ${response.status}`, httpStatus: response.status, contentType };
     if (!contentType.includes("application/json")) return { ready: false, reason: "SearXNG search did not return JSON", httpStatus: response.status, contentType };
-    const body = await response.json().catch(() => null) as { results?: unknown[] } | null;
+    const body = response.json ? await response.json().catch(() => null) as { results?: unknown[] } | null : null;
     return { ready: true, reason: "SearXNG JSON search succeeded", httpStatus: response.status, resultCount: Array.isArray(body?.results) ? body.results.length : 0, contentType };
   } catch (error) {
     return { ready: false, reason: error instanceof Error ? error.message : "SearXNG probe failed" };
@@ -82,8 +88,8 @@ async function probeSearch(): Promise<DependencyProbe> {
   if (!base) return { ready: false, configured: false, reason: "SEARXNG_URL is not configured" };
   const url = `${base}/search?` + new URLSearchParams({ q: "BharatShop readiness probe", categories: "general", format: "json", language: "en" }).toString();
 
-  // Render free services can take ~30 seconds to wake. The first bounded request doubles
-  // as the wake-up signal; only timeout/network failures get one longer retry. HTTP or
+  // Free search services can take ~30 seconds to wake. The first bounded request doubles
+  // as a wake-up signal; only timeout/network failures get one longer retry. HTTP or
   // content errors remain truthful failures instead of being hidden by retries.
   const first = await probeSearchAttempt(url, 12_000);
   if (first.ready) {
@@ -205,14 +211,14 @@ export async function deepAgentReadiness() {
 }
 
 export function configuredAgentReadiness() {
-  const ai = Boolean(process.env.AI_BASE_URL || process.env.LOCAL_AI_BASE_URL);
-  const search = Boolean(process.env.SEARXNG_URL);
-  const database = Boolean(process.env.DATABASE_URL);
+  const ai = aiConfigured();
+  const search = Boolean(String(process.env.SEARXNG_URL || "").trim());
+  const database = databaseConfigured();
   const automation = automationTokenConfigured();
   const runtimeMap = new Map(agentRuntimeCatalog().map((entry) => [entry.id, entry]));
   const infrastructure = {
-    database: { ready: database, reason: database ? "DATABASE_URL configured" : "DATABASE_URL missing" },
-    ai: { ready: ai, reason: ai ? "AI provider configured" : "AI provider missing" },
+    database: { ready: database, reason: database ? "PostgreSQL connection configured" : "DATABASE_URL or SUPABASE_DB_URL missing" },
+    ai: { ready: ai, reason: ai ? `${aiProviderName()} provider configured` : "AI provider missing" },
     search: { ready: search, reason: search ? "SearXNG configured" : "SearXNG missing" },
     automation: { ready: automation, reason: automation ? "automation token configured" : "automation token missing" },
   };
