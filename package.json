@@ -2,7 +2,8 @@
   "name": "nextjs-postgresql-template",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --webpack",
+    "dev:turbopack": "next dev --turbopack",
     "build": "next build",
     "creative": "node scripts/bharatshop-creative.mjs",
     "db:push": "node scripts/safe-db-push.mjs",
