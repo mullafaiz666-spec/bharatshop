@@ -63,14 +63,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          DEPLOY_PROXY=$(npx -y netlify-cli@latest env:get CHATGPT_NETLIFY_DEPLOY_PROXY \
+          RAW_PROXY=$(npx -y netlify-cli@latest env:get CHATGPT_NETLIFY_DEPLOY_PROXY \
             --site "$NETLIFY_SITE_ID" \
-            --auth "$NETLIFY_AUTH_TOKEN" \
-            --context production)
-          case "$DEPLOY_PROXY" in
-            https://netlify-mcp.netlify.app/proxy/*) ;;
-            *) echo "Owner-authorized Netlify deployment channel is unavailable."; exit 31 ;;
-          esac
+            --auth "$NETLIFY_AUTH_TOKEN" 2>/dev/null || true)
+          DEPLOY_PROXY=$(printf '%s\n' "$RAW_PROXY" | grep -o 'https://netlify-mcp.netlify.app/proxy/[^[:space:]]*' | tail -n 1 || true)
+          if [ -z "$DEPLOY_PROXY" ]; then
+            echo "Owner-authorized Netlify deployment channel is unavailable."
+            echo "Netlify env response length: ${#RAW_PROXY}"
+            exit 31
+          fi
+          echo "Owner-authorized Netlify deployment channel detected."
           npx -y @netlify/mcp@latest \
             --site-id "$NETLIFY_SITE_ID" \
             --proxy-path "$DEPLOY_PROXY"
