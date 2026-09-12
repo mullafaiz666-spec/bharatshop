@@ -9,6 +9,10 @@
 [build.environment]
   NODE_VERSION = "24"
   NPM_FLAGS = "--no-audit --no-fund"
+  # Netlify otherwise runs Next middleware as an Edge Function before user
+  # redirects. Hybrid BharatShop routes must reach Render/Netlify Functions
+  # first, so run Next middleware at the origin instead.
+  NEXT_DISABLE_NETLIFY_EDGE = "true"
 
 [functions]
   node_bundler = "esbuild"
