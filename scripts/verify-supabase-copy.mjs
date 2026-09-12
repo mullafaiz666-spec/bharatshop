@@ -39,19 +39,52 @@ async function countRows(pool, table) {
 }
 
 async function definition(client, table) {
+  const relation = `public."${table}"`;
   const columns = await client.query(`
-    select a.attname, format_type(a.atttypid,a.atttypmod) as type,
-           a.attnotnull, a.attidentity, a.attgenerated,
+    select a.attnum as ordinal_position,
+           a.attname,
+           format_type(a.atttypid,a.atttypmod) as type,
+           a.attnotnull,
+           a.attidentity,
+           a.attgenerated,
            pg_get_expr(d.adbin,d.adrelid) as default_expression
     from pg_attribute a
     left join pg_attrdef d on d.adrelid=a.attrelid and d.adnum=a.attnum
     where a.attrelid=to_regclass($1) and a.attnum>0 and not a.attisdropped
-    order by a.attname`, [`public."${table}"`]);
+    order by a.attnum`, [relation]);
   const constraints = await client.query(`
-    select contype, pg_get_constraintdef(oid) as definition
+    select conname, contype, pg_get_constraintdef(oid, true) as definition
     from pg_constraint where conrelid=to_regclass($1)
-    order by contype, pg_get_constraintdef(oid)`, [`public."${table}"`]);
-  return { columns: columns.rows, constraints: constraints.rows };
+    order by conname, contype, pg_get_constraintdef(oid, true)`, [relation]);
+  const indexes = await client.query(`
+    select indexname, indexdef
+    from pg_indexes
+    where schemaname='public' and tablename=$1
+    order by indexname`, [table]);
+  const triggers = await client.query(`
+    select t.tgname as trigger_name, pg_get_triggerdef(t.oid, true) as definition
+    from pg_trigger t
+    where t.tgrelid=to_regclass($1) and not t.tgisinternal
+    order by t.tgname`, [relation]);
+  return { columns: columns.rows, constraints: constraints.rows, indexes: indexes.rows, triggers: triggers.rows };
+}
+
+async function sequenceState(client) {
+  const result = await client.query(`
+    select sequencename,
+           data_type,
+           start_value::text,
+           min_value::text,
+           max_value::text,
+           increment_by::text,
+           cycle,
+           cache_size::text,
+           last_value::text
+    from pg_sequences
+    where schemaname='public'
+    order by sequencename
+  `);
+  return result.rows;
 }
 
 async function main() {
@@ -98,15 +131,25 @@ async function main() {
       rows.push({ table, source: sourceCount.toString(), supabase: targetCount.toString(), schemaMatches, contentMatches, matches });
     }
 
+    const [sourceSequences, targetSequences] = await Promise.all([sequenceState(sourceClient), sequenceState(targetClient)]);
+    const sequencesMatch = sameDefinition(sourceSequences, targetSequences);
+    mismatch ||= !sequencesMatch;
+
     console.table(rows);
+    console.log(JSON.stringify({
+      sequencesMatch,
+      sourceSequences: sourceSequences.map((sequence) => sequence.sequencename),
+      supabaseSequences: targetSequences.map((sequence) => sequence.sequencename),
+    }, null, 2));
+
     if (mismatch) {
-      console.error("Supabase migration verification failed: schema, row counts or content differ. No cutover should occur.");
+      console.error("Supabase migration verification failed: schema/indexes/triggers, row counts/content, or sequence state differ. No cutover should occur.");
       process.exitCode = 3;
       return;
     }
 
-    console.log(`Supabase table-copy verification passed for ${rows.length} table(s). This script is read-only and performed no writes.`);
-    console.log('Before cutover: pause source writes, repeat verification, validate sequences, RLS, storage, sessions and payments. This is not automatic cutover authorization.');
+    console.log(`Supabase migration verification passed for ${rows.length} table(s) and ${sourceSequences.length} public sequence(s). This script is read-only and performed no writes.`);
+    console.log('Before cutover: keep source writes paused and independently validate RLS/Data API exposure, storage, sessions, payments and application acceptance. This is not automatic cutover authorization.');
   } finally {
     for (const client of [sourceClient, targetClient]) {
       if (client) { await client.query('ROLLBACK').catch(() => undefined); client.release(); }
