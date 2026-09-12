@@ -4,19 +4,20 @@ import { readFileSync } from "node:fs";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 
-test("production deploy uses a private Netlify build hook instead of broken source-upload and CLI paths", () => {
+test("production deploy uses the connected Netlify capability without committing its credential", () => {
   const workflow = read(".github/workflows/netlify-production-deploy.yml");
-  assert.match(workflow, /api\.netlify\.com\/api\/v1\/sites\/\$\{NETLIFY_SITE_ID\}\/build_hooks/);
-  assert.match(workflow, /NETLIFY_BUILD_HOOK_TITLE: BharatShop production CI/);
-  assert.match(workflow, /hook\.branch === 'main'/);
-  assert.match(workflow, /::add-mask::\$hook_url/);
-  assert.match(workflow, /trigger_branch=main/);
+  assert.match(workflow, /NETLIFY_DEPLOY_PROXY_KEY: CHATGPT_NETLIFY_DEPLOY_PROXY/);
+  assert.match(workflow, /accounts\/\$\{NETLIFY_TEAM_ID\}\/env\/\$\{NETLIFY_DEPLOY_PROXY_KEY\}\?site_id=\$\{NETLIFY_SITE_ID\}/);
+  assert.match(workflow, /::add-mask::\$proxy_path/);
+  assert.match(workflow, /@netlify\/mcp@latest/);
+  assert.match(workflow, /--proxy-path "\$proxy_path"/);
+  assert.match(workflow, /--site-id "\$NETLIFY_SITE_ID"/);
   assert.match(workflow, /sites\/\$\{NETLIFY_SITE_ID\}\/deploys\?branch=main&per_page=20/);
   assert.match(workflow, /deploy\.commit_ref === expected/);
   assert.match(workflow, /deploy\.context === 'production'/);
+  assert.doesNotMatch(workflow, /netlify-mcp\.netlify\.app\/proxy\//);
   assert.doesNotMatch(workflow, /netlify-cli@latest deploy/);
   assert.doesNotMatch(workflow, /\/builds\?branch=main/);
-  assert.doesNotMatch(workflow, /Content-Type: application\/zip/);
 });
 
 test("deployment remains pinned to the owned BharatShop site", () => {

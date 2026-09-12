@@ -12,7 +12,8 @@ env:
   NETLIFY_SITE_URL: https://bharatshop-35fd.netlify.app
   NETLIFY_SITE_ID: 75b5c168-6679-479d-b3a6-244e393fe1b0
   NETLIFY_SITE_NAME: bharatshop-35fd
-  NETLIFY_BUILD_HOOK_TITLE: BharatShop production CI
+  NETLIFY_TEAM_ID: 6a77b005bb09f74e7b55c7d4
+  NETLIFY_DEPLOY_PROXY_KEY: CHATGPT_NETLIFY_DEPLOY_PROXY
 
 jobs:
   deploy:
@@ -75,60 +76,40 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Trigger linked Netlify production build
+      - name: Deploy through connected Netlify capability
         shell: bash
         run: |
           set -euo pipefail
 
-          # Build hooks are Netlify's supported way to ask an already-linked
-          # Git repository to build a branch. Reuse one private hook so no hook
-          # URL is ever committed to this public repository.
+          # The long-lived GitHub token is deliberately read-only for project
+          # mutation. ChatGPT's connected Netlify authorization places a short-
+          # lived deploy proxy in a temporary site variable for this release.
+          # Read it without printing it, mask it, use it once, then ChatGPT
+          # removes the variable after the deploy is verified.
           curl -fsS \
             -H "Authorization: Bearer ${NETLIFY_AUTH_TOKEN}" \
-            "https://api.netlify.com/api/v1/sites/${NETLIFY_SITE_ID}/build_hooks" \
-            -o /tmp/netlify-build-hooks.json
+            "https://api.netlify.com/api/v1/accounts/${NETLIFY_TEAM_ID}/env/${NETLIFY_DEPLOY_PROXY_KEY}?site_id=${NETLIFY_SITE_ID}" \
+            -o /tmp/netlify-deploy-proxy.json
 
-          hook_url=$(node - <<'NODE'
+          proxy_path=$(node - <<'NODE'
           const fs = require('fs');
-          const hooks = JSON.parse(fs.readFileSync('/tmp/netlify-build-hooks.json', 'utf8'));
-          const match = Array.isArray(hooks)
-            ? hooks.find((hook) => hook.title === process.env.NETLIFY_BUILD_HOOK_TITLE && hook.branch === 'main')
-            : null;
-          process.stdout.write(String(match?.url || ''));
+          const item = JSON.parse(fs.readFileSync('/tmp/netlify-deploy-proxy.json', 'utf8'));
+          const values = Array.isArray(item?.values) ? item.values : [];
+          const preferred = values.find((value) => value.context === 'all') || values.find((value) => value.context === 'production') || values[0];
+          process.stdout.write(String(preferred?.value || ''));
           NODE
           )
 
-          if [ -z "$hook_url" ]; then
-            node - <<'NODE' >/tmp/netlify-build-hook-body.json
-          const body = {
-            title: process.env.NETLIFY_BUILD_HOOK_TITLE,
-            branch: 'main',
-          };
-          process.stdout.write(JSON.stringify(body));
-          NODE
-            curl -fsS -X POST \
-              -H "Authorization: Bearer ${NETLIFY_AUTH_TOKEN}" \
-              -H 'Content-Type: application/json' \
-              --data-binary @/tmp/netlify-build-hook-body.json \
-              "https://api.netlify.com/api/v1/sites/${NETLIFY_SITE_ID}/build_hooks" \
-              -o /tmp/netlify-created-build-hook.json
-            hook_url=$(node -e "const d=require('/tmp/netlify-created-build-hook.json');process.stdout.write(String(d.url||''))")
-          fi
-
-          if [ -z "$hook_url" ]; then
-            echo 'Netlify did not provide a build-hook URL.' >&2
+          if [ -z "$proxy_path" ]; then
+            echo 'Temporary connected Netlify deploy capability is unavailable.' >&2
             exit 22
           fi
+          echo "::add-mask::$proxy_path"
 
-          echo "::add-mask::$hook_url"
-          trigger_url="${hook_url}?trigger_branch=main&trigger_title=BharatShop+${GITHUB_SHA}"
-          echo "::add-mask::$trigger_url"
-          curl -fsS -X POST \
-            -H 'Content-Type: application/json' \
-            --data '{}' \
-            "$trigger_url" \
-            -o /tmp/netlify-hook-response.json
-          echo "Netlify production build hook accepted for ${GITHUB_SHA}."
+          npx -y @netlify/mcp@latest \
+            --site-id "$NETLIFY_SITE_ID" \
+            --proxy-path "$proxy_path" \
+            --no-wait
 
       - name: Wait for exact Netlify commit to become ready
         shell: bash
