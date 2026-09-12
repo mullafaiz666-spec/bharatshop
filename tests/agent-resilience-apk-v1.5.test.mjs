@@ -22,16 +22,16 @@ test("public agent health reports the immutable deployed build revision and prov
   assert.match(src, /configured AI provider chain passed the live model readiness probe/);
 });
 
-test("Android v1.5 targets the live Netlify production origin", () => {
+test("Android v1.5.1 targets the currently verified production runtime", () => {
   const activity = read("android-app/app/src/main/java/com/bharatshop/app/MainActivity.java");
   const gradle = read("android-app/app/build.gradle");
   const workflow = read(".github/workflows/android-apk.yml");
-  assert.match(activity, /https:\/\/bharatshop-35fd\.netlify\.app\/\?app=android-1\.5/);
-  assert.doesNotMatch(activity, /bharatshop-9w4a\.onrender\.com/);
-  assert.match(gradle, /versionCode 5/);
-  assert.match(gradle, /versionName '1\.5\.0'/);
-  assert.match(workflow, /BharatShop-v1\.5\.0\.apk/);
-  assert.match(workflow, /bharatshop-android-v1\.5\.0/);
+  assert.match(activity, /https:\/\/bharatshop-9w4a\.onrender\.com\/\?app=android-1\.5\.1/);
+  assert.doesNotMatch(activity, /bharatshop-35fd\.netlify\.app/);
+  assert.match(gradle, /versionCode 6/);
+  assert.match(gradle, /versionName '1\.5\.1'/);
+  assert.match(workflow, /BharatShop-v1\.5\.1\.apk/);
+  assert.match(workflow, /bharatshop-android-v1\.5\.1/);
 });
 
 test("validated laptop workstation is packaged from tracked source only", () => {
