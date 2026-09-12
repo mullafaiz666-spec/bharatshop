@@ -9,18 +9,13 @@
 [build.environment]
   NODE_VERSION = "24"
   NPM_FLAGS = "--no-audit --no-fund"
-  # Netlify otherwise runs Next middleware as an Edge Function before user
-  # redirects. Hybrid BharatShop routes must reach Render/Netlify Functions
-  # first, so run Next middleware at the origin instead.
-  NEXT_DISABLE_NETLIFY_EDGE = "true"
 
 [functions]
   node_bundler = "esbuild"
 
 # Keep the public catalogue on the authoritative Render data source, but route
 # through a plain Netlify Function instead of Netlify's Next server handler.
-# This preserves the existing /api/storefront/products browser contract while
-# avoiding the Next/OpenNext handler path that returned `nextHandler is not a function`.
+# This preserves the existing /api/storefront/products browser contract.
 [[redirects]]
   from = "/api/storefront/products"
   to = "/.netlify/functions/storefront-products"
@@ -64,6 +59,6 @@
     Referrer-Policy = "strict-origin-when-cross-origin"
     Permissions-Policy = "camera=(), microphone=(), geolocation=()"
 
-# There is intentionally no catch-all Render rewrite. Netlify's Next.js adapter
-# serves /, /store, assets and non-database pages directly. Full native backend
-# cutover remains guarded by BHARATSHOP_MIGRATION_VERIFIED=true.
+# Use Netlify's current OpenNext adapter defaults for Next.js 16. Netlify
+# supports modern Next middleware/Proxy directly; forcing middleware back into
+# the origin server can produce an invalid generated server handler.
