@@ -36,8 +36,9 @@ export async function GET(request: Request) {
   const netlifyDetected = Boolean(process.env.NETLIFY || process.env.DEPLOY_ID || process.env.SITE_ID);
   const dbSource = databaseSource();
   const admin = adminRuntimeStatus(dbSource);
+  const migrationVerified = String(process.env.BHARATSHOP_MIGRATION_VERIFIED || "").trim().toLowerCase() === "true";
   const readyForNetlifyDeploy = admin.ready && aiConfigured();
-  const readyForSupabaseCutover = Boolean(process.env.SUPABASE_DB_URL) && supabase.authConfigured && supabase.storageConfigured;
+  const readyForSupabaseCutover = migrationVerified && Boolean(process.env.SUPABASE_DB_URL) && supabase.authConfigured && supabase.storageConfigured;
 
   return NextResponse.json({
     ok: readyForNetlifyDeploy,
@@ -49,6 +50,7 @@ export async function GET(request: Request) {
     database: {
       configured: dbSource !== "missing",
       source: dbSource,
+      migrationVerified,
       cutoverPolicy: "DATABASE_URL remains authoritative until the Supabase copy passes the read-only verification command and cutover is explicitly approved.",
     },
     admin,
@@ -62,6 +64,7 @@ export async function GET(request: Request) {
       netlifyDeploy: readyForNetlifyDeploy,
       admin: admin.ready,
       supabaseCutover: readyForSupabaseCutover,
+      migrationVerified,
       gemini: aiConfigured() && aiProviderName() === "gemini",
     },
   }, {
