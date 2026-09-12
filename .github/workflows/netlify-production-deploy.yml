@@ -7,8 +7,8 @@ permissions:
   contents: read
 
 env:
-  NETLIFY_SITE_ID: 75b5c168-6679-479d-b3a6-244e393fe1b0
-  NETLIFY_SITE_URL: https://bharatshop-35fd.netlify.app
+  NETLIFY_SITE_ID: 255afc2a-50a4-4817-81d9-16c2776ce34e
+  NETLIFY_SITE_URL: https://fluffy-mochi-1381a3.netlify.app
   NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN || secrets.NETLIFY_PERSONAL_ACCESS_TOKEN || secrets.NETLIFY_TOKEN }}
 
 jobs:
