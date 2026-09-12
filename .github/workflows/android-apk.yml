@@ -30,23 +30,24 @@ jobs:
       - name: Prepare artifact
         run: |
           mkdir -p dist
-          cp android-app/app/build/outputs/apk/debug/app-debug.apk dist/BharatShop-v1.5.0.apk
-          sha256sum dist/BharatShop-v1.5.0.apk | tee dist/BharatShop-v1.5.0.apk.sha256
+          cp android-app/app/build/outputs/apk/debug/app-debug.apk dist/BharatShop-v1.5.1.apk
+          sha256sum dist/BharatShop-v1.5.1.apk | tee dist/BharatShop-v1.5.1.apk.sha256
       - uses: actions/upload-artifact@v4
         with:
-          name: BharatShop-Android-v1.5
+          name: BharatShop-Android-v1.5.1
           path: dist/*
           if-no-files-found: error
           retention-days: 30
-      - name: Publish stable v1.5 APK release
+      - name: Publish stable v1.5.1 APK release
         if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="bharatshop-android-v1.5.0"
+          TAG="bharatshop-android-v1.5.1"
+          NOTES="BharatShop Android v1.5.1. Verified production runtime: https://bharatshop-9w4a.onrender.com. The APK uses Render while the new Netlify cutover is still awaiting exact-revision verification. Built from commit $GITHUB_SHA."
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/BharatShop-v1.5.0.apk dist/BharatShop-v1.5.0.apk.sha256 --clobber
-            gh release edit "$TAG" --notes "BharatShop Android v1.5.0. Live production: https://bharatshop-35fd.netlify.app. Built from commit $GITHUB_SHA."
+            gh release upload "$TAG" dist/BharatShop-v1.5.1.apk dist/BharatShop-v1.5.1.apk.sha256 --clobber
+            gh release edit "$TAG" --notes "$NOTES"
           else
-            gh release create "$TAG" dist/BharatShop-v1.5.0.apk dist/BharatShop-v1.5.0.apk.sha256 --title "BharatShop Android v1.5.0" --notes "BharatShop Android v1.5.0. Live production: https://bharatshop-35fd.netlify.app. Built from commit $GITHUB_SHA."
+            gh release create "$TAG" dist/BharatShop-v1.5.1.apk dist/BharatShop-v1.5.1.apk.sha256 --title "BharatShop Android v1.5.1" --notes "$NOTES"
           fi

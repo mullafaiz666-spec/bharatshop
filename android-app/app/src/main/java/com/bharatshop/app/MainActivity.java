@@ -17,7 +17,9 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
 public class MainActivity extends Activity {
-    private static final String START_URL = "https://bharatshop-35fd.netlify.app/?app=android-1.5";
+    // Render remains the verified production runtime while the new Netlify site
+    // finishes its deployment/cutover. This keeps the installable app usable now.
+    private static final String START_URL = "https://bharatshop-9w4a.onrender.com/?app=android-1.5.1";
     private WebView webView;
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -38,7 +40,7 @@ public class MainActivity extends Activity {
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setSupportMultipleWindows(false);
-        settings.setUserAgentString(settings.getUserAgentString() + " BharatShopAndroid/1.5");
+        settings.setUserAgentString(settings.getUserAgentString() + " BharatShopAndroid/1.5.1");
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             settings.setSafeBrowsingEnabled(true);
         }
