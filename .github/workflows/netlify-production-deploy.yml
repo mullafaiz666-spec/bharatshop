@@ -16,7 +16,7 @@ env:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     env:
       NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
     steps:
@@ -74,16 +74,55 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Deploy exact build to BharatShop Netlify production
-        env:
-          BHARATSHOP_BUILD_REVISION: ${{ github.sha }}
+      - name: Upload source to Netlify build API and wait for production deploy
+        shell: bash
         run: |
-          npx --yes netlify-cli@latest deploy \
-            --build \
-            --prod \
-            --site "$NETLIFY_SITE_ID" \
-            --auth "$NETLIFY_AUTH_TOKEN" \
-            --message "BharatShop ${GITHUB_SHA}"
+          set -euo pipefail
+
+          # Package only tracked source, then add a non-secret build revision file.
+          # next.config.ts embeds COMMIT_SHA into BHARATSHOP_BUILD_REVISION so the
+          # live runtime can prove exactly which Git commit was published.
+          git archive --format=zip --output=/tmp/bharatshop-source.zip HEAD
+          printf 'COMMIT_SHA=%s\n' "$GITHUB_SHA" > /tmp/.env.production.local
+          (cd /tmp && zip -q bharatshop-source.zip .env.production.local)
+
+          curl -fsS -X POST \
+            -H "Authorization: Bearer ${NETLIFY_AUTH_TOKEN}" \
+            -H 'Content-Type: application/zip' \
+            --data-binary @/tmp/bharatshop-source.zip \
+            "https://api.netlify.com/api/v1/sites/${NETLIFY_SITE_ID}/builds?branch=main" \
+            -o /tmp/netlify-build.json
+
+          build_id=$(node -e "const d=require('/tmp/netlify-build.json');process.stdout.write(String(d.id||''))")
+          deploy_id=$(node -e "const d=require('/tmp/netlify-build.json');process.stdout.write(String(d.deploy_id||''))")
+          if [ -z "$build_id" ] || [ -z "$deploy_id" ]; then
+            echo 'Netlify build API did not return build/deploy identifiers.' >&2
+            cat /tmp/netlify-build.json
+            exit 22
+          fi
+          echo "Netlify build=$build_id deploy=$deploy_id"
+
+          for i in $(seq 1 150); do
+            curl -fsS \
+              -H "Authorization: Bearer ${NETLIFY_AUTH_TOKEN}" \
+              "https://api.netlify.com/api/v1/deploys/${deploy_id}" \
+              -o /tmp/netlify-deploy.json
+            state=$(node -e "const d=require('/tmp/netlify-deploy.json');process.stdout.write(String(d.state||''))")
+            error=$(node -e "const d=require('/tmp/netlify-deploy.json');process.stdout.write(String(d.error_message||''))")
+            echo "Netlify deploy state=$state attempt=$i"
+            if [ "$state" = "ready" ]; then
+              break
+            fi
+            if [ "$state" = "error" ]; then
+              echo "Netlify deployment failed: $error" >&2
+              exit 23
+            fi
+            if [ "$i" = "150" ]; then
+              echo 'Netlify deployment did not become ready within the bounded wait.' >&2
+              exit 24
+            fi
+            sleep 5
+          done
 
       - name: Verify exact live revision and core routes
         shell: bash
@@ -91,7 +130,7 @@ jobs:
           set -euo pipefail
           expected="$GITHUB_SHA"
           live=""
-          for i in $(seq 1 24); do
+          for i in $(seq 1 36); do
             body=$(curl -fsS --max-time 20 "$NETLIFY_SITE_URL/netlify-deploy-health" || true)
             live=$(printf '%s' "$body" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log(JSON.parse(s).revision||'')}catch{console.log('')}})")
             echo "attempt=$i expected=$expected live=$live"
