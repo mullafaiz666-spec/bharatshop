@@ -16,6 +16,7 @@ on:
       - "src/lib/fashion/trend-intelligence.ts"
       - "src/lib/suppliers/qikink-rate-card.ts"
       - ".github/workflows/streetwear-fashion-agent.yml"
+      - ".github/workflows/netlify-production-deploy.yml"
 
 concurrency:
   group: bharatshop-autonomous-streetwear
@@ -36,7 +37,7 @@ jobs:
       - name: Wait for compatible Netlify production revision
         run: |
           set -euo pipefail
-          for i in $(seq 1 42); do
+          for i in $(seq 1 90); do
             code=$(curl -sS -o /tmp/health.json -w '%{http_code}' --max-time 20 "$BHARATSHOP_URL/api/health" || true)
             revision=$(node -e "try{const d=require('/tmp/health.json');process.stdout.write(String(d.revision||''))}catch{}")
             echo "health=$code revision=$revision event=$GITHUB_EVENT_NAME required=$GITHUB_SHA"
