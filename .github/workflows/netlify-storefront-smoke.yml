@@ -1,8 +1,9 @@
 name: Netlify Storefront Smoke
 
 on:
-  push:
-    branches: [main]
+  workflow_run:
+    workflows: ["Deploy BharatShop Netlify Production"]
+    types: [completed]
   workflow_dispatch:
 
 concurrency:
@@ -11,22 +12,24 @@ concurrency:
 
 jobs:
   smoke:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      SITE_URL: https://bharatshops.netlify.app
+      SITE_URL: https://bharatshop-35fd.netlify.app
       RENDER_URL: https://bharatshop-9w4a.onrender.com
+      EXPECTED_REVISION: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
-      - name: Wait for exact Netlify revision
+      - name: Verify exact published Netlify revision
         run: |
           set -euo pipefail
-          for i in $(seq 1 48); do
+          for i in $(seq 1 24); do
             code=$(curl -sS -o /tmp/deploy.json -w '%{http_code}' --max-time 20 "$SITE_URL/netlify-deploy-health" || true)
             revision=$(node -e "try{const d=require('/tmp/deploy.json');process.stdout.write(String(d.revision||''))}catch{}")
             mode=$(node -e "try{const d=require('/tmp/deploy.json');process.stdout.write(String(d.mode||''))}catch{}")
-            echo "Netlify health HTTP=$code revision=$revision expected=$GITHUB_SHA mode=$mode"
-            if [ "$code" = "200" ] && [ "$revision" = "$GITHUB_SHA" ]; then exit 0; fi
-            sleep 10
+            echo "Netlify health HTTP=$code revision=$revision expected=$EXPECTED_REVISION mode=$mode"
+            if [ "$code" = "200" ] && [ "$revision" = "$EXPECTED_REVISION" ]; then exit 0; fi
+            sleep 5
           done
           echo "Exact Netlify revision was not published"
           cat /tmp/deploy.json || true
