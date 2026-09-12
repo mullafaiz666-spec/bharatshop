@@ -1,0 +1,29 @@
+name: BharatShop Source Snapshot
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/source-snapshot.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package tracked source
+        run: |
+          set -euo pipefail
+          git archive --format=zip --output=bharatshop-source.zip HEAD
+          unzip -l bharatshop-source.zip | tail -n 3
+      - name: Upload source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: bharatshop-source-${{ github.sha }}
+          path: bharatshop-source.zip
+          if-no-files-found: error
+          retention-days: 1
