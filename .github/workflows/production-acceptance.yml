@@ -1,8 +1,9 @@
 name: Production Acceptance
 
 on:
-  push:
-    branches: [main]
+  workflow_run:
+    workflows: ["Deploy BharatShop Netlify Production"]
+    types: [completed]
   workflow_dispatch:
 
 concurrency:
@@ -11,47 +12,44 @@ concurrency:
 
 jobs:
   acceptance:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
-      # Netlify is the approved production host for this deployment. Keep the
-      # acceptance target explicit so a stale repository variable cannot send
-      # production checks back to the retired Render application.
       BASE_URL: https://bharatshop-35fd.netlify.app
       BHARATSHOP_URL: https://bharatshop-35fd.netlify.app
       BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
+      EXPECTED_REVISION: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 24
 
       - name: Show production acceptance target
-        run: echo "Production acceptance target=$BHARATSHOP_URL"
+        run: echo "Production acceptance target=$BHARATSHOP_URL revision=$EXPECTED_REVISION"
 
-      - name: Wait for exact production deployment
+      - name: Verify exact production deployment
         run: |
           set -euo pipefail
-          for i in $(seq 1 42); do
+          for i in $(seq 1 24); do
             code=$(curl -sS -o /tmp/health.json -w '%{http_code}' --max-time 20 "$BHARATSHOP_URL/api/health" || true)
             revision=$(node -e "try{const d=require('/tmp/health.json');process.stdout.write(String(d.revision||''))}catch{}")
-            echo "shallow health HTTP=$code revision=$revision expected=$GITHUB_SHA"
-            # A deployed revision can truthfully return 503 while dependencies are
-            # not ready. Treat exact revision visibility separately from readiness.
-            if [ "$revision" = "$GITHUB_SHA" ] && { [ "$code" = "200" ] || [ "$code" = "503" ]; }; then break; fi
-            if [ "$i" = "42" ]; then
-              echo "Production did not expose the exact commit $GITHUB_SHA within the acceptance wait window"
-              cat /tmp/health.json || true
-              exit 1
-            fi
-            sleep 10
+            echo "shallow health HTTP=$code revision=$revision expected=$EXPECTED_REVISION"
+            if [ "$revision" = "$EXPECTED_REVISION" ] && { [ "$code" = "200" ] || [ "$code" = "503" ]; }; then exit 0; fi
+            sleep 5
           done
+          echo "Production did not expose the exact deployed revision $EXPECTED_REVISION"
+          cat /tmp/health.json || true
+          exit 1
 
       - name: Verify administrator runtime prerequisites
         run: |
           set -euo pipefail
           code=$(curl -sS -o /tmp/free-stack.json -w '%{http_code}' --max-time 30 "$BHARATSHOP_URL/api/health/free-stack?deep=1" || true)
-          state=$(node - <<'NODE'
+          state=$(HTTP_CODE="$code" node - <<'NODE'
           const fs=require('fs');
           try {
             const d=JSON.parse(fs.readFileSync('/tmp/free-stack.json','utf8'));
