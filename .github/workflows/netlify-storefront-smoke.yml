@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      SITE_URL: https://bharatshop-35fd.netlify.app
+      SITE_URL: https://fluffy-mochi-1381a3.netlify.app
       RENDER_URL: https://bharatshop-9w4a.onrender.com
     steps:
       - name: Wait for exact Netlify revision
