@@ -50,12 +50,26 @@ function designCode(title: string) {
   const slug = title.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 22) || "CUSTOM";
   return `CUSTOM-${slug}`;
 }
+function localPreviewUrl(raw: unknown, productId: number) {
+  const value = String(raw || "").trim();
+  if (value) {
+    try {
+      const parsed = new URL(value, "http://localhost");
+      if (parsed.pathname.startsWith("/api/fashion-art/") || parsed.pathname.startsWith("/api/fashion-photo/")) {
+        return `${parsed.pathname}${parsed.search}`;
+      }
+      if (/^https:\/\//i.test(value)) return value;
+    } catch {}
+    if (value.startsWith("/")) return value;
+  }
+  return `/api/fashion-art/${productId}/0`;
+}
 
 export async function GET() {
   const admin = await getAdminUser();
   if (!admin) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const rows = await pool.query(`
-    SELECT p.id,p.sku,p.title,p.category,p.brand,p.status,p.selling_price_inr,p.net_profit_inr,p.custom_margin_pct,p.updated_at,
+    SELECT p.id,p.sku,p.title,p.category,p.brand,p.status,p.image_url,p.selling_price_inr,p.net_profit_inr,p.custom_margin_pct,p.updated_at,
            d.specifications_json
     FROM products p
     LEFT JOIN product_details d ON d.product_id=p.id
@@ -72,11 +86,23 @@ export async function GET() {
     printMethods: PRINT_METHODS,
     garments: QIKINK_PRODUCTS.map(p => ({ code: p.code, name: p.name, audience: p.audience, sizes: p.sizes, baseInr: p.baseInr })),
     priceBands: { "BharatShop Studio": { min: 129, max: 599 }, BharatDrip: { min: 599, max: 999 } },
-    products: rows.rows.map((r: any) => ({
-      id: Number(r.id), sku: r.sku, title: r.title, category: r.category, brand: r.brand, status: r.status,
-      sellingPriceInr: Number(r.selling_price_inr), netProfitInr: Number(r.net_profit_inr), marginPct: Number(r.custom_margin_pct),
-      updatedAt: r.updated_at, specifications: r.specifications_json || {},
-    })),
+    products: rows.rows.map((r: any) => {
+      const id = Number(r.id);
+      return {
+        id,
+        sku: r.sku,
+        title: r.title,
+        category: r.category,
+        brand: r.brand,
+        status: r.status,
+        imageUrl: localPreviewUrl(r.image_url, id),
+        sellingPriceInr: Number(r.selling_price_inr),
+        netProfitInr: Number(r.net_profit_inr),
+        marginPct: Number(r.custom_margin_pct),
+        updatedAt: r.updated_at,
+        specifications: r.specifications_json || {},
+      };
+    }),
     policy: "Original artwork only. Qikink production mapping and category economics are checked before a design can be queued. Final publication remains CEO/listing-gated.",
   });
 }
