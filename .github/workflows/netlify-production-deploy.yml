@@ -28,7 +28,7 @@ jobs:
       - name: Require Netlify token
         if: ${{ env.NETLIFY_AUTH_TOKEN == '' }}
         run: |
-          echo "NETLIFY_AUTH_TOKEN is required for the Netlify source-build API."
+          echo "NETLIFY_AUTH_TOKEN is required for Netlify project configuration."
           exit 20
 
       - name: Verify existing Netlify project access
@@ -40,20 +40,38 @@ jobs:
             -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" \
             "https://api.netlify.com/api/v1/sites/$NETLIFY_SITE_ID")
           printf '%s' "$site" | jq -e --arg id "$NETLIFY_SITE_ID" '.id == $id' >/dev/null
-          printf '%s' "$site" | jq '{id,name,url,ssl_url}'
+          printf '%s' "$site" | jq '{id,name,url,ssl_url,git_provider,build_settings,prevent_non_git_prod_deploys}'
 
-      - name: Package validated source
+      - name: Attach public GitHub repository to Netlify project
         if: ${{ env.NETLIFY_AUTH_TOKEN != '' }}
         shell: bash
         run: |
           set -euo pipefail
-          git archive --format=zip --output=/tmp/bharatshop-source.zip HEAD
-          test -s /tmp/bharatshop-source.zip
-          unzip -l /tmp/bharatshop-source.zip | grep -q 'netlify.toml'
-          unzip -l /tmp/bharatshop-source.zip | grep -q 'package.json'
-          echo "Packaged $(du -h /tmp/bharatshop-source.zip | cut -f1) from $GITHUB_SHA"
+          cat >/tmp/netlify-site-update.json <<'JSON'
+          {
+            "repo": {
+              "provider": "github",
+              "repo_path": "mullafaiz666-spec/bharatshop",
+              "repo_branch": "main",
+              "repo_url": "https://github.com/mullafaiz666-spec/bharatshop",
+              "public_repo": true,
+              "cmd": "npm run build",
+              "dir": "",
+              "functions_dir": "netlify/functions",
+              "allowed_branches": ["main"],
+              "stop_builds": false
+            }
+          }
+          response=$(curl -sS --fail-with-body \
+            -X PATCH \
+            -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data-binary @/tmp/netlify-site-update.json \
+            "https://api.netlify.com/api/v1/sites/$NETLIFY_SITE_ID")
+          printf '%s' "$response" | jq '{id,name,git_provider,build_settings:{provider:.build_settings.provider,repo_path:.build_settings.repo_path,repo_branch:.build_settings.repo_branch,repo_url:.build_settings.repo_url,cmd:.build_settings.cmd,dir:.build_settings.dir,functions_dir:.build_settings.functions_dir,stop_builds:.build_settings.stop_builds}}'
+          printf '%s' "$response" | jq -e '.build_settings.repo_path == "mullafaiz666-spec/bharatshop" and .build_settings.repo_branch == "main"' >/dev/null
 
-      - name: Start Netlify production build from source ZIP
+      - name: Trigger production build from linked main branch
         if: ${{ env.NETLIFY_AUTH_TOKEN != '' }}
         shell: bash
         run: |
@@ -61,16 +79,12 @@ jobs:
           response=$(curl -sS --fail-with-body \
             -X POST \
             -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" \
-            -H "Content-Type: application/zip" \
-            --data-binary @/tmp/bharatshop-source.zip \
-            "https://api.netlify.com/api/v1/sites/$NETLIFY_SITE_ID/builds?clear_cache=true&title=BharatShop-$GITHUB_SHA")
-          printf '%s' "$response" > /tmp/netlify-build.json
+            -H "Content-Type: application/json" \
+            -d '{}' \
+            "https://api.netlify.com/api/v1/sites/$NETLIFY_SITE_ID/builds?branch=main&clear_cache=true&title=BharatShop-$GITHUB_SHA")
           printf '%s' "$response" | jq '{id,state,deploy_id,site_id,created_at,error}'
           build_id=$(printf '%s' "$response" | jq -r '.id // empty')
-          if [ -z "$build_id" ]; then
-            echo "Netlify did not return a build id."
-            exit 32
-          fi
+          test -n "$build_id"
 
       - name: Verify live Netlify storefront and catalogue
         if: ${{ env.NETLIFY_AUTH_TOKEN != '' }}
