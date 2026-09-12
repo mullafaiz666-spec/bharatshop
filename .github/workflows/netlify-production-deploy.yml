@@ -22,7 +22,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN || secrets.NETLIFY_PERSONAL_ACCESS_TOKEN || secrets.NETLIFY_TOKEN }}
+      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      NETLIFY_PERSONAL_ACCESS_TOKEN: ${{ secrets.NETLIFY_PERSONAL_ACCESS_TOKEN }}
+      NETLIFY_TOKEN: ${{ secrets.NETLIFY_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -35,14 +37,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ -z "${NETLIFY_AUTH_TOKEN:-}" ]; then
-            echo 'No Netlify deployment token is configured in the supported secret names.' >&2
+          readable_token=""
+          for candidate in "${NETLIFY_AUTH_TOKEN:-}" "${NETLIFY_PERSONAL_ACCESS_TOKEN:-}" "${NETLIFY_TOKEN:-}"; do
+            [ -z "$candidate" ] && continue
+            echo "::add-mask::$candidate"
+            if curl -fsS \
+              -H "Authorization: Bearer ${candidate}" \
+              "https://api.netlify.com/api/v1/sites/${NETLIFY_SITE_ID}" \
+              -o /tmp/netlify-site.json; then
+              readable_token="$candidate"
+              break
+            fi
+          done
+          if [ -z "$readable_token" ]; then
+            echo 'No configured Netlify token can read the BharatShop production site.' >&2
             exit 21
           fi
-          curl -fsS \
-            -H "Authorization: Bearer ${NETLIFY_AUTH_TOKEN}" \
-            "https://api.netlify.com/api/v1/sites/${NETLIFY_SITE_ID}" \
-            -o /tmp/netlify-site.json
+          echo "NETLIFY_READ_TOKEN=$readable_token" >> "$GITHUB_ENV"
           node - <<'NODE'
           const fs = require('fs');
           const site = JSON.parse(fs.readFileSync('/tmp/netlify-site.json', 'utf8'));
@@ -78,18 +89,39 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Deploy production with the last verified Netlify CLI
+      - name: Deploy production with existing Netlify credentials
         env:
           BHARATSHOP_BUILD_REVISION: ${{ github.sha }}
         shell: bash
         run: |
           set -euo pipefail
-          npx -y netlify-cli@27.5.2 deploy \
-            --build \
-            --prod \
-            --site "$NETLIFY_SITE_ID" \
-            --auth "$NETLIFY_AUTH_TOKEN" \
-            --message "BharatShop production ${GITHUB_SHA}"
+          success=0
+          attempt=0
+
+          # Try every already-configured credential without printing or persisting
+          # its value. A read-only/stale token currently returns Not Found on the
+          # deploy API, so a deploy-capable legacy/PAT secret can recover CI.
+          for candidate in "${NETLIFY_PERSONAL_ACCESS_TOKEN:-}" "${NETLIFY_TOKEN:-}" "${NETLIFY_AUTH_TOKEN:-}"; do
+            [ -z "$candidate" ] && continue
+            attempt=$((attempt + 1))
+            echo "::add-mask::$candidate"
+            echo "Trying configured Netlify deployment credential #${attempt}."
+            if npx -y netlify-cli@27.5.2 deploy \
+              --build \
+              --prod \
+              --site "$NETLIFY_SITE_ID" \
+              --auth "$candidate" \
+              --message "BharatShop production ${GITHUB_SHA}"; then
+              success=1
+              break
+            fi
+            echo "Credential #${attempt} could not deploy; trying the next configured credential."
+          done
+
+          if [ "$success" != "1" ]; then
+            echo 'No configured GitHub Actions Netlify credential has production deploy permission.' >&2
+            exit 22
+          fi
 
       - name: Wait for exact Netlify commit to become ready
         shell: bash
@@ -100,7 +132,7 @@ jobs:
 
           for i in $(seq 1 150); do
             curl -fsS \
-              -H "Authorization: Bearer ${NETLIFY_AUTH_TOKEN}" \
+              -H "Authorization: Bearer ${NETLIFY_READ_TOKEN}" \
               "https://api.netlify.com/api/v1/sites/${NETLIFY_SITE_ID}/deploys?branch=main&per_page=20" \
               -o /tmp/netlify-deploys.json
 
