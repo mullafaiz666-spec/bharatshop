@@ -77,20 +77,31 @@ jobs:
         if: ${{ inputs.mode == 'apply' }}
         run: node scripts/database-migration-preflight.mjs
 
-      - name: Dump source public schema and data to ephemeral runner storage
+      - name: Dump source and current target to ephemeral runner storage
         if: ${{ inputs.mode == 'apply' }}
         shell: bash
         run: |
           set -euo pipefail
-          dump="$RUNNER_TEMP/bharatshop-source.dump"
+          source_dump="$RUNNER_TEMP/bharatshop-source.dump"
+          target_dump="$RUNNER_TEMP/bharatshop-target-before.dump"
+
           pg_dump "$SOURCE_DATABASE_URL" \
             --format=custom \
             --schema=public \
             --no-owner \
             --no-privileges \
-            --file="$dump"
-          test -s "$dump"
-          echo "Source dump created in ephemeral runner storage. It will not be uploaded as an artifact."
+            --file="$source_dump"
+
+          pg_dump "$SUPABASE_DB_URL" \
+            --format=custom \
+            --schema=public \
+            --no-owner \
+            --no-privileges \
+            --file="$target_dump"
+
+          test -s "$source_dump"
+          test -s "$target_dump"
+          echo "Source and target safety dumps exist only in ephemeral runner storage and will not be uploaded."
 
       - name: Replace only the known empty Supabase starter tables
         if: ${{ inputs.mode == 'apply' }}
@@ -118,24 +129,25 @@ jobs:
             select coalesce(array_agg(name order by name), '{}')
               into nonempty
             from (
-              select 'order_items' as name where to_regclass('public.order_items') is not null and exists (select 1 from public.order_items limit 1)
-              union all select 'orders' where to_regclass('public.orders') is not null and exists (select 1 from public.orders limit 1)
-              union all select 'products' where to_regclass('public.products') is not null and exists (select 1 from public.products limit 1)
-              union all select 'profiles' where to_regclass('public.profiles') is not null and exists (select 1 from public.profiles limit 1)
+              select 'order_items' as name where exists (select 1 from public.order_items limit 1)
+              union all select 'orders' where exists (select 1 from public.orders limit 1)
+              union all select 'products' where exists (select 1 from public.products limit 1)
+              union all select 'profiles' where exists (select 1 from public.profiles limit 1)
             ) q;
             if cardinality(nonempty) > 0 then
               raise exception 'Target starter tables are no longer empty: %', nonempty;
             end if;
           end $$;
 
-          drop table if exists public.order_items cascade;
-          drop table if exists public.orders cascade;
-          drop table if exists public.products cascade;
-          drop table if exists public.profiles cascade;
+          drop table public.order_items cascade;
+          drop table public.orders cascade;
+          drop table public.products cascade;
+          drop table public.profiles cascade;
           commit;
           SQL
 
       - name: Restore source public schema and data into Supabase
+        id: restore_source
         if: ${{ inputs.mode == 'apply' }}
         shell: bash
         run: |
@@ -148,8 +160,23 @@ jobs:
             --single-transaction \
             "$RUNNER_TEMP/bharatshop-source.dump"
 
+      - name: Recover original Supabase starter schema if source restore failed
+        if: ${{ always() && inputs.mode == 'apply' && steps.restore_source.outcome == 'failure' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s "$RUNNER_TEMP/bharatshop-target-before.dump"
+          pg_restore \
+            --dbname="$SUPABASE_DB_URL" \
+            --no-owner \
+            --no-privileges \
+            --exit-on-error \
+            --single-transaction \
+            "$RUNNER_TEMP/bharatshop-target-before.dump"
+          echo "Source restore failed; the prior empty Supabase starter schema was restored. Production traffic was never switched."
+
       - name: Lock migrated public tables away from direct Data API roles
-        if: ${{ inputs.mode == 'apply' }}
+        if: ${{ inputs.mode == 'apply' && steps.restore_source.outcome == 'success' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -171,12 +198,12 @@ jobs:
           revoke execute on all functions in schema public from anon, authenticated;
           SQL
 
-      - name: Verify exact table/schema/content parity
-        if: ${{ inputs.mode == 'apply' }}
+      - name: Verify exact table/schema/content/sequence parity
+        if: ${{ inputs.mode == 'apply' && steps.restore_source.outcome == 'success' }}
         run: node scripts/verify-supabase-copy.mjs
 
       - name: Migration result
-        if: ${{ inputs.mode == 'apply' }}
+        if: ${{ inputs.mode == 'apply' && steps.restore_source.outcome == 'success' }}
         run: |
           echo "Source public schema/data copy verified."
           echo "Production traffic was NOT switched. Render remains authoritative until final acceptance and cutover approval."
