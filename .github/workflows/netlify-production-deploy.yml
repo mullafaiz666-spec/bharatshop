@@ -9,7 +9,9 @@ permissions:
   contents: read
 
 env:
-  NETLIFY_SITE_URL: https://bharatshops.netlify.app
+  NETLIFY_SITE_URL: https://bharatshop-35fd.netlify.app
+  NETLIFY_SITE_ID: 75b5c168-6679-479d-b3a6-244e393fe1b0
+  NETLIFY_SITE_NAME: bharatshop-35fd
 
 jobs:
   deploy:
@@ -17,7 +19,6 @@ jobs:
     timeout-minutes: 25
     env:
       NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
-      NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
     steps:
       - uses: actions/checkout@v4
 
@@ -34,10 +35,6 @@ jobs:
             echo 'NETLIFY_AUTH_TOKEN is missing.' >&2
             exit 21
           fi
-          if [ -z "${NETLIFY_SITE_ID:-}" ]; then
-            echo 'NETLIFY_SITE_ID is missing.' >&2
-            exit 22
-          fi
           curl -fsS \
             -H "Authorization: Bearer ${NETLIFY_AUTH_TOKEN}" \
             "https://api.netlify.com/api/v1/sites/${NETLIFY_SITE_ID}" \
@@ -45,14 +42,19 @@ jobs:
           node - <<'NODE'
           const fs = require('fs');
           const site = JSON.parse(fs.readFileSync('/tmp/netlify-site.json', 'utf8'));
-          if (site.name !== 'bharatshops') {
-            throw new Error(`Refusing deployment: expected Netlify site bharatshops, got ${site.name || 'unknown'}`);
+          const expectedName = process.env.NETLIFY_SITE_NAME;
+          const expectedUrl = process.env.NETLIFY_SITE_URL;
+          if (site.id !== process.env.NETLIFY_SITE_ID) {
+            throw new Error(`Refusing deployment: unexpected Netlify site id ${site.id || 'missing'}`);
           }
-          const url = String(site.ssl_url || site.url || '');
-          if (!url.includes('bharatshops.netlify.app')) {
-            throw new Error(`Refusing deployment: unexpected Netlify production URL ${url || 'missing'}`);
+          if (site.name !== expectedName) {
+            throw new Error(`Refusing deployment: expected Netlify site ${expectedName}, got ${site.name || 'unknown'}`);
           }
-          console.log(`Verified Netlify target: ${site.name}`);
+          const url = String(site.ssl_url || site.url || '').replace(/\/$/, '');
+          if (url !== expectedUrl) {
+            throw new Error(`Refusing deployment: expected ${expectedUrl}, got ${url || 'missing'}`);
+          }
+          console.log(`Verified Netlify target: ${site.name} (${site.id})`);
           NODE
 
       - name: Install dependencies
@@ -72,7 +74,7 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Deploy exact build to bharatshops
+      - name: Deploy exact build to BharatShop Netlify production
         env:
           BHARATSHOP_BUILD_REVISION: ${{ github.sha }}
         run: |
@@ -88,6 +90,7 @@ jobs:
         run: |
           set -euo pipefail
           expected="$GITHUB_SHA"
+          live=""
           for i in $(seq 1 24); do
             body=$(curl -fsS --max-time 20 "$NETLIFY_SITE_URL/netlify-deploy-health" || true)
             live=$(printf '%s' "$body" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log(JSON.parse(s).revision||'')}catch{console.log('')}})")
