@@ -1,4 +1,5 @@
 # BharatShop production transition configuration.
+# Deployment retrigger: corrected catalogue routing after Netlify token setup.
 # Netlify serves the storefront shell and static assets natively. Until the
 # guarded Render -> Supabase database copy is verified, database-backed API,
 # dashboard and SSR product-detail requests remain on the known-good Render
