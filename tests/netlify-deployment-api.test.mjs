@@ -4,14 +4,15 @@ import { readFileSync } from "node:fs";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 
-test("production deploy uses the official Netlify source build API instead of the failing CLI path", () => {
+test("production deploy pins the previously working Netlify CLI instead of floating latest", () => {
   const workflow = read(".github/workflows/netlify-production-deploy.yml");
-  assert.match(workflow, /api\.netlify\.com\/api\/v1\/sites\/\$\{NETLIFY_SITE_ID\}\/builds\?branch=main/);
-  assert.match(workflow, /Content-Type: application\/zip/);
-  assert.match(workflow, /git archive --format=zip/);
-  assert.match(workflow, /COMMIT_SHA=%s/);
-  assert.match(workflow, /api\.netlify\.com\/api\/v1\/deploys\/\$\{deploy_id\}/);
-  assert.doesNotMatch(workflow, /netlify-cli@latest deploy/);
+  assert.match(workflow, /netlify-cli@27\.5\.2 deploy/);
+  assert.match(workflow, /--build/);
+  assert.match(workflow, /--prod/);
+  assert.match(workflow, /--site "\$NETLIFY_SITE_ID"/);
+  assert.match(workflow, /--auth "\$NETLIFY_AUTH_TOKEN"/);
+  assert.doesNotMatch(workflow, /netlify-cli@latest/);
+  assert.doesNotMatch(workflow, /sites\/\$\{NETLIFY_SITE_ID\}\/builds/);
 });
 
 test("deployment remains pinned to the owned BharatShop site", () => {
