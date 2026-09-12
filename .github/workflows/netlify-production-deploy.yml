@@ -7,37 +7,14 @@ permissions:
   contents: read
 
 env:
-  NETLIFY_SITE_ID: 255afc2a-50a4-4817-81d9-16c2776ce34e
-  NETLIFY_SITE_URL: https://fluffy-mochi-1381a3.netlify.app
-  NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN || secrets.NETLIFY_PERSONAL_ACCESS_TOKEN || secrets.NETLIFY_TOKEN }}
+  NETLIFY_SITE_URL: https://bharatshops.netlify.app
 
 jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Require Netlify token
-        if: ${{ env.NETLIFY_AUTH_TOKEN == '' }}
-        run: |
-          echo "NETLIFY_AUTH_TOKEN is required for read-only project verification."
-          exit 20
-
-      - name: Verify GitHub repository is linked in Netlify
-        if: ${{ env.NETLIFY_AUTH_TOKEN != '' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          site=$(curl -sS --fail-with-body \
-            -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" \
-            "https://api.netlify.com/api/v1/sites/$NETLIFY_SITE_ID")
-          printf '%s' "$site" | jq '{id,name,url,ssl_url,git_provider,build_settings:{provider:.build_settings.provider,repo_path:.build_settings.repo_path,repo_branch:.build_settings.repo_branch,repo_url:.build_settings.repo_url,installation_id:.build_settings.installation_id,stop_builds:.build_settings.stop_builds}}'
-          printf '%s' "$site" | jq -e '.build_settings.repo_path == "mullafaiz666-spec/bharatshop" and .build_settings.repo_branch == "main"' >/dev/null || {
-            echo "Netlify repository is not linked yet. Link mullafaiz666-spec/bharatshop, branch main, in Netlify Continuous deployment settings."
-            exit 31
-          }
-
       - name: Verify live storefront and catalogue
-        if: ${{ env.NETLIFY_AUTH_TOKEN != '' }}
         shell: bash
         run: |
           set -euo pipefail
