@@ -83,9 +83,11 @@ async function main() {
     for (const table of targetTables) targetCounts[table] = await rowCount(targetClient, table);
 
     const unexpectedTargetTables = targetTables.filter((table) => !KNOWN_EMPTY_TARGET_TABLES.includes(table));
+    const missingStarterTables = KNOWN_EMPTY_TARGET_TABLES.filter((table) => !targetTables.includes(table));
     const nonEmptyTargetTables = targetTables.filter((table) => targetCounts[table] !== "0");
     const exactKnownStarterShape = unexpectedTargetTables.length === 0 &&
-      targetTables.every((table) => KNOWN_EMPTY_TARGET_TABLES.includes(table));
+      missingStarterTables.length === 0 &&
+      targetTables.length === KNOWN_EMPTY_TARGET_TABLES.length;
 
     const report = {
       status: "READ_ONLY_PREFLIGHT_COMPLETE",
@@ -108,9 +110,10 @@ async function main() {
       },
       guards: {
         requiredSourceTablesPresent: true,
-        targetContainsOnlyKnownStarterTables: exactKnownStarterShape,
+        targetMatchesKnownStarterSchema: exactKnownStarterShape,
         targetPublicTablesEmpty: nonEmptyTargetTables.length === 0,
         unexpectedTargetTables,
+        missingStarterTables,
         nonEmptyTargetTables,
         safeForGuardedReplacement: exactKnownStarterShape && nonEmptyTargetTables.length === 0,
       },
@@ -118,7 +121,7 @@ async function main() {
 
     console.log(JSON.stringify(report, null, 2));
     if (!report.guards.safeForGuardedReplacement) {
-      console.error("Target is not the known empty starter schema. Refusing migration preparation.");
+      console.error("Target is not the exact known empty starter schema. Refusing migration preparation.");
       process.exitCode = 3;
     }
   } finally {
