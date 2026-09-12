@@ -34,7 +34,7 @@ existing approval and signature checks. No paid hosting upgrade is part of this 
    schema. Prepare a non-destructive copy, including all tables, constraints,
    indexes, sequences, private media and required extensions.
 3. Run `node --env-file=.env.migration scripts/verify-supabase-copy.mjs`.
-   The script uses read-only repeatable-read transactions. It never transfers
+   The script uses read-only repeatable-read transactions. It inventories public tables through pg_catalog so missing SELECT permissions cannot hide tables, and sets row_security=off so policy-filtered reads fail instead of silently comparing partial records. This does not bypass RLS or change policies. It never transfers
    records or authorizes cutover. Sequence positions, RLS, storage objects and
    sessions still require independent checks. Source writes must be paused for
    the final copy and comparison so new orders cannot be lost.

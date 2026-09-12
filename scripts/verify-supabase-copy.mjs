@@ -23,10 +23,11 @@ function poolFor(url) {
 
 async function tableNames(pool) {
   const result = await pool.query(`
-    select table_name
-    from information_schema.tables
-    where table_schema = 'public' and table_type = 'BASE TABLE'
-    order by table_name
+    select c.relname as table_name
+    from pg_catalog.pg_class c
+    join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public' and c.relkind in ('r', 'p')
+    order by c.relname
   `);
   return new Set(result.rows.map((row) => row.table_name));
 }
@@ -68,6 +69,7 @@ async function main() {
     for (const client of [sourceClient, targetClient]) {
       await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
       await client.query("SET LOCAL statement_timeout = '120s'");
+      await client.query("SET LOCAL row_security = off");
       await client.query("SET LOCAL timezone = 'UTC'");
       await client.query("SET LOCAL DateStyle = 'ISO, YMD'");
       await client.query("SET LOCAL search_path = public, pg_catalog");
