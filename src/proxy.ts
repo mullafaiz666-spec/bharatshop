@@ -97,4 +97,34 @@ export async function proxy(request: NextRequest) {
   return NextResponse.next();
 }
 
-export const config = { matcher: ["/dashboard/:path*", "/api/:path*"] };
+// Match only routes that this proxy actually protects. Public APIs such as
+// /api/storefront/products must bypass Next middleware so Netlify can apply
+// the hybrid Render rewrite without invoking its Next server handler.
+export const config = {
+  matcher: [
+    "/dashboard/:path*",
+    "/api/admin/:path*",
+    "/api/agent-execute/:path*",
+    "/api/milestone/:path*",
+    "/api/payments/diagnostics/:path*",
+    "/api/marketing/:path*",
+    "/api/overview/:path*",
+    "/api/cart/:path*",
+    "/api/ceo-chat/:path*",
+    "/api/ceo-approvals/:path*",
+    "/api/ceo-research/:path*",
+    "/api/agent-audit/:path*",
+    "/api/agents/:path*",
+    "/api/catalog/:path*",
+    "/api/sourcing/:path*",
+    "/api/suppliers/:path*",
+    "/api/products/:path*",
+    "/api/orders/:path*",
+    "/api/rules/:path*",
+    "/api/engine/:path*",
+    "/api/shopify/:path*",
+    "/api/automation/:path*",
+    "/api/fashion-designer/:path*",
+    "/api/fashion-studio/:path*",
+  ],
+};
