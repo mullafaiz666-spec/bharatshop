@@ -13,13 +13,12 @@
 [functions]
   node_bundler = "esbuild"
 
-# The catalogue is the first request a shopper makes. Route it through a
-# Netlify Function so it can wait up to the normal synchronous function limit
-# for a sleeping free Render instance to wake, rather than the shorter external
-# rewrite timeout.
+# The storefront catalogue is served by the authoritative Render database API
+# during the migration window. Keep the page shell native on Netlify; proxy only
+# the data request until Supabase parity is verified.
 [[redirects]]
   from = "/api/storefront/products"
-  to = "/.netlify/functions/storefront-products-proxy"
+  to = "https://bharatshop-9w4a.onrender.com/api/storefront/products"
   status = 200
   force = true
 
@@ -61,5 +60,5 @@
     Permissions-Policy = "camera=(), microphone=(), geolocation=()"
 
 # There is intentionally no catch-all Render rewrite. Netlify's Next.js adapter
-# now serves /, /store, assets and non-database pages directly. Full native
-# backend cutover remains guarded by BHARATSHOP_MIGRATION_VERIFIED=true.
+# serves /, /store, assets and non-database pages directly. Full native backend
+# cutover remains guarded by BHARATSHOP_MIGRATION_VERIFIED=true.
