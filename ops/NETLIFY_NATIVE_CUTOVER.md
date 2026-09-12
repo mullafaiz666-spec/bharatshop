@@ -1,4 +1,4 @@
-# Native Netlify migration — 2026-09-11
+# Native Netlify migration — updated 2026-09-12
 
 The existing BharatShop source and operating terms remain authoritative:
 GitHub -> Netlify Next.js -> Supabase PostgreSQL/Storage -> hosted Gemini.
@@ -9,71 +9,93 @@ existing approval and signature checks. No paid hosting upgrade is part of this 
 ## Verified current state
 
 - Netlify team `postmanjallad` is Free. Existing site: `75b5c168-6679-479d-b3a6-244e393fe1b0`.
-- `netlify.toml` currently proxies all traffic to Render. A ready Netlify deployment
-  therefore does not prove the new app revision is executing.
-- Netlify has an admin-session secret, but database, Gemini, automation,
-  payment and private storage credentials are absent.
-- Supabase `cxsoomzauxcfrskgtqds` is healthy and about 10 MB. Its public
-  products/orders/order_items/profiles tables are empty. UUID product IDs and
-  different columns are incompatible with the production app's integer IDs.
-  Do not overwrite these tables or treat them as a verified production copy.
-- Render database `dpg-da8ccgdg1s2s7390490g-a` is the current source. Its
-  external network allowlist is restricted; connected read-only queries failed.
-  Obtain authorized connection access before copying. Do not open it to all IPs.
-- The previous verifier only compared selected row counts and could pass an
-  empty source. It now requires core tables, all source tables, matching column
-  definitions/constraints, row counts and streamed content fingerprints.
+- `netlify.toml` currently proxies all traffic to Render. A ready production Netlify
+  deployment therefore does not prove the native app revision is executing.
+- PR #71 has a ready native deploy preview and its Creative Engine CI passed at
+  commit `ce1ead20b1637eb8e0f2183de5c558ddf5d1d2fe` before the database-migration
+  hardening commits were added. Each newer commit must pass CI again before merge.
+- Supabase `cxsoomzauxcfrskgtqds` is ACTIVE_HEALTHY. Direct inspection on 2026-09-12
+  confirmed that `public` contains exactly four base tables: `order_items`, `orders`,
+  `products`, and `profiles`. All four contain zero rows. Their current schema is not
+  BharatShop production schema and they carry starter RLS policies. No public views,
+  materialized views or sequences were observed in the object inventory used for this review.
+- Supabase security advisors returned no security findings before migration. Performance
+  advisors reported only informational items, including two unindexed foreign keys on
+  `order_items`; those starter objects are not the production schema.
+- Render database `dpg-da8ccgdg1s2s7390490g-a` (`bharatshop-db`) is the current source
+  of truth. The Render database is available, but the connected Render read-only SQL
+  action currently fails before query execution because the connector reaches the external
+  endpoint without satisfying Render's SSL/TLS requirement. This is a tooling/connectivity
+  blocker, not evidence that the database is unhealthy. Do not relax the database IP allow
+  list to `0.0.0.0/0` merely to make the connector work.
+- Render's `bharatshop` service remains live on an older successful revision because the
+  free Render workspace has exhausted its build-pipeline minutes. Recent deploy attempts
+  were cancelled before build. The migration therefore continues on Netlify rather than
+  adding a paid Render upgrade.
+- The copy verifier requires core tables, all source tables, matching column definitions and
+  constraints, row counts and streamed content fingerprints. It is read-only and cannot
+  authorize cutover by itself.
 
-## Prepare the candidate
+## Guarded database copy now included
 
-1. Place the existing source and target connection strings in the ignored
-   `.env.migration` file as `SOURCE_DATABASE_URL` and `SUPABASE_DB_URL`.
-   Do not paste secrets into logs, issues or pull requests. Do not reset passwords
-   merely to reveal them.
-2. Back up the source. Review both schemas and preserve the unrelated target
-   schema. Prepare a non-destructive copy, including all tables, constraints,
-   indexes, sequences, private media and required extensions.
-3. Run `node --env-file=.env.migration scripts/verify-supabase-copy.mjs`.
-   The script uses read-only repeatable-read transactions. It inventories public tables through pg_catalog so missing SELECT permissions cannot hide tables, and sets row_security=off so policy-filtered reads fail instead of silently comparing partial records. This does not bypass RLS or change policies. It never transfers
-   records or authorizes cutover. Sequence positions, RLS, storage objects and
-   sessions still require independent checks. Source writes must be paused for
-   the final copy and comparison so new orders cannot be lost.
-4. Configure the existing site's deploy-preview environment with verified
-   Supabase connection, hosted Gemini key/model, admin/automation secrets,
-   existing payment credentials/webhook secrets and private storage key.
-   Required build-check inputs need builds and functions scopes and must remain
-   server-only. Use the appropriate candidate origin for preview callbacks.
-5. Use `netlify deploy --build --config netlify.native.toml --context deploy-preview`.
-   This candidate has no Render proxy. Its preflight blocks missing required
-   inputs and old Render/desktop dependencies before consuming a full build.
-   The existing production configuration is unchanged until acceptance passes.
-6. Validate exact revision and `hosting.netlify=true`, real catalog parity,
-   login/session persistence, private APIs, AI tool execution, payment diagnostics
-   without charging, private downloads, and bounded queue processing.
-7. After copy verification and final cutover approval, promote the native
-   configuration to `netlify.toml`, publish the validated revision to the existing
-   site, switch approved callbacks/schedulers, and repeat production acceptance.
-   Keep a rollback copy and do not retire Render before all checks pass.
+The branch contains two database migration paths:
+
+1. `npm run db:migration-preflight` / `scripts/database-migration-preflight.mjs`
+   performs read-only source/target inspection. It requires the Render source to contain
+   the BharatShop core tables and requires Supabase to still match exactly the four known
+   empty starter tables. If the target changes or receives data, it refuses preparation.
+2. `.github/workflows/database-migration.yml` is manual-only. `preflight` mode performs no
+   writes. `apply` mode additionally requires the exact confirmation text
+   `MIGRATE_RENDER_TO_SUPABASE`. It re-runs the guard immediately before writes, creates an
+   ephemeral `pg_dump` of the source public schema/data, removes only the four verified empty
+   starter tables, restores the source public schema/data in one restore transaction, enables
+   RLS on migrated public tables, revokes direct `anon`/`authenticated` Data API privileges,
+   and then runs the full parity verifier. The source dump is never uploaded as an artifact.
+3. The workflow never switches production traffic, changes Render's database, or retires
+   Render. A successful copy is still only a migration candidate until native acceptance passes.
+
+The workflow expects private GitHub Actions secrets named `SOURCE_DATABASE_URL` and
+`SUPABASE_DB_URL`. These values must be obtained from the authorized Render and Supabase
+connection panels and must never be committed, pasted into issues, or printed in logs.
+
+## Final migration and cutover sequence
+
+1. Obtain the authorized Render external PostgreSQL connection string and a Supabase pooler
+   or direct PostgreSQL connection suitable for migration. Keep both private.
+2. Run the workflow in `preflight` mode. It must prove the Render source has the BharatShop
+   core tables and the Supabase target is still the exact empty starter schema.
+3. Back up the Render source using Render's supported backup/export path before any target
+   replacement. Do not delete, reset, or modify the Render source.
+4. For the final copy window, stop or otherwise block new production writes so orders cannot
+   change between dump and verification. Do not claim zero-downtime migration without a real
+   write-freeze/delta-capture mechanism.
+5. Run the workflow in `apply` mode with the exact confirmation text. It copies only the
+   source `public` schema/data to Supabase and verifies table/schema/content parity.
+6. Independently verify sequences, Supabase RLS/Data API exposure, storage objects, sessions,
+   admin login, catalog, checkout, Razorpay/Cashfree signature verification, order persistence,
+   private downloads, agent queue execution and approval gates.
+7. Configure the native Netlify deploy-preview environment with the verified Supabase
+   connection, hosted Gemini key/model, admin/automation secrets, payment webhook secrets and
+   private storage credentials. Keep every server secret out of `NEXT_PUBLIC_*` variables.
+8. Deploy using `netlify.native.toml`, validate the exact revision and confirm
+   `hosting.netlify=true`. The candidate must not depend on Render or a desktop model.
+9. Only after acceptance and explicit cutover approval, promote the native configuration to
+   production, update callbacks/schedulers, and repeat production acceptance. Preserve a
+   rollback path and do not retire Render until the native system is stable.
 
 ## Free-plan constraints
 
-Netlify Free includes 300 credits/month and one concurrent build. Usage includes
-production deploys, compute, requests and bandwidth. Free does not mean unlimited;
-services may pause at quota. Keep paid auto-recharge/upgrades disabled.
-Supabase Free includes 500 MB database, 1 GB storage and 5 GB egress; idle projects
-can pause after one week. Do not add artificial keep-alive traffic.
+Netlify Free includes finite monthly usage and one concurrent build. Usage includes production
+deploys, compute, requests and bandwidth. Free does not mean unlimited; services may pause at
+quota. Keep paid auto-recharge/upgrades disabled unless explicitly approved.
 
-Netlify synchronous functions have a 60-second limit. Existing multi-minute
-agent handlers and the five-minute GitHub workflow must be adapted and measured
-before redirecting automation to native Netlify. The daily scheduler only queues
-work; it is not proof of completed agent tasks. Search remains optional evidence
-infrastructure and must report missing/throttled service honestly.
+Supabase Free also has finite database/storage/egress limits and idle-project behavior. Do not
+add artificial keep-alive traffic merely to avoid plan limits.
 
-Gemini free-tier availability and data-use terms depend on the chosen model and
-project. Verify eligibility before enabling it; keep customer/payment secrets out
-of model prompts. No billable fallback or Netlify AI Gateway is enabled by this change.
+Netlify synchronous functions have bounded execution time. Long-running company-agent work is
+therefore executed through the existing queue/worker design rather than pretending a request
+completed when it only enqueued work.
 
-Sources checked 2026-09-11:
-- https://www.netlify.com/pricing/
-- https://docs.netlify.com/build/functions/configuration/
-- https://supabase.com/pricing
+Gemini free-tier availability and data-use terms depend on the selected Google project/model.
+Keep customer/payment secrets out of model prompts. PixVerse remains an optional credit-backed
+creative worker behind explicit enable/spend gates and is not a core production dependency.
