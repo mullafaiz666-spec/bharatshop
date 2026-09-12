@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  NETLIFY_SITE_ID: 75b5c168-6679-479d-b3a6-244e393fe1b0
+  NETLIFY_SITE_TARGET: bharatshop-35fd.netlify.app
   NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN || secrets.NETLIFY_PERSONAL_ACCESS_TOKEN || secrets.NETLIFY_TOKEN }}
 
 jobs:
@@ -52,6 +52,6 @@ jobs:
           npx -y netlify-cli@27.5.2 deploy \
             --build \
             --prod \
-            --site "$NETLIFY_SITE_ID" \
+            --site "$NETLIFY_SITE_TARGET" \
             --auth "$NETLIFY_AUTH_TOKEN" \
             --message "BharatShop production ${GITHUB_SHA}"
