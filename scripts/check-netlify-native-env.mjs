@@ -34,9 +34,18 @@ export function nativeEnvironmentErrors(env) {
 
   if (String(env.ADMIN_SESSION_SECRET || '').length < 32) errors.push("ADMIN_SESSION_SECRET must contain at least 32 characters");
   requireValue("BHARATSHOP_AUTOMATION_TOKEN", env.BHARATSHOP_AUTOMATION_TOKEN || env.AUTOMATION_TOKEN);
-  if (env.AI_PROVIDER !== 'gemini') errors.push("AI_PROVIDER must be gemini for hosted production");
-  requireValue("GEMINI_API_KEY", env.GEMINI_API_KEY || env.GOOGLE_AI_API_KEY);
-  requireValue("GEMINI_MODEL");
+
+  const aiProvider = String(env.AI_PROVIDER || '').trim().toLowerCase();
+  const geminiKey = String(env.GEMINI_API_KEY || env.GOOGLE_AI_API_KEY || '').trim();
+  const aiBaseUrl = String(env.AI_BASE_URL || env.LOCAL_AI_BASE_URL || '').trim();
+  if (!aiProvider) errors.push("AI_PROVIDER is missing");
+  if (aiProvider === 'gemini') {
+    if (!geminiKey && !aiBaseUrl) errors.push("Gemini requires GEMINI_API_KEY/GOOGLE_AI_API_KEY or an OpenAI-compatible fallback endpoint");
+    requireValue("GEMINI_MODEL");
+  } else if (!aiBaseUrl) {
+    errors.push("Non-Gemini AI providers require AI_BASE_URL or LOCAL_AI_BASE_URL");
+  }
+
   requireValue("RAZORPAY_KEY_ID");
   requireValue("RAZORPAY_KEY_SECRET");
   requireValue("RAZORPAY_WEBHOOK_SECRET");

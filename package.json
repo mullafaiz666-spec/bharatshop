@@ -9,6 +9,7 @@
     "db:check": "drizzle-kit check",
     "db:migration-preflight": "node scripts/database-migration-preflight.mjs",
     "db:verify-supabase": "node scripts/verify-supabase-copy.mjs",
+    "launch:check": "node scripts/native-launch-readiness.mjs",
     "start": "next start -H 0.0.0.0 -p ${PORT:-10000}",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
