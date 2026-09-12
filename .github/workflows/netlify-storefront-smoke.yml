@@ -15,6 +15,7 @@ jobs:
     timeout-minutes: 15
     env:
       SITE_URL: https://bharatshop-35fd.netlify.app
+      RENDER_URL: https://bharatshop-9w4a.onrender.com
     steps:
       - name: Wait for exact Netlify revision
         run: |
@@ -36,15 +37,25 @@ jobs:
           set -euo pipefail
           code=$(curl -sS -o /tmp/home.html -w '%{http_code}' --max-time 30 "$SITE_URL/" || true)
           echo "storefront HTTP=$code"
-          test "$code" = "200"
+          if [ "$code" != "200" ]; then cat /tmp/home.html || true; exit 1; fi
           grep -q "BharatShop" /tmp/home.html
 
       - name: Verify catalogue reaches authoritative backend
         run: |
           set -euo pipefail
           code=$(curl -sS -o /tmp/catalogue.json -w '%{http_code}' --max-time 58 "$SITE_URL/api/storefront/products?limit=1&page=1" || true)
-          echo "catalogue HTTP=$code"
-          test "$code" = "200"
+          echo "Netlify catalogue HTTP=$code"
+          if [ "$code" != "200" ]; then
+            echo "--- Netlify catalogue body ---"
+            cat /tmp/catalogue.json || true
+            echo
+            echo "--- Direct Render comparison ---"
+            upstream_code=$(curl -sS -o /tmp/render-catalogue.json -w '%{http_code}' --max-time 58 "$RENDER_URL/api/storefront/products?limit=1&page=1" || true)
+            echo "Render catalogue HTTP=$upstream_code"
+            cat /tmp/render-catalogue.json || true
+            echo
+            exit 1
+          fi
           node - <<'NODE'
           const fs = require('fs');
           const data = JSON.parse(fs.readFileSync('/tmp/catalogue.json', 'utf8'));
