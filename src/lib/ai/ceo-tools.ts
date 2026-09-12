@@ -2,7 +2,7 @@ import { pool } from "@/db";
 import { serpSearch } from "@/lib/ai/agent-tools";
 import { resolveVerifiedProductMedia } from "@/lib/ai/media-resolver";
 import { FASHION_COMMANDS, runFashionCommand } from "@/lib/ai/fashion-studio";
-import { runFashionDesigner } from "@/app/api/fashion-designer/route";
+import { runFashionDesigner } from "@/lib/ai/fashion-designer";
 
 async function ensureApprovalTable(){
  await pool.query(`CREATE TABLE IF NOT EXISTS ceo_approvals (id SERIAL PRIMARY KEY,title TEXT NOT NULL,action_type TEXT NOT NULL,payload JSONB NOT NULL DEFAULT '{}'::jsonb,reason TEXT NOT NULL DEFAULT '',risk_level TEXT NOT NULL DEFAULT 'MEDIUM',status TEXT NOT NULL DEFAULT 'PENDING',requested_by TEXT NOT NULL DEFAULT 'BHARATSHOP AI CEO',created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),decided_at TIMESTAMPTZ,decision_note TEXT NOT NULL DEFAULT '')`);
