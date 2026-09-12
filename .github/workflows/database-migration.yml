@@ -1,6 +1,10 @@
 name: Guarded database migration
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/migration-preflight-trigger.txt"
   workflow_dispatch:
     inputs:
       mode:
