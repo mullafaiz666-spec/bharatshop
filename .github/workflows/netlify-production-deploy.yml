@@ -14,7 +14,6 @@ concurrency:
 
 env:
   NETLIFY_SITE_ID: 75b5c168-6679-479d-b3a6-244e393fe1b0
-  NETLIFY_ACCOUNT_ID: 6a77b005bb09f74e7b55c7d4
   NETLIFY_SITE_URL: https://bharatshop-35fd.netlify.app
   NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN || secrets.NETLIFY_PERSONAL_ACCESS_TOKEN || secrets.NETLIFY_TOKEN }}
 
@@ -29,15 +28,8 @@ jobs:
       - name: Require Netlify token
         if: ${{ env.NETLIFY_AUTH_TOKEN == '' }}
         run: |
-          echo "NETLIFY_AUTH_TOKEN is required to read the owner-authorized deployment channel."
+          echo "NETLIFY_AUTH_TOKEN is required for the Netlify source-build API."
           exit 20
-
-      - name: Set up Node.js
-        if: ${{ env.NETLIFY_AUTH_TOKEN != '' }}
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
 
       - name: Verify existing Netlify project access
         if: ${{ env.NETLIFY_AUTH_TOKEN != '' }}
@@ -50,41 +42,42 @@ jobs:
           printf '%s' "$site" | jq -e --arg id "$NETLIFY_SITE_ID" '.id == $id' >/dev/null
           printf '%s' "$site" | jq '{id,name,url,ssl_url}'
 
-      - name: Read owner-authorized Netlify deployment channel
+      - name: Package validated source
         if: ${{ env.NETLIFY_AUTH_TOKEN != '' }}
-        id: deploy_channel
         shell: bash
         run: |
           set -euo pipefail
-          env_json=$(curl -sS --fail-with-body \
-            -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" \
-            "https://api.netlify.com/api/v1/accounts/$NETLIFY_ACCOUNT_ID/env/CHATGPT_NETLIFY_DEPLOY_PROXY?site_id=$NETLIFY_SITE_ID")
-          DEPLOY_PROXY=$(printf '%s' "$env_json" | jq -r '.values[] | select(.context == "all") | .value' | head -n 1)
-          case "$DEPLOY_PROXY" in
-            https://netlify-mcp.netlify.app/proxy/*) ;;
-            *) echo "Owner-authorized Netlify deployment channel is unavailable."; exit 31 ;;
-          esac
-          echo "Owner-authorized Netlify deployment channel detected."
-          echo "proxy=$DEPLOY_PROXY" >> "$GITHUB_OUTPUT"
-          echo "::add-mask::$DEPLOY_PROXY"
+          git archive --format=zip --output=/tmp/bharatshop-source.zip HEAD
+          test -s /tmp/bharatshop-source.zip
+          unzip -l /tmp/bharatshop-source.zip | grep -q 'netlify.toml'
+          unzip -l /tmp/bharatshop-source.zip | grep -q 'package.json'
+          echo "Packaged $(du -h /tmp/bharatshop-source.zip | cut -f1) from $GITHUB_SHA"
 
-      - name: Deploy through owner-authorized Netlify channel
+      - name: Start Netlify production build from source ZIP
         if: ${{ env.NETLIFY_AUTH_TOKEN != '' }}
         shell: bash
-        env:
-          DEPLOY_PROXY: ${{ steps.deploy_channel.outputs.proxy }}
         run: |
           set -euo pipefail
-          npx -y @netlify/mcp@latest \
-            --site-id "$NETLIFY_SITE_ID" \
-            --proxy-path "$DEPLOY_PROXY"
+          response=$(curl -sS --fail-with-body \
+            -X POST \
+            -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" \
+            -H "Content-Type: application/zip" \
+            --data-binary @/tmp/bharatshop-source.zip \
+            "https://api.netlify.com/api/v1/sites/$NETLIFY_SITE_ID/builds?clear_cache=true&title=BharatShop-$GITHUB_SHA")
+          printf '%s' "$response" > /tmp/netlify-build.json
+          printf '%s' "$response" | jq '{id,state,deploy_id,site_id,created_at,error}'
+          build_id=$(printf '%s' "$response" | jq -r '.id // empty')
+          if [ -z "$build_id" ]; then
+            echo "Netlify did not return a build id."
+            exit 32
+          fi
 
       - name: Verify live Netlify storefront and catalogue
         if: ${{ env.NETLIFY_AUTH_TOKEN != '' }}
         shell: bash
         run: |
           set -euo pipefail
-          for attempt in $(seq 1 18); do
+          for attempt in $(seq 1 30); do
             home_code=$(curl -sS -o /tmp/home.html -w '%{http_code}' --max-time 30 "$NETLIFY_SITE_URL/" || true)
             store_code=$(curl -sS -o /tmp/store.html -w '%{http_code}' --max-time 30 "$NETLIFY_SITE_URL/store" || true)
             catalogue_code=$(curl -sS -o /tmp/catalogue.json -w '%{http_code}' --max-time 58 "$NETLIFY_SITE_URL/api/storefront/products?limit=1&page=1" || true)
@@ -100,9 +93,11 @@ jobs:
           NODE
               exit 0
             fi
-            echo "--- catalogue response ---"
-            head -c 1000 /tmp/catalogue.json || true
-            echo
+            if [ "$catalogue_code" != "200" ]; then
+              echo "--- catalogue response ---"
+              head -c 500 /tmp/catalogue.json || true
+              echo
+            fi
             sleep 10
           done
           echo "Netlify production verification failed."
