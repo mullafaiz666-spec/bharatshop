@@ -21,6 +21,17 @@ export function nativeEnvironmentErrors(env) {
       errors.push("The active database connection is malformed");
     }
   }
+
+  const deployContext = String(env.CONTEXT || '').trim().toLowerCase();
+  const migrationVerified = String(env.BHARATSHOP_MIGRATION_VERIFIED || '').trim().toLowerCase() === 'true';
+  const nativeWorkerEnabled = String(env.BHARATSHOP_NATIVE_WORKER_ENABLED || '').trim().toLowerCase() === 'true';
+  if (deployContext === 'production' && !migrationVerified) {
+    errors.push("BHARATSHOP_MIGRATION_VERIFIED must be true for native production deployment");
+  }
+  if (nativeWorkerEnabled && !migrationVerified) {
+    errors.push("BHARATSHOP_NATIVE_WORKER_ENABLED cannot be true before database migration verification");
+  }
+
   if (String(env.ADMIN_SESSION_SECRET || '').length < 32) errors.push("ADMIN_SESSION_SECRET must contain at least 32 characters");
   requireValue("BHARATSHOP_AUTOMATION_TOKEN", env.BHARATSHOP_AUTOMATION_TOKEN || env.AUTOMATION_TOKEN);
   if (env.AI_PROVIDER !== 'gemini') errors.push("AI_PROVIDER must be gemini for hosted production");
@@ -34,7 +45,7 @@ export function nativeEnvironmentErrors(env) {
   requireValue("SUPABASE_SERVICE_ROLE_KEY");
   requireValue("SUPABASE_URL", env.SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL);
   requireValue("BHARATSHOP_PUBLIC_ORIGIN");
-  for (const key of ['BHARATSHOP_PUBLIC_ORIGIN', 'SEARXNG_URL', 'AI_BASE_URL', 'LOCAL_AI_BASE_URL']) {
+  for (const key of ['BHARATSHOP_PUBLIC_ORIGIN', 'BHARATSHOP_NATIVE_ORIGIN', 'SEARXNG_URL', 'AI_BASE_URL', 'LOCAL_AI_BASE_URL']) {
     if (!env[key]) continue;
     try {
       const url = new URL(env[key]);
