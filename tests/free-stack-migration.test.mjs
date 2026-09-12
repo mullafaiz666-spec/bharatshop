@@ -49,10 +49,19 @@ test("free-stack environment contract keeps current production paths reversible"
   assert.match(env, /BHARATSHOP_AUTOMATION_TOKEN=/);
   assert.match(env, /GEMINI_API_KEY=/);
   assert.match(env, /SUPABASE_SERVICE_ROLE_KEY=/);
+  assert.match(env, /BHARATSHOP_MIGRATION_VERIFIED=/);
   assert.match(env, /Never commit real credentials/);
   assert.match(netlify, /command = "npm run build"/);
   assert.match(netlify, /NODE_VERSION = "24"/);
   assert.doesNotMatch(netlify, /publish\s*=/);
+});
+
+test("native production deployment is blocked until database migration is verified", () => {
+  const nativeCheck = read("scripts/check-netlify-native-env.mjs");
+  assert.match(nativeCheck, /deployContext === 'production'/);
+  assert.match(nativeCheck, /BHARATSHOP_MIGRATION_VERIFIED must be true for native production deployment/);
+  assert.match(nativeCheck, /BHARATSHOP_NATIVE_WORKER_ENABLED cannot be true before database migration verification/);
+  assert.match(nativeCheck, /BHARATSHOP_NATIVE_ORIGIN/);
 });
 
 test("Supabase adapters keep customer auth public-key based and storage signing server-only", () => {
@@ -81,6 +90,8 @@ test("free-stack readiness endpoint never exposes secret values", () => {
   const health = read("src/app/api/health/free-stack/route.ts");
   assert.match(health, /readyForNetlifyDeploy/);
   assert.match(health, /readyForSupabaseCutover/);
+  assert.match(health, /migrationVerified/);
+  assert.match(health, /BHARATSHOP_MIGRATION_VERIFIED/);
   assert.match(health, /DATABASE_URL remains authoritative/);
   assert.match(health, /supabaseRuntimeStatus/);
   assert.doesNotMatch(health, /SUPABASE_SERVICE_ROLE_KEY\s*:/);
