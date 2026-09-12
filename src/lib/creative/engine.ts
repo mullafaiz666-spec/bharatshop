@@ -24,7 +24,7 @@ const ASPECTS: Record<string, [number, number]> = {
 
 export const BHARATSHOP_CREATIVE_CAPABILITIES = {
   name: "BharatShop Creative Engine",
-  version: "1.0.0",
+  version: "1.1.0",
   api: "/api/creative",
   cli: "npm run creative --",
   modes: {
@@ -41,7 +41,21 @@ export const BHARATSHOP_CREATIVE_CAPABILITIES = {
       supplierImageryPolicy: "source-backed supplier images are never replaced by generated lookalikes",
     },
   },
-  planned: ["video", "voice", "music", "canvas workflows"],
+  externalWorkers: {
+    pixverse: {
+      description: "Optional subscribed creative workstation for higher-end image and short-video generation.",
+      execution: "authorized-workstation-only",
+      cli: "npm run pixverse:create --",
+      modes: ["image", "video"],
+      enabledByDefault: false,
+      requiresSubscription: true,
+      canConsumeCredits: true,
+      productionCritical: false,
+      approvalGates: ["PIXVERSE_ENABLED=true", "PIXVERSE_ALLOW_CREDIT_SPEND=true", "--execute"],
+      documentation: "docs/PIXVERSE_CREATIVE_STUDIO.md",
+    },
+  },
+  planned: ["native video", "native voice", "native music", "canvas workflows"],
   policy: {
     freeFirst: true,
     originalCreativeOnly: true,
