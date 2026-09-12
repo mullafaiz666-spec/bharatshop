@@ -1,7 +1,5 @@
-import StorePage from "./store/page";
+import MarketplaceHome from "@/components/storefront/MarketplaceHome";
 
-// Customer-facing storefront is the public home page.
-// The operator dashboard remains available at /dashboard.
 export default function RootPage() {
-  return <StorePage />;
+  return <MarketplaceHome />;
 }
