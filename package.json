@@ -4,6 +4,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "creative": "node scripts/bharatshop-creative.mjs",
     "db:push": "node scripts/safe-db-push.mjs",
     "db:check": "drizzle-kit check",
     "db:verify-supabase": "node scripts/verify-supabase-copy.mjs",

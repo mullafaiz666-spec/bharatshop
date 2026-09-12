@@ -1,0 +1,31 @@
+name: Creative Engine CI
+
+on:
+  pull_request:
+    paths:
+      - 'src/lib/creative/**'
+      - 'src/app/api/creative/**'
+      - 'scripts/bharatshop-creative.mjs'
+      - 'tests/creative-engine.test.mjs'
+      - 'package.json'
+      - '.github/workflows/creative-engine-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: TypeScript check
+        run: npm run typecheck
+      - name: Creative engine regression tests
+        run: node --test tests/creative-engine.test.mjs
