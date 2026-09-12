@@ -17,7 +17,6 @@ concurrency:
 
 env:
   NETLIFY_SITE_ID: 75b5c168-6679-479d-b3a6-244e393fe1b0
-  NETLIFY_SITE_TARGET: bharatshop-35fd.netlify.app
   NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN || secrets.NETLIFY_PERSONAL_ACCESS_TOKEN || secrets.NETLIFY_TOKEN }}
 
 jobs:
@@ -28,11 +27,11 @@ jobs:
       - name: Checkout validated main
         uses: actions/checkout@v4
 
-      - name: Use linked Netlify Git integration when CLI token is absent
+      - name: Require Netlify token
         if: ${{ env.NETLIFY_AUTH_TOKEN == '' }}
         run: |
-          echo "No GitHub Netlify CLI token is configured."
-          echo "Skipping duplicate CLI deployment instead of failing the workflow."
+          echo "NETLIFY_AUTH_TOKEN is required for the production build trigger."
+          exit 20
 
       - name: Verify Netlify token and BharatShop site access
         if: ${{ env.NETLIFY_AUTH_TOKEN != '' }}
@@ -47,33 +46,53 @@ jobs:
             "https://api.netlify.com/api/v1/sites/$NETLIFY_SITE_ID")
           echo "NETLIFY_USER_HTTP=$user_code"
           echo "BHARATSHOP_SITE_HTTP=$site_code"
-          if [ "$user_code" != "200" ]; then
-            echo "Netlify token is not valid for the API."
-            exit 21
-          fi
-          if [ "$site_code" != "200" ]; then
-            echo "Netlify token is valid but cannot access the BharatShop project."
-            exit 22
-          fi
+          test "$user_code" = "200"
+          test "$site_code" = "200"
 
-      - name: Set up Node.js for token-backed CLI deployment
+      - name: Trigger Netlify production build from linked main branch
         if: ${{ env.NETLIFY_AUTH_TOKEN != '' }}
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-
-      - name: Install project dependencies for CLI deployment
-        if: ${{ env.NETLIFY_AUTH_TOKEN != '' }}
-        run: npm ci --no-audit --no-fund
-
-      - name: Deploy production to existing Netlify site with CLI token
-        if: ${{ env.NETLIFY_AUTH_TOKEN != '' }}
+        id: trigger
         shell: bash
         run: |
-          npx -y netlify-cli@27.5.2 deploy \
-            --build \
-            --prod \
-            --site "$NETLIFY_SITE_TARGET" \
-            --auth "$NETLIFY_AUTH_TOKEN" \
-            --message "BharatShop production ${GITHUB_SHA}"
+          set -euo pipefail
+          response=$(curl -sS --fail-with-body \
+            -X POST \
+            -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" \
+            -H "Content-Type: application/json" \
+            "https://api.netlify.com/api/v1/sites/$NETLIFY_SITE_ID/builds?clear_cache=true&title=BharatShop-${GITHUB_SHA}" \
+            -d '{}')
+          build_id=$(printf '%s' "$response" | jq -r '.id // empty')
+          deploy_id=$(printf '%s' "$response" | jq -r '.deploy_id // empty')
+          test -n "$build_id"
+          test -n "$deploy_id"
+          echo "build_id=$build_id" >> "$GITHUB_OUTPUT"
+          echo "deploy_id=$deploy_id" >> "$GITHUB_OUTPUT"
+          echo "Netlify build accepted."
+
+      - name: Verify resulting Netlify deploy becomes ready
+        if: ${{ env.NETLIFY_AUTH_TOKEN != '' }}
+        shell: bash
+        env:
+          DEPLOY_ID: ${{ steps.trigger.outputs.deploy_id }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 90); do
+            response=$(curl -sS --fail-with-body \
+              -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" \
+              "https://api.netlify.com/api/v1/deploys/$DEPLOY_ID")
+            state=$(printf '%s' "$response" | jq -r '.state // empty')
+            commit_ref=$(printf '%s' "$response" | jq -r '.commit_ref // empty')
+            error_message=$(printf '%s' "$response" | jq -r '.error_message // empty')
+            echo "NETLIFY_DEPLOY_STATE=$state"
+            if [ "$state" = "ready" ]; then
+              echo "NETLIFY_DEPLOY_COMMIT=$commit_ref"
+              exit 0
+            fi
+            if [ "$state" = "error" ] || [ "$state" = "failed" ]; then
+              echo "Netlify deploy failed: $error_message"
+              exit 30
+            fi
+            sleep 5
+          done
+          echo "Netlify deploy did not reach ready state in the verification window."
+          exit 31
