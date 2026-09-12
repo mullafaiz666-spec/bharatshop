@@ -14,6 +14,7 @@ concurrency:
 
 env:
   NETLIFY_SITE_ID: 75b5c168-6679-479d-b3a6-244e393fe1b0
+  NETLIFY_ACCOUNT_ID: 6a77b005bb09f74e7b55c7d4
   NETLIFY_SITE_URL: https://bharatshop-35fd.netlify.app
   NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN || secrets.NETLIFY_PERSONAL_ACCESS_TOKEN || secrets.NETLIFY_TOKEN }}
 
@@ -28,7 +29,7 @@ jobs:
       - name: Require Netlify token
         if: ${{ env.NETLIFY_AUTH_TOKEN == '' }}
         run: |
-          echo "NETLIFY_AUTH_TOKEN is required to read the one-time owner-authorized deployment channel."
+          echo "NETLIFY_AUTH_TOKEN is required to read the owner-authorized deployment channel."
           exit 20
 
       - name: Set up Node.js
@@ -49,30 +50,31 @@ jobs:
           printf '%s' "$site" | jq -e --arg id "$NETLIFY_SITE_ID" '.id == $id' >/dev/null
           printf '%s' "$site" | jq '{id,name,url,ssl_url}'
 
-      - name: Link checkout to the existing Netlify project
+      - name: Read owner-authorized Netlify deployment channel
         if: ${{ env.NETLIFY_AUTH_TOKEN != '' }}
+        id: deploy_channel
         shell: bash
         run: |
           set -euo pipefail
-          npx -y netlify-cli@latest link \
-            --id "$NETLIFY_SITE_ID" \
-            --auth "$NETLIFY_AUTH_TOKEN"
+          env_json=$(curl -sS --fail-with-body \
+            -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" \
+            "https://api.netlify.com/api/v1/accounts/$NETLIFY_ACCOUNT_ID/env/CHATGPT_NETLIFY_DEPLOY_PROXY?site_id=$NETLIFY_SITE_ID")
+          DEPLOY_PROXY=$(printf '%s' "$env_json" | jq -r '.values[] | select(.context == "all") | .value' | head -n 1)
+          case "$DEPLOY_PROXY" in
+            https://netlify-mcp.netlify.app/proxy/*) ;;
+            *) echo "Owner-authorized Netlify deployment channel is unavailable."; exit 31 ;;
+          esac
+          echo "Owner-authorized Netlify deployment channel detected."
+          echo "proxy=$DEPLOY_PROXY" >> "$GITHUB_OUTPUT"
+          echo "::add-mask::$DEPLOY_PROXY"
 
       - name: Deploy through owner-authorized Netlify channel
         if: ${{ env.NETLIFY_AUTH_TOKEN != '' }}
         shell: bash
+        env:
+          DEPLOY_PROXY: ${{ steps.deploy_channel.outputs.proxy }}
         run: |
           set -euo pipefail
-          RAW_PROXY=$(npx -y netlify-cli@latest env:get CHATGPT_NETLIFY_DEPLOY_PROXY \
-            --site "$NETLIFY_SITE_ID" \
-            --auth "$NETLIFY_AUTH_TOKEN" 2>/dev/null || true)
-          DEPLOY_PROXY=$(printf '%s\n' "$RAW_PROXY" | grep -o 'https://netlify-mcp.netlify.app/proxy/[^[:space:]]*' | tail -n 1 || true)
-          if [ -z "$DEPLOY_PROXY" ]; then
-            echo "Owner-authorized Netlify deployment channel is unavailable."
-            echo "Netlify env response length: ${#RAW_PROXY}"
-            exit 31
-          fi
-          echo "Owner-authorized Netlify deployment channel detected."
           npx -y @netlify/mcp@latest \
             --site-id "$NETLIFY_SITE_ID" \
             --proxy-path "$DEPLOY_PROXY"
