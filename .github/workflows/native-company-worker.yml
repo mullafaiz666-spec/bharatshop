@@ -1,0 +1,35 @@
+name: Native Supabase Gemini Company Worker
+on:
+  schedule:
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: bharatshop-native-company-worker
+  cancel-in-progress: false
+jobs:
+  worker:
+    if: vars.BHARATSHOP_NATIVE_WORKER_ENABLED == 'true' && vars.BHARATSHOP_MIGRATION_VERIFIED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Execute one persisted native task
+        env:
+          BHARATSHOP_NATIVE_WORKER_ENABLED: ${{ vars.BHARATSHOP_NATIVE_WORKER_ENABLED }}
+          BHARATSHOP_MIGRATION_VERIFIED: ${{ vars.BHARATSHOP_MIGRATION_VERIFIED }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          BHARATSHOP_NATIVE_REVISION: ${{ vars.BHARATSHOP_NATIVE_REVISION }}
+          BHARATSHOP_PUBLIC_ORIGIN: ${{ vars.BHARATSHOP_NATIVE_ORIGIN }}
+          BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
+          AI_PROVIDER: gemini
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          SEARXNG_URL: ${{ vars.BHARATSHOP_NATIVE_SEARCH_URL }}
+        run: node scripts/run-native-company-worker.mjs

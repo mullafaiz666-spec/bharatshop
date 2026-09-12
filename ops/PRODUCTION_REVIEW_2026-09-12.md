@@ -38,3 +38,13 @@ Status: INCOMPLETE — tested safety fixes on existing PR #71; no production cut
 Supply connection strings only through a private environment/ignored `.env.migration` file. Never through a public issue, PR or source file. Required first: SOURCE_DATABASE_URL (Render External Database URL, authorized network access). Next: SUPABASE_DB_URL (Supabase Connect -> Session pooler, with existing database password). Do not reset passwords to reveal them or open the source allowlist to everyone.
 
 The migration comparison uses PostgreSQL's documented row_security=off behavior: error if policies would filter records, not policy bypass. See https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-ROW-SECURITY . Live database verification of this candidate still requires both connections.
+
+## Native architecture continuation
+
+The standalone Supabase/Gemini company worker and serverless queue behavior are
+implemented; see NATIVE_WORKER.md for setup, activation gates and limitations.
+134 tests, typecheck and production build pass; lint has zero errors and 37
+existing warnings. The prior safety commit 47ed865 also passed GitHub CI.
+The native worker is not activated, and production is still the Render-backed
+Netlify mirror until the real database is preserved and accepted. No connection
+strings or deployment credentials became available during this continuation.

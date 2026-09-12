@@ -151,6 +151,7 @@ export default function CommandCentreV3() {
       const result = await response.json().catch(() => ({}));
       setLastRun(result);
       if (!response.ok || result.ok === false) setNotice(String(result.error || `Command returned HTTP ${response.status}.`));
+      else if (result.status === "QUEUED") setNotice(String(result.message || "Task queued; waiting for worker execution."));
       else if (key === "growth") setNotice("Growth cycle created: CEO direction ran and specialist work was queued on the shared company bus.");
       else if (key === "queue") setNotice(`Processed ${Number(result.claimed || 0)} queued specialist task(s).`);
       else setNotice(`${agent?.name || "Agent"} completed/attempted a real runtime cycle; the receipt is stored below.`);

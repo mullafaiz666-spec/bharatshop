@@ -1,3 +1,4 @@
+import { deferCompanyExecution } from "@/lib/agents/execution-mode";
 import { NextResponse } from "next/server";
 import { getAdminUser } from "@/lib/admin-auth";
 import { AGENT_CONTRACTS, publicAgentContracts, type OperationalAgentId } from "@/lib/agents/contracts";
@@ -94,7 +95,7 @@ export async function POST(request: Request) {
         createdBy: admin.id,
         origin,
       });
-      return NextResponse.json({ ok: true, action, ...result, snapshot: await snapshotWithMetadata() }, { status: 201 });
+      return NextResponse.json({ ok: true, action, ...result, ...(deferCompanyExecution() ? { status: "QUEUED", message: "Growth cycle queued. CEO and specialist results will appear after worker execution." } : {}), snapshot: await snapshotWithMetadata() }, { status: 201 });
     }
 
     if (action === "run_agent") {
@@ -111,6 +112,11 @@ export async function POST(request: Request) {
         createdBy: admin.id,
         data: { directCommand: true, operatorId: admin.id },
       });
+      if (deferCompanyExecution()) return NextResponse.json({
+        ok: true, action, status: "QUEUED", work: queued,
+        message: "Task queued. Its result will appear after worker execution.",
+        snapshot: await snapshotWithMetadata(),
+      }, { status: 202 });
       const work = await startWorkItem(queued.id);
       if (!work) return NextResponse.json({ error: "Work item could not be claimed" }, { status: 409 });
       const result = await executeCompanyWorkItem(work, origin);
@@ -135,6 +141,11 @@ export async function POST(request: Request) {
     }
 
     if (action === "run_queue") {
+      if (deferCompanyExecution()) return NextResponse.json({
+        ok: true, action, status: "QUEUED", claimed: 0,
+        message: "Queued tasks are waiting for the worker. No tasks were executed by this request.",
+        snapshot: await snapshotWithMetadata(),
+      }, { status: 202 });
       const claimed = await claimQueuedWork(Math.max(1, Math.min(2, Number(body.limit || 1))));
       const results = [];
       for (const item of claimed) results.push(await executeCompanyWorkItem(item, origin));
