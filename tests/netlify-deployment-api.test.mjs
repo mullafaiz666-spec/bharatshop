@@ -12,19 +12,18 @@ test("production deploy safely fails over across existing Netlify credentials", 
   assert.match(workflow, /NETLIFY_PERSONAL_ACCESS_TOKEN:-/);
   assert.match(workflow, /NETLIFY_TOKEN:-/);
   assert.match(workflow, /NETLIFY_AUTH_TOKEN:-/);
-  assert.match(workflow, /netlify-cli@27\.5\.2 deploy/);
-  assert.match(workflow, /--prod/);
-  assert.match(workflow, /--site "\$NETLIFY_SITE_ID"/);
-  assert.match(workflow, /--auth "\$candidate"/);
+  assert.match(workflow, /-X POST/);
+  assert.match(workflow, /sites\/\$\{NETLIFY_SITE_ID\}\/builds/);
+  assert.match(workflow, /NETLIFY_READ_TOKEN=\$candidate/);
   assert.match(workflow, /::add-mask::\$candidate/);
-  assert.match(workflow, /No configured GitHub Actions Netlify credential has production deploy permission/);
-  assert.match(workflow, /sites\/\$\{NETLIFY_SITE_ID\}\/deploys\?branch=main&per_page=20/);
+  assert.match(workflow, /No configured Netlify credential can trigger a production build/);
+  assert.match(workflow, /sites\/\$\{NETLIFY_SITE_ID\}\/deploys\?branch=main&per_page=30/);
   assert.match(workflow, /deploy\.commit_ref === expected/);
   assert.match(workflow, /deploy\.context === 'production'/);
   assert.doesNotMatch(workflow, /CHATGPT_NETLIFY_DEPLOY_PROXY/);
   assert.doesNotMatch(workflow, /netlify-mcp\.netlify\.app\/proxy\//);
-  assert.doesNotMatch(workflow, /netlify-cli@latest deploy/);
-  assert.doesNotMatch(workflow, /\/builds\?branch=main/);
+  assert.doesNotMatch(workflow, /netlify-cli@27\.5\.2 deploy/);
+  assert.doesNotMatch(workflow, /--auth "\$candidate"/);
 });
 
 test("deployment remains pinned to the owned BharatShop site", () => {
