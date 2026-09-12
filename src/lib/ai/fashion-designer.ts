@@ -1,0 +1,205 @@
+import { pool } from "@/db";
+import { openAIJson } from "@/lib/ai/agent-tools";
+import { qikinkCostForDesign } from "@/lib/suppliers/qikink-rate-card";
+
+type Seed = {
+  code: string;
+  audience: string;
+  category: string;
+  garment: string;
+  print: string;
+  title: string;
+  brief: string;
+  palette: [string, string, string];
+  target: number;
+  brand: "BharatShop Studio" | "BharatDrip";
+  line: "VALUE" | "DESIGNER";
+};
+
+const SEEDS: Seed[] = [
+  { code: "M-ESSENTIAL", audience: "men", category: "Men's Fashion", garment: "Unisex Standard Crew T-Shirt", print: "Pocket DTF", title: "Night Shift Essential Tee", brief: "clean micro chest badge; low-risk everyday value tee", palette: ["#0f172a", "#ef4444", "#f8fafc"], target: 399, brand: "BharatShop Studio", line: "VALUE" },
+  { code: "BD-VOIDRONIN", audience: "unisex", category: "BharatDrip Streetwear", garment: "Oversized Standard T-Shirt", print: "Front + Back DTF", title: "Void Ronin Baggy Tee", brief: "original manga-inspired cyber ronin mask; tiny front crest plus oversized back panel with speed lines and liquid chrome drips; no licensed character", palette: ["#09090b", "#f43f5e", "#f8fafc"], target: 699, brand: "BharatDrip", line: "DESIGNER" },
+  { code: "W-AURALINE", audience: "women", category: "Women's Fashion", garment: "Women's Crop Top", print: "Pocket DTF", title: "Aura Line Crop Tee", brief: "small luminous line-flower chest motif; clean value-first crop", palette: ["#3b0764", "#f472b6", "#fde68a"], target: 349, brand: "BharatShop Studio", line: "VALUE" },
+  { code: "BD-NEONONI", audience: "unisex", category: "BharatDrip Streetwear", garment: "Terry Oversized Tee", print: "Front + Back DTF", title: "Neon Oni Heavy Baggy Tee", brief: "original folklore oni-inspired mask reimagined as a futuristic street graphic; front sigil, giant back mask, halftone noise and dripping neon edges", palette: ["#111827", "#a855f7", "#22d3ee"], target: 899, brand: "BharatDrip", line: "DESIGNER" },
+  { code: "K-CLOUD", audience: "kids", category: "Baby & Kids", garment: "Girl's Crew Neck T-Shirt", print: "Pocket DTF", title: "Confetti Cloud Crew Tee", brief: "small playful original cloud patch; affordable kids tee", palette: ["#be185d", "#f9a8d4", "#dbeafe"], target: 299, brand: "BharatShop Studio", line: "VALUE" },
+  { code: "BD-KITSUNE", audience: "unisex", category: "BharatDrip Streetwear", garment: "Oversized Classic T-Shirt", print: "Front + Back DTF", title: "Chrome Kitsune Oversized Tee", brief: "original fox-mask street artwork with chrome contours, manga framing, chain accents and paint drips; small front mark plus full back composition", palette: ["#18181b", "#f59e0b", "#e5e7eb"], target: 799, brand: "BharatDrip", line: "DESIGNER" },
+  { code: "M-MONSOON", audience: "men", category: "Men's Fashion", garment: "Men's Full Sleeve T-Shirt", print: "Pocket DTF", title: "Monsoon Signal Full Sleeve Tee", brief: "small technical rain-line emblem with understated everyday styling", palette: ["#172554", "#38bdf8", "#e0f2fe"], target: 449, brand: "BharatShop Studio", line: "VALUE" },
+  { code: "BD-GHOSTCIRCUIT", audience: "unisex", category: "BharatDrip Streetwear", garment: "Oversized Standard T-Shirt", print: "Front + Back DTF", title: "Ghost Circuit Backprint Tee", brief: "original anime-tech phantom silhouette, glitch circuitry, distorted panel borders and wet-ink drips; tiny front emblem and loud back graphic", palette: ["#020617", "#84cc16", "#e2e8f0"], target: 799, brand: "BharatDrip", line: "DESIGNER" },
+  { code: "W-INKWAVE", audience: "women", category: "Women's Fashion", garment: "Women's T-Shirt Dress", print: "Pocket DTF", title: "Ink Wave T-Shirt Dress", brief: "small flowing brush-wave mark designed for a minimal wearable look", palette: ["#111827", "#fb7185", "#f8fafc"], target: 499, brand: "BharatShop Studio", line: "VALUE" },
+  { code: "BD-KOISTATIC", audience: "unisex", category: "BharatDrip Streetwear", garment: "AOP Oversized T-Shirt", print: "AOP", title: "Koi Static AOP Oversized Tee", brief: "original koi and wave composition broken into manga panels with static texture, asymmetric placement and liquid distortion", palette: ["#0c0a09", "#f97316", "#f5f5f4"], target: 899, brand: "BharatDrip", line: "DESIGNER" },
+  { code: "K-COMET", audience: "kids", category: "Baby & Kids", garment: "Kids Hoodie", print: "Pocket DTF", title: "Comet Trail Kids Hoodie", brief: "small comet chest patch with clean motion marks and tiny stars", palette: ["#312e81", "#818cf8", "#fef3c7"], target: 549, brand: "BharatShop Studio", line: "VALUE" },
+  { code: "BD-VOIDBLOOM", audience: "unisex", category: "BharatDrip Streetwear", garment: "Oversized Standard T-Shirt", print: "Front + Back DTF", title: "Void Bloom Drip Tee", brief: "original black-flower-meets-mecha back graphic, manga screentone, thorn lines and melting ink; restrained front chest crest", palette: ["#09090b", "#ec4899", "#fafafa"], target: 699, brand: "BharatDrip", line: "DESIGNER" },
+];
+
+const clean = (value: unknown) => String(value || "").replace(/[<>]/g, "").trim();
+
+async function creativeDirection() {
+  try {
+    const ai = await openAIJson(
+      "You are BharatShop's local Gen Z fashion creative director. Improve a dual-lane Indian ecommerce capsule: affordable value fashion plus BharatDrip designer streetwear. BharatDrip should feel baggy, oversized, manga/anime-inspired, drippy, glitchy and front/back graphic-led, while using only original characters/art and no copied brands or licensed IP. Return JSON with collectionName,mood,merchandisingNote only.",
+      {
+        valueLane: "₹129-₹599 when sourcing supports it",
+        designerLane: "BharatDrip ₹599-₹999",
+        themes: SEEDS.map((x) => x.brief),
+        pricingRule: "market-aware; never fake margin or copy copyrighted character art",
+      },
+      { timeoutMs: 8000, maxTokens: 300 },
+    );
+    return {
+      collectionName: clean(ai.collectionName) || "BharatShop x BharatDrip Drop",
+      mood: clean(ai.mood) || "value basics plus loud Gen Z streetwear",
+      merchandisingNote: clean(ai.merchandisingNote) || "Choose budget essentials or premium BharatDrip statement pieces.",
+      modelStatus: "local-gemma",
+    };
+  } catch (error) {
+    return {
+      collectionName: "BharatShop x BharatDrip Drop",
+      mood: "value basics plus loud Gen Z streetwear",
+      merchandisingNote: "Choose budget essentials or premium BharatDrip statement pieces.",
+      modelStatus: "deterministic-fallback",
+      modelError: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+export async function runFashionDesigner(count: number, origin: string) {
+  const requested = Math.max(3, Math.min(24, Number(count || 12)));
+  const direction = await creativeDirection();
+  const day = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+  const results: any[] = [];
+
+  for (let i = 0; i < requested; i++) {
+    const seed = SEEDS[i % SEEDS.length];
+    const rate = qikinkCostForDesign(seed.garment, seed.print, seed.audience);
+    const minMargin = Math.max(18, Number(process.env.MIN_FASHION_MARGIN_PCT || 22));
+    const selling = seed.target;
+    const profit = selling - rate.prepaidLandedCostInr;
+    const margin = selling > 0 ? (profit / selling) * 100 : 0;
+    const maxLanded = selling * (1 - minMargin / 100);
+
+    if (profit <= 0 || margin < minMargin) {
+      results.push({
+        title: seed.title,
+        brand: seed.brand,
+        line: seed.line,
+        status: "REJECTED_UNCOMPETITIVE_SOURCE",
+        marketPriceCeilingInr: selling,
+        prepaidLandedCostInr: rate.prepaidLandedCostInr,
+        maxLandedCostInr: Number(maxLanded.toFixed(2)),
+        marginPct: Number(margin.toFixed(1)),
+      });
+      continue;
+    }
+
+    const sku = `${seed.brand === "BharatDrip" ? "BD" : "BSF"}-${seed.code}-${day}`;
+    const sourceUrl = rate.sourceUrl;
+    const existing = await pool.query(`SELECT id,status FROM products WHERE sku=$1 LIMIT 1`, [sku]);
+    let productId: number;
+    const supplierBase = rate.productBaseInr + rate.printingInr;
+    const logistics = rate.shippingInr + rate.gstInr;
+    const copy = seed.brand === "BharatDrip"
+      ? `${seed.title}. Original BharatDrip Gen Z streetwear made to order. ${seed.brief}.`
+      : `${seed.title}. Original BharatShop Studio design made to order. ${seed.brief}.`;
+
+    if (existing.rows[0]) {
+      productId = Number(existing.rows[0].id);
+      await pool.query(
+        `UPDATE products SET title=$2,category=$3,brand=$4,supplier_name='Qikink',supplier_city='India',supplier_cost_inr=$5,shipping_cost_inr=$6,gst_pct=0,selling_price_inr=$7,mrp_inr=$8,custom_margin_pct=$9,net_profit_inr=$10,ai_score=$11,viral_velocity_score=$12,stock_count=0,status=CASE WHEN status='Published' THEN 'Published' ELSE 'CEO_PENDING' END,ai_marketing_copy=$13,ai_target_audience=$14,updated_at=NOW() WHERE id=$1`,
+        [productId, seed.title, seed.category, seed.brand, supplierBase.toFixed(2), logistics.toFixed(2), selling.toFixed(2), Math.ceil((selling * 1.18) / 10) * 10, margin.toFixed(2), profit.toFixed(2), seed.line === "DESIGNER" ? 96 : 90, seed.line === "DESIGNER" ? 95 : 84, copy, seed.audience],
+      );
+    } else {
+      const inserted = await pool.query(
+        `INSERT INTO products (user_id,sku,title,category,image_url,brand,supplier_name,supplier_city,supplier_cost_inr,shipping_cost_inr,gst_pct,selling_price_inr,mrp_inr,custom_margin_pct,net_profit_inr,ai_score,viral_velocity_score,stock_count,moq,status,ai_marketing_copy,ai_target_audience) VALUES (1,$1,$2,$3,'',$4,'Qikink','India',$5,$6,0,$7,$8,$9,$10,$11,$12,0,1,'CEO_PENDING',$13,$14) RETURNING id`,
+        [sku, seed.title, seed.category, seed.brand, supplierBase.toFixed(2), logistics.toFixed(2), selling.toFixed(2), Math.ceil((selling * 1.18) / 10) * 10, margin.toFixed(2), profit.toFixed(2), seed.line === "DESIGNER" ? 96 : 90, seed.line === "DESIGNER" ? 95 : 84, copy, seed.audience],
+      );
+      productId = Number(inserted.rows[0].id);
+    }
+
+    const images = [0, 1, 2, 3].map((view) => `${origin.replace(/\/$/, "")}/api/fashion-art/${productId}/${view}`);
+    await pool.query(`UPDATE products SET image_url=$2 WHERE id=$1`, [productId, images[0]]);
+
+    const specs = {
+      designOrigin: seed.brand,
+      designLine: seed.line,
+      productionSupplier: "Qikink",
+      inventoryMode: "MADE_TO_ORDER",
+      qikinkProductCode: rate.productCode,
+      qikinkProductName: rate.productName,
+      qikinkRateSource: rate.rateSource,
+      qikinkSourceUrl: sourceUrl,
+      printMethod: seed.print,
+      printPlacements: rate.printPlacements || 1,
+      designBrief: seed.brief,
+      designCode: seed.code,
+      palette: [...seed.palette],
+      audience: seed.audience,
+      sizes: rate.sizes,
+      collection: direction.collectionName,
+      mood: direction.mood,
+      prepaidLandedCostInr: rate.prepaidLandedCostInr,
+      codSurchargeInr: Number((rate.codInr + rate.codGstInr).toFixed(2)),
+      marketPriceCeilingInr: selling,
+      pricingPolicy: seed.line === "DESIGNER" ? "BHARATDRIP_DESIGNER_MARKET_BAND" : "MARKET_BACKWARD_HARD_CEILING",
+      minMarginPct: minMargin,
+      ipPolicy: "ORIGINAL_ART_ONLY_NO_UNLICENSED_CHARACTERS",
+      generatedAt: new Date().toISOString(),
+    };
+
+    const details = await pool.query(`SELECT id FROM product_details WHERE product_id=$1 LIMIT 1`, [productId]);
+    const description = `${seed.title}. Original ${seed.brand} artwork on ${rate.productName}; made to order.`;
+    const variants = JSON.stringify(rate.sizes.map((size: string) => ({ size, available: "made-to-order" })));
+
+    if (details.rows[0]) {
+      await pool.query(
+        `UPDATE product_details SET description=$2,specifications_json=$3,variants_json=$4,included_items=$5,material=$6,color_options=$7,source_url=$8,verification_status='SOURCE_VERIFIED',verified_at=NOW(),updated_at=NOW() WHERE product_id=$1`,
+        [productId, description, JSON.stringify(specs), variants, "1 made-to-order printed garment", "See garment specification", seed.palette.join(", "), sourceUrl],
+      );
+    } else {
+      await pool.query(
+        `INSERT INTO product_details (product_id,description,specifications_json,variants_json,included_items,material,color_options,source_url,verification_status,verified_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'SOURCE_VERIFIED',NOW(),NOW())`,
+        [productId, description, JSON.stringify(specs), variants, "1 made-to-order printed garment", "See garment specification", seed.palette.join(", "), sourceUrl],
+      );
+    }
+
+    await pool.query(`DELETE FROM product_images WHERE product_id=$1 AND verification_provider='bharatshop-studio'`, [productId]);
+    for (let view = 0; view < images.length; view++) {
+      await pool.query(
+        `INSERT INTO product_images (product_id,image_url,source_url,sort_order,alt_text,verification_status,verification_confidence,verification_model,verification_provider,verification_metadata,verified_at) VALUES ($1,$2,$3,$4,$5,'AI_GENERATED_ORIGINAL',1,'bharatshop-svg-fashion-v3','bharatshop-studio',$6,NOW())`,
+        [productId, images[view], sourceUrl, view, `${seed.title} view ${view + 1}`, JSON.stringify({ designOrigin: seed.brand, designLine: seed.line, designCode: seed.code, view, ipPolicy: "original-only" })],
+      );
+    }
+
+    await pool.query(
+      `INSERT INTO ai_activity_logs (user_id,agent_name,action_type,message,metadata_json,status) VALUES (1,'AI Fashion Designer',$1,$2,$3,'SUCCESS')`,
+      [seed.line === "DESIGNER" ? "BHARATDRIP_DESIGN_READY" : "MARKET_BACKWARD_FASHION_READY", `${seed.title} passed real production costing at its customer price band.`, JSON.stringify({ productId, sku, brand: seed.brand, line: seed.line, marketPriceInr: selling, prepaidLandedCostInr: rate.prepaidLandedCostInr, printPlacements: rate.printPlacements || 1, marginPct: Number(margin.toFixed(2)), maxLandedCostInr: Number(maxLanded.toFixed(2)), direction })],
+    );
+
+    results.push({
+      productId,
+      sku,
+      title: seed.title,
+      brand: seed.brand,
+      line: seed.line,
+      audience: seed.audience,
+      status: existing.rows[0]?.status === "Published" ? "Published" : "CEO_PENDING",
+      sellingPriceInr: selling,
+      prepaidLandedCostInr: rate.prepaidLandedCostInr,
+      printPlacements: rate.printPlacements || 1,
+      marginPct: Number(margin.toFixed(1)),
+      images,
+    });
+  }
+
+  return {
+    success: true,
+    provider: "market-lanes+local-gemma+deterministic-art",
+    inventoryMode: "MADE_TO_ORDER",
+    pricingPolicy: "VALUE_AND_BHARATDRIP_DUAL_LANE",
+    valueLaneInr: "129-599 where verified sourcing permits",
+    designerLaneInr: "599-999",
+    requested,
+    generated: results.length,
+    direction,
+    results,
+  };
+}
