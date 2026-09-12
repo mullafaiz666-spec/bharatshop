@@ -1,4 +1,5 @@
 import FashionAgentCockpit from "@/components/FashionAgentCockpit";
+import FashionMediaBoard from "@/components/FashionMediaBoard";
 import { getAdminUser } from "@/lib/admin-auth";
 import { redirect } from "next/navigation";
 
@@ -9,5 +10,8 @@ export const fetchCache = "force-no-store";
 export default async function FashionAgentPage() {
   const admin = await getAdminUser();
   if (!admin) redirect("/admin-login");
-  return <FashionAgentCockpit />;
+  return <>
+    <FashionMediaBoard />
+    <FashionAgentCockpit />
+  </>;
 }
