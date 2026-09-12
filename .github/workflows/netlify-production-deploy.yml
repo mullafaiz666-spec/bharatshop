@@ -12,6 +12,7 @@ env:
   NETLIFY_SITE_URL: https://bharatshop-35fd.netlify.app
   NETLIFY_SITE_ID: 75b5c168-6679-479d-b3a6-244e393fe1b0
   NETLIFY_SITE_NAME: bharatshop-35fd
+  NETLIFY_BUILD_HOOK_TITLE: BharatShop production CI
 
 jobs:
   deploy:
@@ -74,57 +75,110 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Upload source to Netlify build API and wait for production deploy
+      - name: Trigger linked Netlify production build
         shell: bash
         run: |
           set -euo pipefail
 
-          # Package only tracked source, then add a non-secret build revision file.
-          # next.config.ts embeds COMMIT_SHA into BHARATSHOP_BUILD_REVISION so the
-          # live runtime can prove exactly which Git commit was published.
-          git archive --format=zip --output=/tmp/bharatshop-source.zip HEAD
-          printf 'COMMIT_SHA=%s\n' "$GITHUB_SHA" > /tmp/.env.production.local
-          (cd /tmp && zip -q bharatshop-source.zip .env.production.local)
-
-          curl -fsS -X POST \
+          # Build hooks are Netlify's supported way to ask an already-linked
+          # Git repository to build a branch. Reuse one private hook so no hook
+          # URL is ever committed to this public repository.
+          curl -fsS \
             -H "Authorization: Bearer ${NETLIFY_AUTH_TOKEN}" \
-            -H 'Content-Type: application/zip' \
-            --data-binary @/tmp/bharatshop-source.zip \
-            "https://api.netlify.com/api/v1/sites/${NETLIFY_SITE_ID}/builds?branch=main" \
-            -o /tmp/netlify-build.json
+            "https://api.netlify.com/api/v1/sites/${NETLIFY_SITE_ID}/build_hooks" \
+            -o /tmp/netlify-build-hooks.json
 
-          build_id=$(node -e "const d=require('/tmp/netlify-build.json');process.stdout.write(String(d.id||''))")
-          deploy_id=$(node -e "const d=require('/tmp/netlify-build.json');process.stdout.write(String(d.deploy_id||''))")
-          if [ -z "$build_id" ] || [ -z "$deploy_id" ]; then
-            echo 'Netlify build API did not return build/deploy identifiers.' >&2
-            cat /tmp/netlify-build.json
+          hook_url=$(node - <<'NODE'
+          const fs = require('fs');
+          const hooks = JSON.parse(fs.readFileSync('/tmp/netlify-build-hooks.json', 'utf8'));
+          const match = Array.isArray(hooks)
+            ? hooks.find((hook) => hook.title === process.env.NETLIFY_BUILD_HOOK_TITLE && hook.branch === 'main')
+            : null;
+          process.stdout.write(String(match?.url || ''));
+          NODE
+          )
+
+          if [ -z "$hook_url" ]; then
+            node - <<'NODE' >/tmp/netlify-build-hook-body.json
+          const body = {
+            title: process.env.NETLIFY_BUILD_HOOK_TITLE,
+            branch: 'main',
+          };
+          process.stdout.write(JSON.stringify(body));
+          NODE
+            curl -fsS -X POST \
+              -H "Authorization: Bearer ${NETLIFY_AUTH_TOKEN}" \
+              -H 'Content-Type: application/json' \
+              --data-binary @/tmp/netlify-build-hook-body.json \
+              "https://api.netlify.com/api/v1/sites/${NETLIFY_SITE_ID}/build_hooks" \
+              -o /tmp/netlify-created-build-hook.json
+            hook_url=$(node -e "const d=require('/tmp/netlify-created-build-hook.json');process.stdout.write(String(d.url||''))")
+          fi
+
+          if [ -z "$hook_url" ]; then
+            echo 'Netlify did not provide a build-hook URL.' >&2
             exit 22
           fi
-          echo "Netlify build=$build_id deploy=$deploy_id"
+
+          echo "::add-mask::$hook_url"
+          trigger_url="${hook_url}?trigger_branch=main&trigger_title=BharatShop+${GITHUB_SHA}"
+          echo "::add-mask::$trigger_url"
+          curl -fsS -X POST \
+            -H 'Content-Type: application/json' \
+            --data '{}' \
+            "$trigger_url" \
+            -o /tmp/netlify-hook-response.json
+          echo "Netlify production build hook accepted for ${GITHUB_SHA}."
+
+      - name: Wait for exact Netlify commit to become ready
+        shell: bash
+        run: |
+          set -euo pipefail
+          deploy_id=""
+          state=""
 
           for i in $(seq 1 150); do
             curl -fsS \
               -H "Authorization: Bearer ${NETLIFY_AUTH_TOKEN}" \
-              "https://api.netlify.com/api/v1/deploys/${deploy_id}" \
-              -o /tmp/netlify-deploy.json
-            state=$(node -e "const d=require('/tmp/netlify-deploy.json');process.stdout.write(String(d.state||''))")
-            error=$(node -e "const d=require('/tmp/netlify-deploy.json');process.stdout.write(String(d.error_message||''))")
-            echo "Netlify deploy state=$state attempt=$i"
-            if [ "$state" = "ready" ]; then
-              break
+              "https://api.netlify.com/api/v1/sites/${NETLIFY_SITE_ID}/deploys?branch=main&per_page=20" \
+              -o /tmp/netlify-deploys.json
+
+            result=$(node - <<'NODE'
+          const fs = require('fs');
+          const deploys = JSON.parse(fs.readFileSync('/tmp/netlify-deploys.json', 'utf8'));
+          const expected = process.env.GITHUB_SHA;
+          const match = Array.isArray(deploys)
+            ? deploys.find((deploy) => deploy.commit_ref === expected && deploy.context === 'production')
+            : null;
+          if (match) process.stdout.write(`${match.id || ''}\t${match.state || ''}\t${match.error_message || ''}`);
+          NODE
+            )
+
+            if [ -n "$result" ]; then
+              IFS=$'\t' read -r deploy_id state deploy_error <<< "$result"
+              echo "Netlify deploy=${deploy_id} state=${state} attempt=${i}"
+              if [ "$state" = "ready" ]; then
+                break
+              fi
+              if [ "$state" = "error" ]; then
+                echo "Netlify deployment failed: ${deploy_error}" >&2
+                exit 23
+              fi
+            else
+              echo "Waiting for Netlify to register commit ${GITHUB_SHA}; attempt=${i}"
             fi
-            if [ "$state" = "error" ]; then
-              echo "Netlify deployment failed: $error" >&2
-              exit 23
-            fi
+
             if [ "$i" = "150" ]; then
-              echo 'Netlify deployment did not become ready within the bounded wait.' >&2
+              echo 'Netlify did not publish the exact Git commit within the bounded wait.' >&2
               exit 24
             fi
             sleep 5
           done
 
-      - name: Verify exact live revision and core routes
+          test -n "$deploy_id"
+          test "$state" = "ready"
+
+      - name: Verify exact live revision and storefront routes
         shell: bash
         run: |
           set -euo pipefail
@@ -142,18 +196,26 @@ jobs:
           test "$live" = "$expected"
 
           home_code=$(curl -sS -o /tmp/home.html -w '%{http_code}' --max-time 30 "$NETLIFY_SITE_URL/" || true)
+          women_code=$(curl -sS -o /tmp/women.html -w '%{http_code}' --max-time 30 "$NETLIFY_SITE_URL/women" || true)
+          men_code=$(curl -sS -o /tmp/men.html -w '%{http_code}' --max-time 30 "$NETLIFY_SITE_URL/men" || true)
+          kids_code=$(curl -sS -o /tmp/kids.html -w '%{http_code}' --max-time 30 "$NETLIFY_SITE_URL/kids" || true)
+          electronics_code=$(curl -sS -o /tmp/electronics.html -w '%{http_code}' --max-time 30 "$NETLIFY_SITE_URL/electronics" || true)
           store_code=$(curl -sS -o /tmp/store.html -w '%{http_code}' --max-time 30 "$NETLIFY_SITE_URL/store" || true)
           catalogue_code=$(curl -sS -o /tmp/catalogue.json -w '%{http_code}' --max-time 58 "$NETLIFY_SITE_URL/api/storefront/products?limit=1&page=1" || true)
           dashboard_code=$(curl -sS -o /tmp/dashboard.html -w '%{http_code}' --max-time 58 "$NETLIFY_SITE_URL/dashboard" || true)
           command_code=$(curl -sS -o /tmp/command.html -w '%{http_code}' --max-time 58 "$NETLIFY_SITE_URL/dashboard/command-centre" || true)
 
-          echo "home=$home_code store=$store_code catalogue=$catalogue_code dashboard=$dashboard_code command=$command_code"
+          echo "home=$home_code women=$women_code men=$men_code kids=$kids_code electronics=$electronics_code store=$store_code catalogue=$catalogue_code dashboard=$dashboard_code command=$command_code"
           test "$home_code" = "200"
+          test "$women_code" = "200"
+          test "$men_code" = "200"
+          test "$kids_code" = "200"
+          test "$electronics_code" = "200"
           test "$store_code" = "200"
           test "$catalogue_code" = "200"
           test "$dashboard_code" = "200"
           test "$command_code" = "200"
-          grep -q "BharatShop" /tmp/home.html
+          grep -q "BHARATSHOP\|BharatShop" /tmp/home.html
           node - <<'NODE'
           const fs = require('fs');
           const data = JSON.parse(fs.readFileSync('/tmp/catalogue.json', 'utf8'));
