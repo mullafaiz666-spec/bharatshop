@@ -47,26 +47,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat >/tmp/netlify-site-update.json <<'JSON'
-          {
-            "repo": {
-              "provider": "github",
-              "repo_path": "mullafaiz666-spec/bharatshop",
-              "repo_branch": "main",
-              "repo_url": "https://github.com/mullafaiz666-spec/bharatshop",
-              "public_repo": true,
-              "cmd": "npm run build",
-              "dir": "",
-              "functions_dir": "netlify/functions",
-              "allowed_branches": ["main"],
-              "stop_builds": false
-            }
-          }
+          payload=$(jq -n '{repo:{provider:"github",repo_path:"mullafaiz666-spec/bharatshop",repo_branch:"main",repo_url:"https://github.com/mullafaiz666-spec/bharatshop",public_repo:true,cmd:"npm run build",dir:"",functions_dir:"netlify/functions",allowed_branches:["main"],stop_builds:false}}')
           response=$(curl -sS --fail-with-body \
             -X PATCH \
             -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" \
             -H "Content-Type: application/json" \
-            --data-binary @/tmp/netlify-site-update.json \
+            --data-binary "$payload" \
             "https://api.netlify.com/api/v1/sites/$NETLIFY_SITE_ID")
           printf '%s' "$response" | jq '{id,name,git_provider,build_settings:{provider:.build_settings.provider,repo_path:.build_settings.repo_path,repo_branch:.build_settings.repo_branch,repo_url:.build_settings.repo_url,cmd:.build_settings.cmd,dir:.build_settings.dir,functions_dir:.build_settings.functions_dir,stop_builds:.build_settings.stop_builds}}'
           printf '%s' "$response" | jq -e '.build_settings.repo_path == "mullafaiz666-spec/bharatshop" and .build_settings.repo_branch == "main"' >/dev/null
