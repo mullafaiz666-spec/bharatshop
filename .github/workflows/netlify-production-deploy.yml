@@ -16,6 +16,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  NETLIFY_SITE_ID: 75b5c168-6679-479d-b3a6-244e393fe1b0
   NETLIFY_SITE_TARGET: bharatshop-35fd.netlify.app
   NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN || secrets.NETLIFY_PERSONAL_ACCESS_TOKEN || secrets.NETLIFY_TOKEN }}
 
@@ -31,8 +32,29 @@ jobs:
         if: ${{ env.NETLIFY_AUTH_TOKEN == '' }}
         run: |
           echo "No GitHub Netlify CLI token is configured."
-          echo "The existing Netlify site remains linked to this repository, so Netlify's Git integration is the deployment authority."
           echo "Skipping duplicate CLI deployment instead of failing the workflow."
+
+      - name: Verify Netlify token and BharatShop site access
+        if: ${{ env.NETLIFY_AUTH_TOKEN != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          user_code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" \
+            https://api.netlify.com/api/v1/user)
+          site_code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" \
+            "https://api.netlify.com/api/v1/sites/$NETLIFY_SITE_ID")
+          echo "NETLIFY_USER_HTTP=$user_code"
+          echo "BHARATSHOP_SITE_HTTP=$site_code"
+          if [ "$user_code" != "200" ]; then
+            echo "Netlify token is not valid for the API."
+            exit 21
+          fi
+          if [ "$site_code" != "200" ]; then
+            echo "Netlify token is valid but cannot access the BharatShop project."
+            exit 22
+          fi
 
       - name: Set up Node.js for token-backed CLI deployment
         if: ${{ env.NETLIFY_AUTH_TOKEN != '' }}
