@@ -1,0 +1,31 @@
+name: Catalogue Upstream Probe
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe direct Render and Netlify catalogue
+        run: |
+          set -u
+          echo '=== Direct Render ==='
+          render_code=$(curl -sS -D /tmp/render-headers.txt -o /tmp/render-body.txt -w '%{http_code}' --max-time 58 'https://bharatshop-9w4a.onrender.com/api/storefront/products?limit=1&page=1' || true)
+          echo "Render HTTP=$render_code"
+          cat /tmp/render-headers.txt || true
+          echo '--- body ---'
+          head -c 4000 /tmp/render-body.txt || true
+          echo
+          echo '=== Netlify ==='
+          netlify_code=$(curl -sS -D /tmp/netlify-headers.txt -o /tmp/netlify-body.txt -w '%{http_code}' --max-time 58 'https://bharatshop-35fd.netlify.app/api/storefront/products?limit=1&page=1' || true)
+          echo "Netlify HTTP=$netlify_code"
+          cat /tmp/netlify-headers.txt || true
+          echo '--- body ---'
+          head -c 4000 /tmp/netlify-body.txt || true
+          echo
+          if [ "$render_code" != "200" ]; then exit 11; fi
+          if [ "$netlify_code" != "200" ]; then exit 12; fi
