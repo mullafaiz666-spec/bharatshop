@@ -59,14 +59,15 @@ test("native production remains fail-closed before migration parity is verified"
 
 test("agent runtime SQL is additive and locks internal tables away from Data API roles", () => {
   const sql = read("ops/sql/agent-runtime-foundation.sql");
+  const executableSql = sql.replace(/^\s*--.*$/gm, "");
   for (const table of ["agent_company_goals", "agent_work_items", "agent_shared_events", "agent_chat_messages"]) {
     assert.match(sql, new RegExp(`CREATE TABLE IF NOT EXISTS public\\.${table}`));
     assert.match(sql, new RegExp(`ALTER TABLE public\\.${table} ENABLE ROW LEVEL SECURITY`));
   }
   assert.match(sql, /REVOKE ALL ON TABLE public\.agent_work_items FROM anon, authenticated/);
-  assert.doesNotMatch(sql, /\bDROP\b/i);
-  assert.doesNotMatch(sql, /\bTRUNCATE\b/i);
-  assert.doesNotMatch(sql, /\bDELETE\s+FROM\b/i);
+  assert.doesNotMatch(executableSql, /\bDROP\b/i);
+  assert.doesNotMatch(executableSql, /\bTRUNCATE\b/i);
+  assert.doesNotMatch(executableSql, /\bDELETE\s+FROM\b/i);
 });
 
 test("launch health is read-only and exposes a one-command certification path", () => {
