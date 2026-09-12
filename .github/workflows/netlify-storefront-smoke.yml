@@ -1,0 +1,56 @@
+name: Netlify Storefront Smoke
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: bharatshop-netlify-storefront-smoke
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SITE_URL: https://bharatshop-35fd.netlify.app
+    steps:
+      - name: Wait for exact Netlify revision
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 48); do
+            code=$(curl -sS -o /tmp/deploy.json -w '%{http_code}' --max-time 20 "$SITE_URL/netlify-deploy-health" || true)
+            revision=$(node -e "try{const d=require('/tmp/deploy.json');process.stdout.write(String(d.revision||''))}catch{}")
+            mode=$(node -e "try{const d=require('/tmp/deploy.json');process.stdout.write(String(d.mode||''))}catch{}")
+            echo "Netlify health HTTP=$code revision=$revision expected=$GITHUB_SHA mode=$mode"
+            if [ "$code" = "200" ] && [ "$revision" = "$GITHUB_SHA" ]; then exit 0; fi
+            sleep 10
+          done
+          echo "Exact Netlify revision was not published"
+          cat /tmp/deploy.json || true
+          exit 1
+
+      - name: Verify storefront HTML is native and usable
+        run: |
+          set -euo pipefail
+          code=$(curl -sS -o /tmp/home.html -w '%{http_code}' --max-time 30 "$SITE_URL/" || true)
+          echo "storefront HTTP=$code"
+          test "$code" = "200"
+          grep -q "BharatShop" /tmp/home.html
+
+      - name: Verify catalogue reaches authoritative backend
+        run: |
+          set -euo pipefail
+          code=$(curl -sS -o /tmp/catalogue.json -w '%{http_code}' --max-time 58 "$SITE_URL/api/storefront/products?limit=1&page=1" || true)
+          echo "catalogue HTTP=$code"
+          test "$code" = "200"
+          node - <<'NODE'
+          const fs = require('fs');
+          const data = JSON.parse(fs.readFileSync('/tmp/catalogue.json', 'utf8'));
+          if (!Array.isArray(data.products)) throw new Error('products is not an array');
+          if (data.products.length < 1) throw new Error('catalogue returned no products');
+          const first = data.products[0] || {};
+          if (!first.id || !first.title) throw new Error('catalogue product is incomplete');
+          console.log(`catalogue OK: ${data.products.length} product(s), total=${data.total ?? 'unknown'}`);
+          NODE
