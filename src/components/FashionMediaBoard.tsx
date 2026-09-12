@@ -58,7 +58,7 @@ function normalize(payloads: unknown[]) {
       const item = asObject(raw);
       if (!item) continue;
       const imageUrl = imageFrom(item);
-      if (!imageUrl || !/^https?:\/\//i.test(imageUrl)) continue;
+      if (!imageUrl || !(/^(?:https?:\/\/|\/)/i.test(imageUrl))) continue;
       const id = String(item.id ?? item.sku ?? item.slug ?? imageUrl);
       if (seen.has(id)) continue;
       seen.add(id);
@@ -73,7 +73,17 @@ function normalize(payloads: unknown[]) {
       });
     }
   }
-  return out.slice(0, 10);
+  return out.slice(0, 12);
+}
+
+async function fetchJson(url: string, timeoutMs: number) {
+  try {
+    const response = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(timeoutMs) });
+    if (!response.ok) return null;
+    return await response.json().catch(() => null);
+  } catch {
+    return null;
+  }
 }
 
 export default function FashionMediaBoard() {
@@ -85,22 +95,23 @@ export default function FashionMediaBoard() {
   const load = useCallback(async () => {
     setLoading(true);
     setNotice("");
-    try {
-      const [fashion, store] = await Promise.all([
-        fetch("/api/admin/fashion-agent", { cache: "no-store" }).catch(() => null),
-        fetch("/api/storefront/products?sort=aiScore&limit=12&page=1", { cache: "no-store" }).catch(() => null),
-      ]);
-      setFashionPayload(fashion ? await fashion.json().catch(() => null) : null);
-      setStorePayload(store ? await store.json().catch(() => null) : null);
-    } catch {
-      setNotice("Product media could not be refreshed.");
-    } finally {
-      setLoading(false);
-    }
+
+    // Customer-safe storefront media is the fastest, authoritative preview source.
+    // Render it first instead of holding the whole visual board behind slower admin data.
+    const store = await fetchJson("/api/storefront/products?sort=aiScore&limit=12&page=1", 10_000);
+    setStorePayload(store);
+    setLoading(false);
+
+    // Enrich with local Fashion Agent records when available. Failure here must never
+    // hide already-valid storefront media or leave the dashboard spinning indefinitely.
+    const fashion = await fetchJson("/api/admin/fashion-agent", 10_000);
+    setFashionPayload(fashion);
+
+    if (!store && !fashion) setNotice("Catalogue media endpoints did not respond. The rest of the fashion cockpit remains usable; retry media when the services recover.");
   }, []);
 
   useEffect(() => { void load(); }, [load]);
-  const media = useMemo(() => normalize([fashionPayload, storePayload]), [fashionPayload, storePayload]);
+  const media = useMemo(() => normalize([storePayload, fashionPayload]), [storePayload, fashionPayload]);
 
   return <section className="mx-auto max-w-[1600px] px-4 pt-5 md:px-7 md:pt-7">
     <div className="overflow-hidden rounded-3xl border border-white/10 bg-[linear-gradient(135deg,rgba(13,17,25,.98),rgba(23,15,30,.96))] shadow-[0_24px_80px_rgba(0,0,0,.32)]">
@@ -108,24 +119,28 @@ export default function FashionMediaBoard() {
         <div>
           <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-violet-300"><ImageIcon size={15}/> Visual production board</div>
           <h2 className="mt-2 text-2xl font-black tracking-tight text-white md:text-3xl">Real catalogue media + creative bridges</h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">This board only shows images already attached to BharatShop records or the live storefront. Higgsfield and ChatGPT stay clearly marked as external creative surfaces instead of fake local APIs.</p>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Customer-safe media is previewed from the authoritative BharatShop storefront while your laptop database stays isolated for local agent testing. Higgsfield and ChatGPT remain clearly marked as external creative surfaces.</p>
+          <div className="mt-3 flex flex-wrap gap-2 text-[10px] font-black uppercase tracking-[0.12em]">
+            <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-emerald-300">{media.length} verified media cards</span>
+            <span className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-2.5 py-1 text-cyan-300">authoritative preview</span>
+          </div>
         </div>
         <button onClick={() => void load()} className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.05] px-4 py-2.5 text-xs font-black uppercase tracking-[0.12em] text-white hover:bg-white/[0.09]"><RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`}/>Refresh media</button>
       </div>
 
       <div className="grid gap-4 p-4 md:p-6 xl:grid-cols-[1.5fr_.7fr]">
         <div>
-          {loading && !media.length ? <div className="grid min-h-56 place-items-center rounded-2xl border border-white/10 bg-black/20"><Loader2 className="h-7 w-7 animate-spin text-violet-300"/></div> : media.length ? <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-            {media.map((product) => <a key={product.id} href="/store" className="group overflow-hidden rounded-2xl border border-white/10 bg-black/20">
-              <div className="aspect-[4/5] overflow-hidden bg-[#141923]"><img src={product.imageUrl} alt={product.title} className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.035]"/></div>
+          {loading && !media.length ? <div className="grid min-h-56 place-items-center rounded-2xl border border-white/10 bg-black/20"><div className="text-center"><Loader2 className="mx-auto h-7 w-7 animate-spin text-violet-300"/><div className="mt-3 text-xs font-bold text-slate-400">Loading authoritative catalogue media…</div></div></div> : media.length ? <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+            {media.map((product) => <a key={product.id} href="/store" className="group overflow-hidden rounded-2xl border border-white/10 bg-black/20 transition hover:border-white/20 hover:bg-white/[0.03]">
+              <div className="aspect-[4/5] overflow-hidden bg-[#141923]"><img src={product.imageUrl} alt={product.title} loading="lazy" className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.035]"/></div>
               <div className="p-2.5"><div className="line-clamp-1 text-xs font-black text-white">{product.title}</div><div className="mt-1 flex items-center justify-between text-[10px] text-slate-500"><span>{product.status || "catalog"}</span>{product.price ? <span>₹{Math.round(product.price).toLocaleString("en-IN")}</span> : null}</div></div>
             </a>)}
-          </div> : <div className="grid min-h-56 place-items-center rounded-2xl border border-dashed border-white/10 bg-white/[0.02] p-6 text-center"><div><Shirt className="mx-auto h-9 w-9 text-slate-600"/><div className="mt-3 text-sm font-black text-white">No verified product image is attached yet</div><p className="mt-1 max-w-xl text-xs leading-5 text-slate-500">Create or import a real product image, attach it to the product record, then refresh. BharatShop will not substitute unrelated stock art.</p></div></div>}
+          </div> : <div className="grid min-h-56 place-items-center rounded-2xl border border-dashed border-white/10 bg-white/[0.02] p-6 text-center"><div><Shirt className="mx-auto h-9 w-9 text-slate-600"/><div className="mt-3 text-sm font-black text-white">No verified catalogue image returned</div><p className="mt-1 max-w-xl text-xs leading-5 text-slate-500">The board is no longer stuck. If this remains empty, the authoritative storefront currently has no publishable verified-media records for this query.</p></div></div>}
           {notice && <div className="mt-3 rounded-xl border border-rose-400/20 bg-rose-400/10 px-3 py-2 text-xs text-rose-200">{notice}</div>}
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-          <a href="/" className="rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.06] p-4 hover:bg-emerald-400/[0.09]"><div className="flex items-center justify-between"><div className="flex items-center gap-2 font-black text-white"><Smartphone className="h-5 w-5 text-emerald-300"/>BharatShop App</div><ExternalLink className="h-4 w-4 text-emerald-300"/></div><p className="mt-2 text-xs leading-5 text-slate-400">Open the live local PWA/storefront experience and verify the same catalogue media customers see.</p></a>
+          <a href="/" className="rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.06] p-4 hover:bg-emerald-400/[0.09]"><div className="flex items-center justify-between"><div className="flex items-center gap-2 font-black text-white"><Smartphone className="h-5 w-5 text-emerald-300"/>BharatShop App</div><ExternalLink className="h-4 w-4 text-emerald-300"/></div><p className="mt-2 text-xs leading-5 text-slate-400">Open the local PWA/storefront experience and verify the same catalogue media customers see.</p></a>
           <a href="https://chatgpt.com/" target="_blank" rel="noreferrer" className="rounded-2xl border border-cyan-400/20 bg-cyan-400/[0.06] p-4 hover:bg-cyan-400/[0.09]"><div className="flex items-center justify-between"><div className="flex items-center gap-2 font-black text-white"><PlugZap className="h-5 w-5 text-cyan-300"/>ChatGPT bridge</div><ExternalLink className="h-4 w-4 text-cyan-300"/></div><p className="mt-2 text-xs leading-5 text-slate-400">Use ChatGPT as the external operator surface for connected plugins and founder approvals.</p></a>
           <a href="https://higgsfield.ai/mcp" target="_blank" rel="noreferrer" className="rounded-2xl border border-violet-400/20 bg-violet-400/[0.06] p-4 hover:bg-violet-400/[0.09]"><div className="flex items-center justify-between"><div className="flex items-center gap-2 font-black text-white"><Sparkles className="h-5 w-5 text-violet-300"/>Higgsfield connector</div><ExternalLink className="h-4 w-4 text-violet-300"/></div><p className="mt-2 text-xs leading-5 text-slate-400">Official ChatGPT plugin/MCP surface for rendered UGC images and video. Generation remains credit-gated.</p></a>
           <a href="/store" className="rounded-2xl border border-orange-400/20 bg-orange-400/[0.06] p-4 hover:bg-orange-400/[0.09]"><div className="flex items-center justify-between"><div className="flex items-center gap-2 font-black text-white"><Store className="h-5 w-5 text-orange-300"/>Customer store</div><ExternalLink className="h-4 w-4 text-orange-300"/></div><p className="mt-2 text-xs leading-5 text-slate-400">Open the customer-facing store to verify titles, media, pricing and published state.</p></a>
