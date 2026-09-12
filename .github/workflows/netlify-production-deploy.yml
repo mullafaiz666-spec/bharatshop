@@ -8,25 +8,27 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: netlify-production
+  cancel-in-progress: true
+
 env:
   NETLIFY_SITE_URL: https://bharatshop-35fd.netlify.app
   NETLIFY_SITE_ID: 75b5c168-6679-479d-b3a6-244e393fe1b0
   NETLIFY_SITE_NAME: bharatshop-35fd
-  NETLIFY_TEAM_ID: 6a77b005bb09f74e7b55c7d4
-  NETLIFY_DEPLOY_PROXY_KEY: CHATGPT_NETLIFY_DEPLOY_PROXY
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN || secrets.NETLIFY_PERSONAL_ACCESS_TOKEN || secrets.NETLIFY_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '22'
           cache: npm
 
       - name: Require the exact BharatShop Netlify target
@@ -34,7 +36,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${NETLIFY_AUTH_TOKEN:-}" ]; then
-            echo 'NETLIFY_AUTH_TOKEN is missing.' >&2
+            echo 'No Netlify deployment token is configured in the supported secret names.' >&2
             exit 21
           fi
           curl -fsS \
@@ -60,7 +62,7 @@ jobs:
           NODE
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --no-audit --no-fund
 
       - name: Run integration tests
         run: npm run test:integrations
@@ -76,40 +78,18 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Deploy through connected Netlify capability
+      - name: Deploy production with the last verified Netlify CLI
+        env:
+          BHARATSHOP_BUILD_REVISION: ${{ github.sha }}
         shell: bash
         run: |
           set -euo pipefail
-
-          # The long-lived GitHub token is deliberately read-only for project
-          # mutation. ChatGPT's connected Netlify authorization places a short-
-          # lived deploy proxy in a temporary site variable for this release.
-          # Read it without printing it, mask it, use it once, then ChatGPT
-          # removes the variable after the deploy is verified.
-          curl -fsS \
-            -H "Authorization: Bearer ${NETLIFY_AUTH_TOKEN}" \
-            "https://api.netlify.com/api/v1/accounts/${NETLIFY_TEAM_ID}/env/${NETLIFY_DEPLOY_PROXY_KEY}?site_id=${NETLIFY_SITE_ID}" \
-            -o /tmp/netlify-deploy-proxy.json
-
-          proxy_path=$(node - <<'NODE'
-          const fs = require('fs');
-          const item = JSON.parse(fs.readFileSync('/tmp/netlify-deploy-proxy.json', 'utf8'));
-          const values = Array.isArray(item?.values) ? item.values : [];
-          const preferred = values.find((value) => value.context === 'all') || values.find((value) => value.context === 'production') || values[0];
-          process.stdout.write(String(preferred?.value || ''));
-          NODE
-          )
-
-          if [ -z "$proxy_path" ]; then
-            echo 'Temporary connected Netlify deploy capability is unavailable.' >&2
-            exit 22
-          fi
-          echo "::add-mask::$proxy_path"
-
-          npx -y @netlify/mcp@latest \
-            --site-id "$NETLIFY_SITE_ID" \
-            --proxy-path "$proxy_path" \
-            --no-wait
+          npx -y netlify-cli@27.5.2 deploy \
+            --build \
+            --prod \
+            --site "$NETLIFY_SITE_ID" \
+            --auth "$NETLIFY_AUTH_TOKEN" \
+            --message "BharatShop production ${GITHUB_SHA}"
 
       - name: Wait for exact Netlify commit to become ready
         shell: bash

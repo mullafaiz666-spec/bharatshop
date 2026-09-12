@@ -4,18 +4,19 @@ import { readFileSync } from "node:fs";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 
-test("production deploy uses the connected Netlify capability without committing its credential", () => {
+test("production deploy reuses the last verified Netlify CLI path and token fallbacks", () => {
   const workflow = read(".github/workflows/netlify-production-deploy.yml");
-  assert.match(workflow, /NETLIFY_DEPLOY_PROXY_KEY: CHATGPT_NETLIFY_DEPLOY_PROXY/);
-  assert.match(workflow, /accounts\/\$\{NETLIFY_TEAM_ID\}\/env\/\$\{NETLIFY_DEPLOY_PROXY_KEY\}\?site_id=\$\{NETLIFY_SITE_ID\}/);
-  assert.match(workflow, /::add-mask::\$proxy_path/);
-  assert.match(workflow, /@netlify\/mcp@latest/);
-  assert.match(workflow, /--proxy-path "\$proxy_path"/);
-  assert.match(workflow, /--site-id "\$NETLIFY_SITE_ID"/);
+  assert.match(workflow, /secrets\.NETLIFY_AUTH_TOKEN \|\| secrets\.NETLIFY_PERSONAL_ACCESS_TOKEN \|\| secrets\.NETLIFY_TOKEN/);
+  assert.match(workflow, /netlify-cli@27\.5\.2 deploy/);
+  assert.match(workflow, /--build/);
+  assert.match(workflow, /--prod/);
+  assert.match(workflow, /--site "\$NETLIFY_SITE_ID"/);
+  assert.match(workflow, /--auth "\$NETLIFY_AUTH_TOKEN"/);
   assert.match(workflow, /sites\/\$\{NETLIFY_SITE_ID\}\/deploys\?branch=main&per_page=20/);
   assert.match(workflow, /deploy\.commit_ref === expected/);
   assert.match(workflow, /deploy\.context === 'production'/);
-  assert.doesNotMatch(workflow, /netlify-mcp\.netlify\.app\/proxy\//);
+  assert.doesNotMatch(workflow, /CHATGPT_NETLIFY_DEPLOY_PROXY/);
+  assert.doesNotMatch(workflow, /@netlify\/mcp@latest/);
   assert.doesNotMatch(workflow, /netlify-cli@latest deploy/);
   assert.doesNotMatch(workflow, /\/builds\?branch=main/);
 });
