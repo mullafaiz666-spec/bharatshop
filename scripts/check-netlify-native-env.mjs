@@ -33,8 +33,6 @@ export function nativeEnvironmentErrors(env) {
   }
 
   if (String(env.ADMIN_SESSION_SECRET || '').length < 32) errors.push("ADMIN_SESSION_SECRET must contain at least 32 characters");
-  requireValue("ADMIN_EMAIL");
-  requireValue("ADMIN_PASSWORD");
   requireValue("BHARATSHOP_AUTOMATION_TOKEN", env.BHARATSHOP_AUTOMATION_TOKEN || env.AUTOMATION_TOKEN);
 
   const aiProvider = String(env.AI_PROVIDER || '').trim().toLowerCase();
@@ -48,7 +46,6 @@ export function nativeEnvironmentErrors(env) {
     errors.push("Non-Gemini AI providers require AI_BASE_URL or LOCAL_AI_BASE_URL");
   }
 
-  requireValue("SEARXNG_URL");
   requireValue("RAZORPAY_KEY_ID");
   requireValue("RAZORPAY_KEY_SECRET");
   requireValue("RAZORPAY_WEBHOOK_SECRET");
@@ -56,7 +53,6 @@ export function nativeEnvironmentErrors(env) {
   requireValue("CASHFREE_CLIENT_SECRET", env.CASHFREE_CLIENT_SECRET || env.CASHFREE_SECRET_KEY);
   requireValue("SUPABASE_SERVICE_ROLE_KEY");
   requireValue("SUPABASE_URL", env.SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL);
-  requireValue("SUPABASE_DIGITAL_BUCKET");
   requireValue("BHARATSHOP_PUBLIC_ORIGIN");
   for (const key of ['BHARATSHOP_PUBLIC_ORIGIN', 'BHARATSHOP_NATIVE_ORIGIN', 'SEARXNG_URL', 'AI_BASE_URL', 'LOCAL_AI_BASE_URL']) {
     if (!env[key]) continue;
