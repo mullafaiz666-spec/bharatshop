@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getAdminUser } from "@/lib/admin-auth";
 
 const ADMIN_PATHS = [
   "/api/admin",
@@ -8,6 +9,7 @@ const ADMIN_PATHS = [
   "/api/marketing",
   "/dashboard",
   "/api/overview",
+  "/api/cart",
   "/api/ceo-chat",
   "/api/ceo-approvals",
   "/api/ceo-research",
@@ -81,6 +83,16 @@ export async function proxy(request: NextRequest) {
     const response = NextResponse.redirect(new URL("/admin-login", request.url));
     response.cookies.delete("bharatshop_admin_session");
     return response;
+  }
+  try {
+    if (!await getAdminUser()) {
+      if (pathname.startsWith("/api/")) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      const response = NextResponse.redirect(new URL("/admin-login", request.url));
+      response.cookies.delete("bharatshop_admin_session");
+      return response;
+    }
+  } catch {
+    return NextResponse.json({ error: "Administrator session verification unavailable" }, { status: 503 });
   }
   return NextResponse.next();
 }

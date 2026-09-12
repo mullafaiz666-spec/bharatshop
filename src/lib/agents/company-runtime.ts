@@ -1,3 +1,4 @@
+import { deferCompanyExecution } from "@/lib/agents/execution-mode";
 import { AGENT_CONTRACTS, type OperationalAgentId } from "@/lib/agents/contracts";
 import { runAgentRuntime } from "@/lib/agents/runtime";
 import {
@@ -39,8 +40,8 @@ function summarize(text: string, max = 600) {
 }
 
 export async function executeCompanyWorkItem(item: AgentWorkItem, origin: string) {
-  const shared = await sharedAgentContext(item.goal_id, 18);
   try {
+    const shared = await sharedAgentContext(item.goal_id, 18);
     const result = await runAgentRuntime({
       agent: item.agent_id,
       objective: item.objective,
@@ -122,7 +123,7 @@ export async function createGrowthCycle(input: { objective: string; title?: stri
     createdBy: input.createdBy ?? null,
   });
   const { startWorkItem } = await import("@/lib/agents/company-state");
-  const ceoWork = await startWorkItem(ceoQueued.id);
+  const ceoWork = deferCompanyExecution() ? null : await startWorkItem(ceoQueued.id);
   const ceoResult = ceoWork ? await executeCompanyWorkItem(ceoWork, input.origin) : null;
 
   const queued: AgentWorkItem[] = [];
@@ -143,7 +144,7 @@ export async function createGrowthCycle(input: { objective: string; title?: stri
     agentId: "ceo",
     eventType: "GROWTH_CYCLE_QUEUED",
     status: "READY",
-    summary: `Coordinated company goal created. CEO direction completed/attempted and ${queued.length} specialist work items were queued on the shared PostgreSQL work bus.`,
+    summary: `Coordinated company goal created. ${deferCompanyExecution() ? "CEO direction queued" : "CEO direction completed/attempted"} and ${queued.length} specialist work items were queued on the shared PostgreSQL work bus.`,
     evidence: { queuedAgents: queued.map((x) => x.agent_id), ceoWorkItemId: ceoQueued.id },
   });
   return { goal, ceo: ceoResult, queued };

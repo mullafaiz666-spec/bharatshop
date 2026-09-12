@@ -287,19 +287,6 @@ export function generateMarketingCopy(product: { title: string; netProfitInr: nu
 
 // ─── AI CAMPAIGN GENERATOR ────────────────────────────────────────────────────
 
-const PLATFORMS = ["WhatsApp Broadcast", "Instagram Reels", "Facebook Ads", "Google Shopping", "SMS Blast", "YouTube Shorts", "Telegram Channel"];
-const CAMPAIGN_TYPES = ["FLASH_SALE", "FESTIVAL", "VIRAL_PUSH", "RETARGET", "NEW_LAUNCH"];
-
-const HEADLINE_TEMPLATES = [
-  (title: string) => `🔥 Flash Sale: ${title.slice(0, 35)}... — 40% OFF Today Only!`,
-  (title: string) => `🌟 New Arrival: ${title.slice(0, 38)}... | Fast Delivery All India`,
-  (title: string) => `💥 Viral: ${title.slice(0, 42)}... — Order Before Stock Ends!`,
-  (title: string) => `🎉 Festival Offer: ${title.slice(0, 35)}... | Extra ₹50 OFF on UPI`,
-  (title: string) => `⚡ Limited Stock: ${title.slice(0, 38)}... | COD Available`,
-];
-
-const CTA_OPTIONS = ["Abhi Kharido!", "Order Karo — COD Available!", "1-Click Order", "Jaldi Karo — Limited Stock!", "Buy Now — Free Delivery!", "Apna Order Lagao!"];
-
 export interface GeneratedCampaign {
   platform: string;
   campaignType: string;
@@ -313,17 +300,16 @@ export interface GeneratedCampaign {
 }
 
 export function generateCampaign(product: { title: string; netProfitInr: number | string; category: string; aiTargetAudience: string; sellingPriceInr: number | string }): GeneratedCampaign {
-  const platform = PLATFORMS[Math.floor(Math.random() * PLATFORMS.length)];
-  const campaignType = CAMPAIGN_TYPES[Math.floor(Math.random() * CAMPAIGN_TYPES.length)];
-  const headlineFn = HEADLINE_TEMPLATES[Math.floor(Math.random() * HEADLINE_TEMPLATES.length)];
-  const cta = CTA_OPTIONS[Math.floor(Math.random() * CTA_OPTIONS.length)];
-  const price = Number(product.sellingPriceInr);
-  const profit = Number(product.netProfitInr);
-  const budgetInr = Math.round((100 + Math.random() * 900) / 50) * 50;
-  const estimatedReachK = Math.floor(5 + Math.random() * 95);
-  const estimatedRoas = Number((2.8 + Math.random() * 3.2).toFixed(2));
-
-  const bodyText = `${product.title.slice(0, 60)}...\n\n✅ Selling Price: ₹${price}\n✅ Fast Delivery: 2–5 Days India\n✅ COD Available | Easy Returns\n✅ GST Invoice Included\n\n🎯 Target: ${product.aiTargetAudience}\n\n💰 Operator Net Profit: ₹${Math.round(profit)}/unit`;
-
-  return { platform, campaignType, headline: headlineFn(product.title), bodyText, ctaText: cta, targetAudience: product.aiTargetAudience, budgetInr, estimatedReachK, estimatedRoas };
+  // Draft suggestions are not measured performance or spending authorization.
+  return {
+    platform: "Instagram",
+    campaignType: "Product Showcase",
+    headline: product.title.slice(0, 120),
+    bodyText: `${product.title}\nView current pricing, availability and delivery terms on BharatShop.`,
+    ctaText: "View Product",
+    targetAudience: product.aiTargetAudience,
+    budgetInr: 0,
+    estimatedReachK: 0,
+    estimatedRoas: 0,
+  };
 }

@@ -1,0 +1,22 @@
+# Native Netlify candidate. Use --config netlify.native.toml --context
+# deploy-preview for validation; publish only after the database copy is verified.
+# The existing netlify.toml remains the working production mirror during migration.
+[build]
+  command = "node scripts/check-netlify-native-env.mjs && npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "24"
+  NPM_FLAGS = "--no-audit --no-fund"
+
+[functions]
+  node_bundler = "esbuild"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+
+# No catch-all proxy: the Next.js adapter serves pages, admin, agents and APIs.

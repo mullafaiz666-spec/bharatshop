@@ -70,7 +70,8 @@ test("Supabase copy verification is read-only and blocks cutover on count mismat
   const verification = read("scripts/verify-supabase-copy.mjs");
   const pkg = JSON.parse(read("package.json"));
   assert.equal(pkg.scripts["db:verify-supabase"], "node scripts/verify-supabase-copy.mjs");
-  assert.match(verification, /information_schema\.tables/);
+  assert.match(verification, /pg_catalog\.pg_class/);
+  assert.match(verification, /SET LOCAL row_security = off/);
   assert.match(verification, /select count\(\*\)::bigint/);
   assert.match(verification, /No cutover should occur/);
   assert.doesNotMatch(verification, /\b(insert|update|delete|drop|truncate|alter|create)\b/i);

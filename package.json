@@ -4,14 +4,20 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "creative": "node scripts/bharatshop-creative.mjs",
     "db:push": "node scripts/safe-db-push.mjs",
     "db:check": "drizzle-kit check",
+    "db:migration-preflight": "node scripts/database-migration-preflight.mjs",
     "db:verify-supabase": "node scripts/verify-supabase-copy.mjs",
     "start": "next start -H 0.0.0.0 -p ${PORT:-10000}",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test:production": "node scripts/production-acceptance-v3.mjs",
-    "test:integrations": "node --test tests/*.test.mjs"
+    "test:integrations": "node --test tests/*.test.mjs",
+    "pixverse:status": "node scripts/pixverse-creative.mjs status",
+    "pixverse:capabilities": "node scripts/pixverse-creative.mjs capabilities",
+    "pixverse:create": "node scripts/pixverse-creative.mjs create",
+    "pixverse:download": "node scripts/pixverse-creative.mjs download"
   },
   "dependencies": {
     "@types/node": "22.19.15",
@@ -29,6 +35,7 @@
   "devDependencies": {
     "@tailwindcss/postcss": "4.1.17",
     "drizzle-kit": "0.31.10",
+    "esbuild": "0.25.12",
     "eslint": "9.39.4",
     "eslint-config-next": "16.3.4",
     "postcss": "8.5.23",

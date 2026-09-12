@@ -1,3 +1,4 @@
+import { deferCompanyExecution } from "@/lib/agents/execution-mode";
 import { NextResponse } from "next/server";
 import { claimQueuedWork, companySnapshot } from "@/lib/agents/company-state";
 import { executeCompanyWorkItem } from "@/lib/agents/company-runtime";
@@ -19,6 +20,10 @@ function authorized(request: Request) {
 
 async function runCycle(request: Request) {
   if (!authorized(request)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (deferCompanyExecution()) return NextResponse.json({
+    status: "QUEUED", claimed: 0,
+    message: "Company tasks are executed by the native worker; this serverless request claimed no work.",
+  }, { status: 202 });
   try {
     const url = new URL(request.url);
     const requestedLimit = Number(url.searchParams.get("limit") || 1);
