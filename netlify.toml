@@ -29,3 +29,5 @@
 # The Next.js build remains deployable on Netlify. The forced production
 # rewrite above is intentionally the active path until the authoritative
 # Render database/runtime credentials are available directly to Netlify.
+# Migration architecture merged 2026-09-12; mirror mode intentionally retained
+# until guarded Render -> Supabase parity and native acceptance both pass.
