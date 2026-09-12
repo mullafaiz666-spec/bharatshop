@@ -4,9 +4,6 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths:
-      - "netlify.toml"
-      - ".github/workflows/netlify-production-deploy.yml"
 
 permissions:
   contents: read
@@ -17,12 +14,13 @@ concurrency:
 
 env:
   NETLIFY_SITE_ID: 75b5c168-6679-479d-b3a6-244e393fe1b0
+  NETLIFY_SITE_URL: https://bharatshop-35fd.netlify.app
   NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN || secrets.NETLIFY_PERSONAL_ACCESS_TOKEN || secrets.NETLIFY_TOKEN }}
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - name: Checkout validated main
         uses: actions/checkout@v4
@@ -30,10 +28,21 @@ jobs:
       - name: Require Netlify token
         if: ${{ env.NETLIFY_AUTH_TOKEN == '' }}
         run: |
-          echo "NETLIFY_AUTH_TOKEN is required for the production build trigger."
+          echo "NETLIFY_AUTH_TOKEN is required for the production deployment."
           exit 20
 
-      - name: Inspect safe Netlify build linkage
+      - name: Set up Node.js
+        if: ${{ env.NETLIFY_AUTH_TOKEN != '' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        if: ${{ env.NETLIFY_AUTH_TOKEN != '' }}
+        run: npm ci --no-audit --no-fund
+
+      - name: Verify existing Netlify project access
         if: ${{ env.NETLIFY_AUTH_TOKEN != '' }}
         shell: bash
         run: |
@@ -41,38 +50,58 @@ jobs:
           site=$(curl -sS --fail-with-body \
             -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" \
             "https://api.netlify.com/api/v1/sites/$NETLIFY_SITE_ID")
-          printf '%s' "$site" | jq '{
-            id,
-            name,
-            git_provider,
-            repo_url,
-            repo_path,
-            repo_branch,
-            build_image,
-            build_settings: {
-              provider: .build_settings.provider,
-              repo_path: .build_settings.repo_path,
-              repo_branch: .build_settings.repo_branch,
-              repo_url: .build_settings.repo_url,
-              installation_id: .build_settings.installation_id,
-              stop_builds: .build_settings.stop_builds,
-              base: .build_settings.base,
-              dir: .build_settings.dir,
-              cmd: .build_settings.cmd
-            },
-            repo: {
-              provider: .repo.provider,
-              repo_path: .repo.repo_path,
-              repo_branch: .repo.repo_branch,
-              repo_url: .repo.repo_url,
-              installation_id: .repo.installation_id,
-              stop_builds: .repo.stop_builds
-            },
-            managed_dns: .managed_dns,
-            manual_deploy: .manual_deploy,
-            deploy_hook: .deploy_hook,
-            processing_settings: .processing_settings
-          }'
+          printf '%s' "$site" | jq -e --arg id "$NETLIFY_SITE_ID" '.id == $id' >/dev/null
+          printf '%s' "$site" | jq '{id,name,url,ssl_url,updated_at}'
 
-      - name: Stop after safe linkage inspection
-        run: echo "Inspection only; no Netlify project settings or database data changed."
+      - name: Link checkout to the existing Netlify project
+        if: ${{ env.NETLIFY_AUTH_TOKEN != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx -y netlify-cli@latest link \
+            --id "$NETLIFY_SITE_ID" \
+            --auth "$NETLIFY_AUTH_TOKEN"
+
+      - name: Deploy current main to Netlify production
+        if: ${{ env.NETLIFY_AUTH_TOKEN != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx -y netlify-cli@latest deploy \
+            --prod \
+            --site "$NETLIFY_SITE_ID" \
+            --auth "$NETLIFY_AUTH_TOKEN" \
+            --context production \
+            --skip-functions-cache \
+            --env "BHARATSHOP_BUILD_REVISION=$GITHUB_SHA" \
+            --message "BharatShop production ${GITHUB_SHA}" \
+            --debug
+
+      - name: Verify live Netlify storefront and catalogue
+        if: ${{ env.NETLIFY_AUTH_TOKEN != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 18); do
+            home_code=$(curl -sS -o /tmp/home.html -w '%{http_code}' --max-time 30 "$NETLIFY_SITE_URL/" || true)
+            store_code=$(curl -sS -o /tmp/store.html -w '%{http_code}' --max-time 30 "$NETLIFY_SITE_URL/store" || true)
+            catalogue_code=$(curl -sS -o /tmp/catalogue.json -w '%{http_code}' --max-time 58 "$NETLIFY_SITE_URL/api/storefront/products?limit=1&page=1" || true)
+            echo "attempt=$attempt home=$home_code store=$store_code catalogue=$catalogue_code"
+            if [ "$home_code" = "200" ] && [ "$store_code" = "200" ] && [ "$catalogue_code" = "200" ]; then
+              grep -q "BharatShop" /tmp/home.html
+              node - <<'NODE'
+          const fs = require('fs');
+          const data = JSON.parse(fs.readFileSync('/tmp/catalogue.json', 'utf8'));
+          if (!Array.isArray(data.products) || data.products.length < 1) throw new Error('catalogue is empty');
+          if (!data.products[0]?.id || !data.products[0]?.title) throw new Error('catalogue product is incomplete');
+          console.log(`Netlify catalogue OK: total=${data.total ?? 'unknown'}, first=${data.products[0].title}`);
+          NODE
+              exit 0
+            fi
+            echo "--- catalogue response ---"
+            head -c 1000 /tmp/catalogue.json || true
+            echo
+            sleep 10
+          done
+          echo "Netlify production verification failed."
+          exit 1
