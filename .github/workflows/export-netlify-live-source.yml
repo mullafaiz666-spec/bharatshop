@@ -20,7 +20,8 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "537d65f953e8d0bf92d6e8595c72050442a1a9f6"
-          tar --exclude='.git' --exclude='node_modules' --exclude='.next' --exclude='bharatshop-source.tgz' -czf bharatshop-source.tgz .
+          tar --exclude='.git' --exclude='node_modules' --exclude='.next' -czf /tmp/bharatshop-source.tgz .
+          cp /tmp/bharatshop-source.tgz ./bharatshop-source.tgz
       - uses: actions/upload-artifact@v4
         with:
           name: bharatshop-source-537d65f
