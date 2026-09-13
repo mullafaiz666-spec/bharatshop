@@ -3,7 +3,9 @@ export type UpstreamIntegrationId =
   | "openhands"
   | "personalive"
   | "mumu-ai-novel"
-  | "marketing-skills";
+  | "marketing-skills"
+  | "dify"
+  | "librechat";
 
 type RuntimeMode = "external-service" | "agent-skills";
 
@@ -115,6 +117,34 @@ export const UPSTREAM_SPECS: readonly UpstreamSpec[] = [
     enabledEnv: "BHARATSHOP_MARKETING_SKILLS_ENABLED",
     notes: "Use the pinned sync script to install skills into .agents/skills for coding/agent workstations; these files are not loaded into the public storefront bundle.",
   },
+  {
+    id: "dify",
+    name: "Dify",
+    repository: "https://github.com/langgenius/dify",
+    commit: "79effdd498a0c53218fe85c11f565b680468e455",
+    purpose: "Visual AI workflow, agent and application orchestration for BharatShop internal automation experiments.",
+    mode: "external-service",
+    license: "Modified Apache-2.0 with Dify-specific multi-tenant and frontend branding conditions.",
+    enabledEnv: "BHARATSHOP_DIFY_ENABLED",
+    endpointEnv: "DIFY_SERVICE_URL",
+    tokenEnv: "DIFY_SERVICE_TOKEN",
+    probePath: "/",
+    notes: "Keep Dify isolated as a single-workspace service. Do not expose it as a multi-tenant SaaS or remove Dify frontend branding without satisfying its license/commercial terms.",
+  },
+  {
+    id: "librechat",
+    name: "LibreChat",
+    repository: "https://github.com/danny-avila/LibreChat",
+    commit: "e18606e5ce739af2d39a0d3c41bedb164ac69cb5",
+    purpose: "Self-hosted multi-provider chat and agent workspace for BharatShop operators and local AI experimentation.",
+    mode: "external-service",
+    license: "MIT",
+    enabledEnv: "BHARATSHOP_LIBRECHAT_ENABLED",
+    endpointEnv: "LIBRECHAT_SERVICE_URL",
+    tokenEnv: "LIBRECHAT_SERVICE_TOKEN",
+    probePath: "/",
+    notes: "Run LibreChat in its own Docker stack and keep BharatShop authentication, production data and agent permissions separate unless an explicit integration is reviewed.",
+  },
 ] as const;
 
 function boolEnv(name: string | undefined) {
@@ -177,6 +207,7 @@ export async function probeUpstreamIntegrations(timeoutMs = 6_000): Promise<Upst
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
         cache: "no-store",
         signal: AbortSignal.timeout(timeoutMs),
+        redirect: "follow",
       });
       return {
         ...status,

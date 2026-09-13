@@ -21,6 +21,8 @@
     "upstreams:bootstrap": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap-upstreams.ps1 -Mode Bootstrap",
     "upstreams:status": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap-upstreams.ps1 -Mode Status",
     "upstreams:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap-upstreams.ps1 -Mode Stop",
+    "upstreams:dify": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap-upstreams.ps1 -Mode Dify",
+    "upstreams:librechat": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap-upstreams.ps1 -Mode LibreChat",
     "pixverse:status": "node scripts/pixverse-creative.mjs status",
     "pixverse:capabilities": "node scripts/pixverse-creative.mjs capabilities",
     "pixverse:create": "node scripts/pixverse-creative.mjs create",

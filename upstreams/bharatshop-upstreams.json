@@ -42,6 +42,22 @@
       "integrationMode": "agent-skills",
       "license": "MIT",
       "productionDefault": "disabled"
+    },
+    {
+      "id": "dify",
+      "repository": "https://github.com/langgenius/dify",
+      "commit": "79effdd498a0c53218fe85c11f565b680468e455",
+      "integrationMode": "external-service",
+      "license": "Dify Open Source License (modified Apache-2.0 with additional conditions)",
+      "productionDefault": "disabled-single-workspace-only"
+    },
+    {
+      "id": "librechat",
+      "repository": "https://github.com/danny-avila/LibreChat",
+      "commit": "e18606e5ce739af2d39a0d3c41bedb164ac69cb5",
+      "integrationMode": "external-service",
+      "license": "MIT",
+      "productionDefault": "disabled"
     }
   ]
 }
