@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 
-test("production deploy safely fails over across existing Netlify credentials", () => {
+test("production deploy safely fails over across normalized existing Netlify credentials", () => {
   const workflow = read(".github/workflows/netlify-production-deploy.yml");
   assert.match(workflow, /NETLIFY_AUTH_TOKEN: \$\{\{ secrets\.NETLIFY_AUTH_TOKEN \}\}/);
   assert.match(workflow, /NETLIFY_PERSONAL_ACCESS_TOKEN: \$\{\{ secrets\.NETLIFY_PERSONAL_ACCESS_TOKEN \}\}/);
@@ -12,6 +12,11 @@ test("production deploy safely fails over across existing Netlify credentials", 
   assert.match(workflow, /NETLIFY_PERSONAL_ACCESS_TOKEN:-/);
   assert.match(workflow, /NETLIFY_TOKEN:-/);
   assert.match(workflow, /NETLIFY_AUTH_TOKEN:-/);
+  assert.match(workflow, /normalize_token\(\)/);
+  assert.match(workflow, /tr -d '\\r\\n'/);
+  assert.match(workflow, /s\/\^\[\[:space:\]\]\*\/\//);
+  assert.match(workflow, /s\/\[\[:space:\]\]\*\$\/\//);
+  assert.match(workflow, /candidate="\$\(normalize_token "\$raw_candidate"\)"/);
   assert.match(workflow, /::add-mask::\$candidate/);
   assert.match(workflow, /npx --yes netlify-cli@27\.5\.2 deploy/);
   assert.match(workflow, /--build/);
