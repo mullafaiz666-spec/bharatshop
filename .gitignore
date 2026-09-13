@@ -10,3 +10,7 @@ next-env.d.ts
 .native-worker/
 .netlify/
 .pixverse/
+.runtime/
+services/remotion/node_modules/
+services/remotion/renders/
+services/remotion/package-lock.json

@@ -6,8 +6,12 @@ const manifest = JSON.parse(fs.readFileSync(new URL("../upstreams/bharatshop-ups
 const envExample = fs.readFileSync(new URL("../.env.example", import.meta.url), "utf8");
 const registry = fs.readFileSync(new URL("../src/lib/integrations/upstream-ai.ts", import.meta.url), "utf8");
 const route = fs.readFileSync(new URL("../src/app/api/integrations/upstream/route.ts", import.meta.url), "utf8");
+const actionRoute = fs.readFileSync(new URL("../src/app/api/integrations/upstream/action/route.ts", import.meta.url), "utf8");
 const commandPage = fs.readFileSync(new URL("../src/app/dashboard/command-centre/page.tsx", import.meta.url), "utf8");
 const panel = fs.readFileSync(new URL("../src/components/UpstreamIntegrationsPanel.tsx", import.meta.url), "utf8");
+const packageJson = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+const bootstrap = fs.readFileSync(new URL("../scripts/bootstrap-upstreams.ps1", import.meta.url), "utf8");
+const remotionService = fs.readFileSync(new URL("../services/remotion/server.mjs", import.meta.url), "utf8");
 
 test("requested upstream repositories are pinned exactly once", () => {
   const expected = new Map([
@@ -30,6 +34,7 @@ test("PersonaLive cannot be enabled without explicit rights approval", () => {
   assert.equal(persona.productionDefault, "blocked-pending-rights-clearance");
   assert.match(registry, /PERSONALIVE_COMMERCIAL_USE_APPROVED/);
   assert.match(registry, /blockedByPolicy/);
+  assert.match(bootstrap, /BHARATSHOP_PERSONALIVE_ENABLED" "false/);
 });
 
 test("upstream credentials remain server-only", () => {
@@ -45,10 +50,12 @@ test("upstream credentials remain server-only", () => {
   }
 });
 
-test("health verification requires the existing automation token", () => {
+test("live health verification accepts authenticated admin or automation token", () => {
+  assert.match(route, /getAdminUser/);
   assert.match(route, /hasAutomationAccess/);
   assert.match(route, /verificationPerformed: canVerify/);
   assert.match(route, /BHARATSHOP_AUTOMATION_TOKEN/);
+  assert.match(route, /verifyRequested/);
 });
 
 test("local pinned marketing skills are surfaced as installed", () => {
@@ -57,11 +64,31 @@ test("local pinned marketing skills are surfaced as installed", () => {
   assert.match(route, /MARKETING_SKILLS_PIN/);
 });
 
-test("command centre exposes all upstream capability tracks", () => {
-  assert.match(commandPage, /UpstreamIntegrationsPanel/);
+test("command centre exposes live upstream controls before the legacy cockpit", () => {
+  assert.ok(commandPage.indexOf("<UpstreamIntegrationsPanel") < commandPage.indexOf("<CommandCentreV3"));
   for (const id of ["remotion", "openhands", "personalive", "mumu-ai-novel", "marketing-skills"]) {
     assert.match(panel, new RegExp(id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
-  assert.match(panel, /\/api\/integrations\/upstream/);
-  assert.match(panel, /PERSONALIVE_COMMERCIAL_USE_APPROVED/);
+  assert.match(panel, /\/api\/integrations\/upstream\?verify=1/);
+  assert.match(panel, /Render test MP4/);
+  assert.match(panel, /Open Agent Canvas/);
+  assert.match(panel, /Open Creative Studio/);
+});
+
+test("automated local runtime scripts isolate OpenHands and MuMu and start Remotion", () => {
+  assert.match(packageJson.scripts["dev:full"], /bootstrap-upstreams\.ps1/);
+  assert.match(packageJson.scripts["upstreams:bootstrap"], /bootstrap-upstreams\.ps1/);
+  assert.match(bootstrap, /ghcr\.io\/openhands\/agent-canvas:1\.18\.0/);
+  assert.match(bootstrap, /\/projects\/bharatshop/);
+  assert.match(bootstrap, new RegExp(manifest.upstreams.find((item) => item.id === "mumu-ai-novel").commit));
+  assert.match(bootstrap, /host\.docker\.internal:11434\/v1/);
+  assert.match(remotionService, /\/render/);
+  assert.match(remotionService, /4\.0\.524/);
+});
+
+test("upstream actions require admin authentication and keep PersonaLive blocked", () => {
+  assert.match(actionRoute, /getAdminUser/);
+  assert.match(actionRoute, /Admin authentication required/);
+  assert.match(actionRoute, /render-product-ad/);
+  assert.match(actionRoute, /blocked by policy|rights approval/i);
 });

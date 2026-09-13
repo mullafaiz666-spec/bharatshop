@@ -28,15 +28,8 @@ type Payload = {
   verificationPerformed: boolean;
   integrations: Integration[];
   summary: { total: number; configured: number; enabled: number; blocked: string[]; errors: string[] };
+  bootstrap?: { command: string; fullWorkstationCommand: string; statusCommand: string; stopCommand: string };
   policy: string;
-};
-
-const ENVIRONMENT: Record<Integration["id"], string[]> = {
-  remotion: ["BHARATSHOP_REMOTION_ENABLED", "REMOTION_SERVICE_URL", "REMOTION_SERVICE_TOKEN"],
-  openhands: ["BHARATSHOP_OPENHANDS_ENABLED", "OPENHANDS_AGENT_SERVER_URL", "OPENHANDS_AGENT_SERVER_TOKEN"],
-  personalive: ["BHARATSHOP_PERSONALIVE_ENABLED", "PERSONALIVE_SERVICE_URL", "PERSONALIVE_SERVICE_TOKEN", "PERSONALIVE_COMMERCIAL_USE_APPROVED"],
-  "mumu-ai-novel": ["BHARATSHOP_MUMU_ENABLED", "MUMU_AI_SERVICE_URL", "MUMU_AI_SERVICE_TOKEN"],
-  "marketing-skills": ["BHARATSHOP_MARKETING_SKILLS_ENABLED"],
 };
 
 const ICONS = {
@@ -52,7 +45,7 @@ function statusFor(item: Integration) {
   if (item.health) return item.health;
   if (item.enabled) return "READY";
   if (item.configured) return "CONFIGURED";
-  return "NOT CONFIGURED";
+  return "NOT_CONFIGURED";
 }
 
 function tone(status: string) {
@@ -64,13 +57,15 @@ function tone(status: string) {
 export default function UpstreamIntegrationsPanel() {
   const [data, setData] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch("/api/integrations/upstream", { cache: "no-store" });
+      const response = await fetch("/api/integrations/upstream?verify=1", { cache: "no-store", credentials: "same-origin" });
       const body = await response.json();
       if (!response.ok) throw new Error(body?.error || `HTTP ${response.status}`);
       setData(body as Payload);
@@ -87,71 +82,118 @@ export default function UpstreamIntegrationsPanel() {
 
   const readyCount = useMemo(() => (data?.integrations || []).filter((item) => statusFor(item) === "READY").length, [data]);
 
+  const runAction = useCallback(async (integration: Integration["id"], action: string) => {
+    const key = `${integration}:${action}`;
+    setBusy(key);
+    setError("");
+    setNotice("");
+    try {
+      const response = await fetch("/api/integrations/upstream/action", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ integration, action }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body?.error || `HTTP ${response.status}`);
+      if (action === "open" && body?.url) {
+        window.open(body.url, "_blank", "noopener,noreferrer");
+        setNotice(`${integration} opened in a new tab.`);
+      } else if (integration === "remotion" && action === "render-product-ad" && body?.result?.url) {
+        window.open(body.result.url, "_blank", "noopener,noreferrer");
+        setNotice("Remotion rendered a real BharatShop product-ad MP4 and opened it in a new tab.");
+      } else {
+        setNotice(`${integration} action completed.`);
+      }
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Integration action failed");
+    } finally {
+      setBusy("");
+    }
+  }, [load]);
+
   return (
-    <section className="mx-auto mt-5 max-w-[1800px] px-3 pb-8 md:px-6">
-      <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4 shadow-xl shadow-black/10 md:p-5">
-        <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.18em] text-orange-300">
-              <Bot size={16} /> Upstream AI Services
+    <section className="mx-auto max-w-[1800px] px-3 pt-4 md:px-6">
+      <div className="overflow-hidden rounded-3xl border border-orange-500/30 bg-slate-950 shadow-2xl shadow-orange-950/10">
+        <div className="border-b border-slate-800 bg-gradient-to-r from-orange-500/15 via-slate-950 to-cyan-500/10 p-5 md:p-7">
+          <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
+            <div>
+              <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.2em] text-orange-300"><Bot size={17} /> Connected Build Runtime</div>
+              <h1 className="mt-2 text-3xl font-black tracking-tight text-white md:text-4xl">BharatShop AI service automation</h1>
+              <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-300">
+                This panel live-probes the local services. Remotion renders product videos, OpenHands runs the isolated developer cockpit, MuMu runs the creative-writing studio, and Marketing Skills are loaded into the agent workspace. PersonaLive remains rights-gated.
+              </p>
             </div>
-            <h2 className="mt-1 text-2xl font-black text-slate-100">5 connected capability tracks</h2>
-            <p className="mt-1 max-w-4xl text-sm leading-6 text-slate-400">
-              Marketing Skills can run from this workstation. Remotion, OpenHands and MuMu stay isolated as external services. PersonaLive stays blocked until commercial/model rights are explicitly approved.
-            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`rounded-full border px-4 py-2 text-sm font-black ${readyCount >= 4 ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" : "border-amber-500/30 bg-amber-500/10 text-amber-300"}`}>{readyCount}/5 LIVE</span>
+              <button onClick={() => void load()} disabled={loading} className="rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-bold text-slate-100 hover:border-slate-500 disabled:opacity-50">
+                <RefreshCw size={15} className={`mr-2 inline ${loading ? "animate-spin" : ""}`} />Verify live
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="rounded-full border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-bold text-slate-300">{readyCount}/5 ready</span>
-            <button onClick={() => void load()} disabled={loading} className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-bold text-slate-200 hover:border-slate-500 disabled:opacity-50">
-              <RefreshCw size={15} className={`mr-2 inline ${loading ? "animate-spin" : ""}`} />Refresh
-            </button>
+
+          <div className="mt-5 grid gap-3 md:grid-cols-[1fr_auto] md:items-center">
+            <div className="rounded-2xl border border-slate-700 bg-black/30 px-4 py-3">
+              <div className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">One-command workstation</div>
+              <code className="mt-1 block break-all text-sm font-bold text-cyan-300">{data?.bootstrap?.fullWorkstationCommand || "npm run dev:full"}</code>
+              <p className="mt-1 text-xs text-slate-500">Syncs Marketing Skills, starts Remotion, starts Docker-isolated OpenHands + MuMu when Docker Desktop is available, validates TypeScript, then launches Next.js with Webpack.</p>
+            </div>
+            <div className="text-xs text-slate-500">Live verification: <span className="font-bold text-slate-300">{data?.verificationPerformed ? "authenticated" : "pending"}</span></div>
           </div>
         </div>
 
-        {error && <div className="mb-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">{error}</div>}
+        <div className="p-4 md:p-5">
+          {error && <div className="mb-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">{error}</div>}
+          {notice && <div className="mb-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">{notice}</div>}
 
-        <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-5">
-          {(data?.integrations || []).map((item) => {
-            const Icon = ICONS[item.id];
-            const status = statusFor(item);
-            return (
-              <article key={item.id} className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="rounded-xl border border-slate-800 bg-slate-950 p-2 text-orange-300"><Icon size={18} /></div>
-                  <span className={`rounded-full border px-2 py-1 text-[10px] font-black ${tone(status)}`}>{status}</span>
-                </div>
-                <h3 className="mt-3 font-black text-slate-100">{item.name}</h3>
-                <p className="mt-1 min-h-16 text-xs leading-5 text-slate-400">{item.purpose}</p>
-
-                {item.id === "marketing-skills" && item.localInstalled && (
-                  <div className="mt-3 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
-                    Local install verified{item.localFiles ? ` · ${item.localFiles} files` : ""}
+          <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-5">
+            {(data?.integrations || []).map((item) => {
+              const Icon = ICONS[item.id];
+              const status = statusFor(item);
+              const ready = status === "READY";
+              return (
+                <article key={item.id} className={`rounded-2xl border p-4 ${ready ? "border-emerald-500/20 bg-emerald-500/[0.04]" : "border-slate-800 bg-slate-900/60"}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="rounded-xl border border-slate-800 bg-slate-950 p-2 text-orange-300"><Icon size={18} /></div>
+                    <span className={`rounded-full border px-2 py-1 text-[10px] font-black ${tone(status)}`}>{status.replaceAll("_", " ")}</span>
                   </div>
-                )}
+                  <h3 className="mt-3 font-black text-slate-100">{item.name}</h3>
+                  <p className="mt-1 min-h-16 text-xs leading-5 text-slate-400">{item.purpose}</p>
 
-                {item.blockedByPolicy && (
-                  <div className="mt-3 flex gap-2 rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs leading-5 text-rose-200">
-                    <ShieldAlert size={15} className="mt-0.5 shrink-0" />Commercial activation is blocked pending rights approval.
+                  {item.id === "marketing-skills" && item.localInstalled && (
+                    <div className="mt-3 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">Local install verified{item.localFiles ? ` · ${item.localFiles} files` : ""}</div>
+                  )}
+
+                  {item.blockedByPolicy && (
+                    <div className="mt-3 flex gap-2 rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs leading-5 text-rose-200"><ShieldAlert size={15} className="mt-0.5 shrink-0" />Commercial activation remains blocked until rights are approved.</div>
+                  )}
+
+                  {!item.blockedByPolicy && !ready && item.mode === "external-service" && (
+                    <div className="mt-3 flex gap-2 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-200"><CircleAlert size={15} className="mt-0.5 shrink-0" />Run <code className="font-bold">npm run upstreams:bootstrap</code>.</div>
+                  )}
+
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {item.id === "remotion" && (
+                      <button disabled={!ready || Boolean(busy)} onClick={() => void runAction("remotion", "render-product-ad")} className="rounded-lg bg-orange-500 px-3 py-2 text-xs font-black text-slate-950 disabled:cursor-not-allowed disabled:opacity-40">{busy === "remotion:render-product-ad" ? "Rendering…" : "Render test MP4"}</button>
+                    )}
+                    {item.id === "openhands" && (
+                      <button disabled={!ready || Boolean(busy)} onClick={() => void runAction("openhands", "open")} className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs font-black text-cyan-200 disabled:cursor-not-allowed disabled:opacity-40">Open Agent Canvas</button>
+                    )}
+                    {item.id === "mumu-ai-novel" && (
+                      <button disabled={!ready || Boolean(busy)} onClick={() => void runAction("mumu-ai-novel", "open")} className="rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-xs font-black text-violet-200 disabled:cursor-not-allowed disabled:opacity-40">Open Creative Studio</button>
+                    )}
+                    {item.id === "marketing-skills" && ready && <span className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs font-black text-emerald-200">Agent skills active</span>}
                   </div>
-                )}
 
-                {!item.blockedByPolicy && !item.enabled && item.mode === "external-service" && (
-                  <div className="mt-3 flex gap-2 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-200">
-                    <CircleAlert size={15} className="mt-0.5 shrink-0" />Deploy the service separately, then add its endpoint below.
-                  </div>
-                )}
+                  <div className="mt-4 text-[10px] leading-4 text-slate-600">{item.license}</div>
+                </article>
+              );
+            })}
+          </div>
 
-                <div className="mt-4 space-y-1.5">
-                  <div className="text-[10px] font-black uppercase tracking-wider text-slate-600">Configuration</div>
-                  {ENVIRONMENT[item.id].map((name) => <code key={name} className="block break-all rounded-md bg-slate-950 px-2 py-1 text-[10px] text-slate-400">{name}</code>)}
-                </div>
-                <div className="mt-3 text-[10px] text-slate-600">{item.license}</div>
-              </article>
-            );
-          })}
+          {data?.policy && <div className="mt-4 rounded-xl border border-slate-800 bg-slate-900/50 px-4 py-3 text-xs leading-5 text-slate-500">{data.policy}</div>}
         </div>
-
-        {data?.policy && <div className="mt-4 rounded-xl border border-slate-800 bg-slate-900/50 px-4 py-3 text-xs leading-5 text-slate-500">{data.policy}</div>}
       </div>
     </section>
   );
