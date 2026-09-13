@@ -54,14 +54,14 @@ export async function GET(req: Request) {
   const enabled = integrations.filter((item) => item.enabled).length;
   const configured = integrations.filter((item) => item.configured).length;
   const blocked = integrations.filter((item) => item.blockedByPolicy).map((item) => item.id);
-  const errors = integrations.filter((item) => "health" in item && item.health === "ERROR").map((item) => item.id);
+  const errors = integrations.filter((item) => String("health" in item ? item.health || "" : "").toUpperCase() === "ERROR").map((item) => item.id);
 
   return NextResponse.json({
     status: errors.length ? "PARTIAL" : "READY",
     mode: "feature-gated-upstream-adapters",
     verificationPerformed: canVerify,
     anyConfigured: configured > 0,
-    anyConnected: integrations.some((item) => "health" in item ? item.health === "READY" : item.enabled),
+    anyConnected: integrations.some((item) => String("health" in item ? item.health || "" : "").toUpperCase() === "READY" || item.enabled),
     integrations,
     summary: {
       total: integrations.length,
