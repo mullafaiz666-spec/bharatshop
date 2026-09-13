@@ -37,10 +37,10 @@ const geminiKey = () => process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_
 const localBaseUrl = () => (process.env.AI_BASE_URL || process.env.LOCAL_AI_BASE_URL || "").replace(/\/+$/, "");
 const localApiKey = () => process.env.AI_API_KEY || process.env.LOCAL_AI_API_KEY || "ollama";
 const providerPreference = () => String(process.env.AI_PROVIDER || "").trim().toLowerCase();
-const useGemini = () => providerPreference() === "gemini" || (!providerPreference() && Boolean(geminiKey()));
+const shouldUseGemini = () => providerPreference() === "gemini" || (!providerPreference() && Boolean(geminiKey()));
 
 function resolveModel(requested) {
-  if (useGemini()) {
+  if (shouldUseGemini()) {
     const modelName = requested || process.env.GEMINI_MODEL || "gemini-3.7-flash";
     const google = createGoogle({ apiKey: geminiKey() });
     return { model: google(modelName), provider: "gemini", modelName };
@@ -79,8 +79,8 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, {
         ok: true,
         service: "bharatshop-ai-sdk-gateway",
-        provider: useGemini() ? "gemini" : "openai-compatible",
-        configured: useGemini() ? Boolean(geminiKey()) : Boolean(localBaseUrl()),
+        provider: shouldUseGemini() ? "gemini" : "openai-compatible",
+        configured: shouldUseGemini() ? Boolean(geminiKey()) : Boolean(localBaseUrl()),
       });
     }
 
