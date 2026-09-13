@@ -146,7 +146,7 @@ export async function GET(req: Request) {
       agentSuite: { status: agentSuite?.suite ? "READY" : agentSuite?.status || "UNKNOWN", suite: agentSuite?.suite, promptVersion: agentSuite?.promptVersion, operationalAgents: Array.isArray(agentSuite?.operationalAgents) ? agentSuite.operationalAgents.length : 0 },
     },
     actions: Object.entries(ACTIONS).map(([id, spec]) => ({ id, label: spec.label })),
-    policy: "Company Autopilot coordinates CEO, supply, catalog, growth and learning agents through the shared PostgreSQL work bus. It may research, verify, draft, stage and recommend. Paid ad activation, supplier purchases/payments, refunds/payouts, credentials and destructive database actions are never autonomously exposed.",
+    policy: "Company Autopilot coordinates CEO, supply, catalog, growth and learning agents through the shared PostgreSQL work bus. It may research, verify, draft, stage and recommend. Fashion generation creates CEO-pending records only. Paid ad activation, supplier purchases/payments, refunds/payouts, credentials and destructive database actions are never autonomously exposed.",
   });
 }
 
