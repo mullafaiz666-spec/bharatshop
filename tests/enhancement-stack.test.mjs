@@ -44,6 +44,12 @@ test("research runner blocks private-network targets", async () => {
   assert.match(source, /maxPages = Math\.max\(1, Math\.min\(20/);
 });
 
+test("research runner pins a published stable Crawlee release", async () => {
+  const pkg = JSON.parse(await text("services/research-runner/package.json"));
+  assert.equal(pkg.dependencies.crawlee, "3.18.1");
+  assert.doesNotMatch(pkg.dependencies.crawlee, /beta|rc/i);
+});
+
 test("root scripts expose enhancement lifecycle without changing root dependencies", async () => {
   const pkg = JSON.parse(await text("package.json"));
   assert.ok(pkg.scripts["enhancements:bootstrap"]);
