@@ -5,7 +5,11 @@ export type UpstreamIntegrationId =
   | "mumu-ai-novel"
   | "marketing-skills"
   | "dify"
-  | "librechat";
+  | "librechat"
+  | "agentmemory"
+  | "browser-use"
+  | "diagram-design"
+  | "scientific-agent-skills";
 
 type RuntimeMode = "external-service" | "agent-skills";
 
@@ -144,6 +148,53 @@ export const UPSTREAM_SPECS: readonly UpstreamSpec[] = [
     tokenEnv: "LIBRECHAT_SERVICE_TOKEN",
     probePath: "/",
     notes: "Run LibreChat in its own Docker stack and keep BharatShop authentication, production data and agent permissions separate unless an explicit integration is reviewed.",
+  },
+  {
+    id: "agentmemory",
+    name: "AgentMemory",
+    repository: "https://github.com/rohitg00/agentmemory",
+    commit: "e04ba88819c365c9acf9d6661ea802143e728bd6",
+    purpose: "Persistent shared memory, project recall, handoffs and provenance across BharatShop agents.",
+    mode: "external-service",
+    license: "Apache-2.0",
+    enabledEnv: "BHARATSHOP_AGENTMEMORY_ENABLED",
+    endpointEnv: "AGENTMEMORY_URL",
+    tokenEnv: "AGENTMEMORY_SECRET",
+    probePath: "/agentmemory/health",
+    notes: "Run AgentMemory as a separate local or private service. It augments agent context only and must not replace BharatShop PostgreSQL, authentication or operational source-of-truth data.",
+  },
+  {
+    id: "browser-use",
+    name: "Browser Use",
+    repository: "https://github.com/browser-use/browser-use",
+    commit: "6e1977daa0f67c9de0bc0e16aaec8b5833eeb8e0",
+    purpose: "Agentic browser-workflow guidance for research and operator tasks that require interactive websites.",
+    mode: "agent-skills",
+    license: "MIT",
+    enabledEnv: "BHARATSHOP_BROWSER_USE_SKILL_ENABLED",
+    notes: "Only the pinned workstation Agent Skill is synced. Browser execution remains outside the Netlify storefront and requires an explicitly configured local Browser Use runtime.",
+  },
+  {
+    id: "diagram-design",
+    name: "Diagram Design",
+    repository: "https://github.com/cathrynlavery/diagram-design",
+    commit: "8d8b2993ee2256ee7dfc0eeb3b5713aba3b60792",
+    purpose: "Architecture, data-flow, deployment, process and agent-workflow diagrams for engineering and operations.",
+    mode: "agent-skills",
+    license: "MIT",
+    enabledEnv: "BHARATSHOP_DIAGRAM_DESIGN_SKILL_ENABLED",
+    notes: "Installed as a pinned workstation Agent Skill. Generated diagrams are artifacts; the diagram skill is not bundled into customer-facing storefront JavaScript.",
+  },
+  {
+    id: "scientific-agent-skills",
+    name: "Scientific Agent Skills (selected)",
+    repository: "https://github.com/K-Dense-AI/scientific-agent-skills",
+    commit: "0b2afe68a5f9379097ad815e028af664f1e222b7",
+    purpose: "Selected statistical analysis and scientific-visualization skills for forecasting, experiments and business analysis.",
+    mode: "agent-skills",
+    license: "MIT repository; individual skill licenses vary and require review.",
+    enabledEnv: "BHARATSHOP_SCIENTIFIC_SKILLS_ENABLED",
+    notes: "BharatShop syncs only statsmodels and scientific-visualization. The complete scientific bundle is intentionally excluded to reduce attack surface, dependency weight and irrelevant context.",
   },
 ] as const;
 

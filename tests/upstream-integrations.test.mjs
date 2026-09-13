@@ -13,6 +13,7 @@ const packageJson = JSON.parse(fs.readFileSync(new URL("../package.json", import
 const bootstrap = fs.readFileSync(new URL("../scripts/bootstrap-upstreams.ps1", import.meta.url), "utf8");
 const runtimeWrapper = fs.readFileSync(new URL("../scripts/run-upstream-runtime.ps1", import.meta.url), "utf8");
 const remotionService = fs.readFileSync(new URL("../services/remotion/server.mjs", import.meta.url), "utf8");
+const upgradeSync = fs.readFileSync(new URL("../scripts/sync-agent-upgrade-skills.mjs", import.meta.url), "utf8");
 
 test("requested upstream repositories are pinned exactly once", () => {
   const expected = new Map([
@@ -28,6 +29,12 @@ test("requested upstream repositories are pinned exactly once", () => {
     ["trigger-dev", "https://github.com/triggerdotdev/trigger.dev"],
     ["langfuse-js", "https://github.com/langfuse/langfuse-js"],
     ["uptime-kuma", "https://github.com/louislam/uptime-kuma"],
+    ["agentmemory", "https://github.com/rohitg00/agentmemory"],
+    ["openviking", "https://github.com/volcengine/OpenViking"],
+    ["browser-use", "https://github.com/browser-use/browser-use"],
+    ["awesome-harness-engineering", "https://github.com/ai-boost/awesome-harness-engineering"],
+    ["diagram-design", "https://github.com/cathrynlavery/diagram-design"],
+    ["scientific-agent-skills", "https://github.com/K-Dense-AI/scientific-agent-skills"],
   ]);
   assert.equal(manifest.upstreams.length, expected.size);
   assert.equal(new Set(manifest.upstreams.map((item) => item.id)).size, expected.size);
@@ -61,6 +68,7 @@ test("upstream credentials remain server-only", () => {
     "MUMU_AI_SERVICE_TOKEN",
     "DIFY_SERVICE_TOKEN",
     "LIBRECHAT_SERVICE_TOKEN",
+    "AGENTMEMORY_SECRET",
   ];
   for (const name of sensitiveNames) {
     assert.match(envExample, new RegExp(`^${name}=`, "m"));
@@ -82,9 +90,33 @@ test("local pinned marketing skills are surfaced as installed", () => {
   assert.match(route, /MARKETING_SKILLS_PIN/);
 });
 
-test("command centre exposes all seven upstream capability tracks", () => {
+test("selected upgrade skills are pinned, additive and surfaced as installed", () => {
+  assert.match(route, /\.bharatshop-agent-upgrades\.json/);
+  assert.match(route, /UPGRADE_SKILL_PINS/);
+  assert.match(packageJson.scripts["skills:upgrades:sync"], /sync-agent-upgrade-skills\.mjs --apply/);
+  assert.match(packageJson.scripts["skills:upgrades:check"], /sync-agent-upgrade-skills\.mjs --check/);
+  assert.match(upgradeSync, /skills\/browser-use/);
+  assert.match(upgradeSync, /skills\/diagram-design/);
+  assert.match(upgradeSync, /skills\/statsmodels/);
+  assert.match(upgradeSync, /skills\/scientific-visualization/);
+  assert.doesNotMatch(upgradeSync, /fs\.rm\(TARGET\s*,/);
+});
+
+test("command centre exposes all eleven runtime capability tracks", () => {
   assert.ok(commandPage.indexOf("<UpstreamIntegrationsPanel") < commandPage.indexOf("<CommandCentreV3"));
-  for (const id of ["remotion", "openhands", "personalive", "mumu-ai-novel", "marketing-skills", "dify", "librechat"]) {
+  for (const id of [
+    "remotion",
+    "openhands",
+    "personalive",
+    "mumu-ai-novel",
+    "marketing-skills",
+    "dify",
+    "librechat",
+    "agentmemory",
+    "browser-use",
+    "diagram-design",
+    "scientific-agent-skills",
+  ]) {
     assert.match(panel, new RegExp(id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
   assert.match(panel, /\/api\/integrations\/upstream\?verify=1/);
@@ -93,6 +125,16 @@ test("command centre exposes all seven upstream capability tracks", () => {
   assert.match(panel, /Open Creative Studio/);
   assert.match(panel, /Open Dify Studio/);
   assert.match(panel, /Open LibreChat/);
+  assert.match(panel, /skills:upgrades:sync/);
+});
+
+test("AgentMemory is isolated and OpenViking stays out of the BharatShop runtime", () => {
+  assert.match(registry, /id: "agentmemory"/);
+  assert.match(registry, /\/agentmemory\/health/);
+  assert.match(registry, /AGENTMEMORY_URL/);
+  assert.match(registry, /must not replace BharatShop PostgreSQL/);
+  assert.doesNotMatch(registry, /id: "openviking"/);
+  assert.match(route, /OpenViking remains excluded from runtime integration pending AGPL architecture review/);
 });
 
 test("automated local runtime covers the safe service set", () => {
