@@ -10,6 +10,6 @@
     "start": "node server.mjs"
   },
   "dependencies": {
-    "crawlee": "4.0.0"
+    "crawlee": "3.18.1"
   }
 }
