@@ -1,0 +1,21 @@
+# Invocation-only overlay for `dsh --profile headless`.
+# The headless app does not mount agent presets, so its product delegation tools
+# must be added to the base/global tool layer. Provider bundles are installed in
+# the headless Profile separately by scripts/deepseek-harness.mjs.
+
+- insert:
+    - id: tool-subagent-codex
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: codex
+        toolName: subagent_codex
+        backgroundMode: one-shot
+        maxDepth: provider-managed
+
+    - id: tool-subagent-claude-code
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: claude-code
+        toolName: subagent_claude_code
+        backgroundMode: one-shot
+        maxDepth: provider-managed
