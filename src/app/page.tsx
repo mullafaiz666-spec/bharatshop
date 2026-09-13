@@ -1,5 +1,11 @@
 import MarketplaceHome from "@/components/storefront/MarketplaceHome";
+import StorefrontAgentSignal from "@/components/storefront/StorefrontAgentSignal";
 
 export default function RootPage() {
-  return <MarketplaceHome />;
+  return (
+    <>
+      <StorefrontAgentSignal />
+      <MarketplaceHome />
+    </>
+  );
 }
