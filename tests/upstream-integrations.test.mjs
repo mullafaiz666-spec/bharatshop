@@ -11,6 +11,7 @@ const commandPage = fs.readFileSync(new URL("../src/app/dashboard/command-centre
 const panel = fs.readFileSync(new URL("../src/components/UpstreamIntegrationsPanel.tsx", import.meta.url), "utf8");
 const packageJson = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const bootstrap = fs.readFileSync(new URL("../scripts/bootstrap-upstreams.ps1", import.meta.url), "utf8");
+const runtimeWrapper = fs.readFileSync(new URL("../scripts/run-upstream-runtime.ps1", import.meta.url), "utf8");
 const remotionService = fs.readFileSync(new URL("../services/remotion/server.mjs", import.meta.url), "utf8");
 
 test("requested upstream repositories are pinned exactly once", () => {
@@ -90,10 +91,14 @@ test("command centre exposes all seven upstream capability tracks", () => {
 });
 
 test("automated local runtime covers the safe service set", () => {
-  assert.match(packageJson.scripts["dev:full"], /bootstrap-upstreams\.ps1/);
-  assert.match(packageJson.scripts["upstreams:bootstrap"], /bootstrap-upstreams\.ps1/);
+  assert.match(packageJson.scripts["dev:full"], /run-upstream-runtime\.ps1/);
+  assert.match(packageJson.scripts["upstreams:bootstrap"], /run-upstream-runtime\.ps1/);
   assert.match(packageJson.scripts["upstreams:dify"], /-Mode Dify/);
   assert.match(packageJson.scripts["upstreams:librechat"], /-Mode LibreChat/);
+  assert.match(runtimeWrapper, /Docker\\Docker\\resources\\bin\\docker\.exe/);
+  assert.match(runtimeWrapper, /Docker Desktop\.exe/);
+  assert.match(runtimeWrapper, /Ensure-DockerDesktopReady/);
+  assert.match(runtimeWrapper, /bootstrap-upstreams\.ps1/);
   assert.match(bootstrap, /ghcr\.io\/openhands\/agent-canvas:1\.18\.0/);
   assert.match(bootstrap, /\/projects\/bharatshop/);
   assert.match(bootstrap, new RegExp(manifest.upstreams.find((item) => item.id === "mumu-ai-novel").commit));
