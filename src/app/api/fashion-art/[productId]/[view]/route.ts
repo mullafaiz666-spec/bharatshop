@@ -21,7 +21,7 @@ async function loadProductForImage(id: number) {
     [id],
   );
 
-  if (published.rows[0]) return published.rows[0];
+  if (published.rows[0]) return { row: published.rows[0], preview: false };
 
   // Admin dashboards need to preview CEO_PENDING / draft fashion products without
   // making those products publicly readable. Browser image requests carry the
@@ -38,7 +38,7 @@ async function loadProductForImage(id: number) {
     [id, admin.id],
   );
 
-  return preview.rows[0] || null;
+  return preview.rows[0] ? { row: preview.rows[0], preview: true } : null;
 }
 
 export async function GET(
@@ -54,12 +54,13 @@ export async function GET(
     return new Response("Invalid product", { status: 400 });
   }
 
-  const row = await loadProductForImage(id);
+  const product = await loadProductForImage(id);
 
-  if (!row) {
+  if (!product) {
     return new Response("Not found", { status: 404 });
   }
 
+  const { row, preview } = product;
   const specs = jsonObject(row.specifications_json);
   const palette = Array.isArray(specs.palette) ? specs.palette : [];
   const image = generateLocalEditorialRaster({
@@ -75,10 +76,11 @@ export async function GET(
     headers: {
       "Content-Type": image.mimeType,
       "Content-Length": String(image.bytes.length),
-      "Cache-Control": "public, max-age=86400, stale-while-revalidate=604800",
+      "Cache-Control": preview ? "private, no-store" : "public, max-age=86400, stale-while-revalidate=604800",
       "X-Content-Type-Options": "nosniff",
       "X-BharatShop-Fashion-Provider": image.provider,
       "X-BharatShop-Fashion-View": String(selectedView),
+      ...(preview ? { "X-BharatShop-Fashion-Preview": "admin" } : {}),
     },
   });
 }
