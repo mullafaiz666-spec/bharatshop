@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 
 const argv = process.argv.slice(2);
 const action = argv.shift() || "status";
@@ -34,9 +36,40 @@ function validateNoUnknown() {
   if (argv.length) fail(`Unknown argument(s): ${argv.join(" ")}`, 2);
 }
 
+function windowsPixVerseEntry() {
+  if (process.platform !== "win32") return null;
+  const npmCli = join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
+  if (!existsSync(npmCli)) return null;
+  const rootResult = spawnSync(process.execPath, [npmCli, "root", "--global"], {
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  if (rootResult.status !== 0) return null;
+  const packagePath = join(rootResult.stdout.trim(), "pixverse", "package.json");
+  if (!existsSync(packagePath)) return null;
+  try {
+    const pkg = JSON.parse(readFileSync(packagePath, "utf8"));
+    const binField = typeof pkg.bin === "string"
+      ? pkg.bin
+      : pkg.bin?.pixverse || Object.values(pkg.bin || {})[0];
+    if (!binField) return null;
+    const entry = resolve(dirname(packagePath), binField);
+    return existsSync(entry) ? entry : null;
+  } catch {
+    return null;
+  }
+}
+
+function pixVerseInvocation(args) {
+  const entry = windowsPixVerseEntry();
+  if (entry) return { command: process.execPath, args: [entry, ...args] };
+  return { command: "pixverse", args };
+}
+
 function runPixVerse(args, { passthrough = false } = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn("pixverse", args, {
+  return new Promise((resolvePromise, reject) => {
+    const invocation = pixVerseInvocation(args);
+    const child = spawn(invocation.command, invocation.args, {
       shell: false,
       stdio: passthrough ? "inherit" : ["ignore", "pipe", "pipe"],
       env: process.env,
@@ -56,7 +89,7 @@ function runPixVerse(args, { passthrough = false } = {}) {
       }
       reject(error);
     });
-    child.on("close", (code) => resolve({ code: code ?? 1, stdout, stderr }));
+    child.on("close", (code) => resolvePromise({ code: code ?? 1, stdout, stderr }));
   });
 }
 
