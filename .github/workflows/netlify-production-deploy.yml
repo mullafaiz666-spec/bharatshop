@@ -39,8 +39,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          normalize_token() {
+            printf '%s' "$1" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+          }
           readable=0
-          for candidate in "${NETLIFY_AUTH_TOKEN:-}" "${NETLIFY_PERSONAL_ACCESS_TOKEN:-}" "${NETLIFY_TOKEN:-}"; do
+          for raw_candidate in "${NETLIFY_AUTH_TOKEN:-}" "${NETLIFY_PERSONAL_ACCESS_TOKEN:-}" "${NETLIFY_TOKEN:-}"; do
+            candidate="$(normalize_token "$raw_candidate")"
             [ -z "$candidate" ] && continue
             echo "::add-mask::$candidate"
             if curl -fsS \
@@ -78,11 +82,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          normalize_token() {
+            printf '%s' "$1" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+          }
           success=0
           attempt=0
           rm -f /tmp/netlify-cli-deploy.json /tmp/netlify-cli-deploy.err
 
-          for candidate in "${NETLIFY_PERSONAL_ACCESS_TOKEN:-}" "${NETLIFY_TOKEN:-}" "${NETLIFY_AUTH_TOKEN:-}"; do
+          for raw_candidate in "${NETLIFY_PERSONAL_ACCESS_TOKEN:-}" "${NETLIFY_TOKEN:-}" "${NETLIFY_AUTH_TOKEN:-}"; do
+            candidate="$(normalize_token "$raw_candidate")"
             [ -z "$candidate" ] && continue
             attempt=$((attempt + 1))
             echo "::add-mask::$candidate"
