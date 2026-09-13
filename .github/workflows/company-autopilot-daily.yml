@@ -1,0 +1,49 @@
+name: BharatShop Company Autopilot Daily Queue
+
+on:
+  schedule:
+    - cron: "12 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bharatshop-company-autopilot-daily
+  cancel-in-progress: false
+
+jobs:
+  queue-company-plan:
+    if: vars.BHARATSHOP_AUTOPILOT_DISABLED != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify production and queue the idempotent daily company plan
+        env:
+          BHARATSHOP_URL: ${{ secrets.BHARATSHOP_URL }}
+          BHARATSHOP_AUTOMATION_TOKEN: ${{ secrets.BHARATSHOP_AUTOMATION_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$BHARATSHOP_URL"
+          test -n "$BHARATSHOP_AUTOMATION_TOKEN"
+
+          curl --silent --show-error --fail-with-body \
+            --connect-timeout 10 --max-time 45 --retry 2 --retry-delay 5 \
+            "$BHARATSHOP_URL/api/health" >/tmp/bharatshop-health.json
+
+          curl --silent --show-error --fail-with-body \
+            --connect-timeout 10 --max-time 60 --retry 2 --retry-delay 5 \
+            -X POST "$BHARATSHOP_URL/api/automation/free-stack-schedule" \
+            -H "Authorization: Bearer $BHARATSHOP_AUTOMATION_TOKEN" \
+            -H "x-automation-token: $BHARATSHOP_AUTOMATION_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data '{}' | tee /tmp/company-autopilot.json
+
+          node - <<'NODE'
+          const fs = require('fs');
+          const data = JSON.parse(fs.readFileSync('/tmp/company-autopilot.json', 'utf8'));
+          if (!data.ok) throw new Error(data.error || 'Company autopilot did not queue successfully');
+          if (data.mode !== 'company-autopilot-v2') throw new Error(`Unexpected autopilot mode: ${data.mode}`);
+          if (Number(data.plannedAgentCount || 0) < 10) throw new Error(`Autopilot plan is incomplete: ${data.plannedAgentCount}`);
+          console.log(`Company autopilot: ${data.status}; ${data.plannedAgentCount} planned agents; ${data.newlyQueuedCount} newly queued.`);
+          NODE

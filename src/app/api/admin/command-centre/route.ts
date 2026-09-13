@@ -4,7 +4,7 @@ import { getAdminUser } from "@/lib/admin-auth";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-type ActionName = "ceo-cycle" | "company-cycle" | "google-refresh" | "catalog-repair" | "product-research" | "fashion-capsule" | "fashion-trends" | "fashion-fronts" | "fashion-backs" | "learning-review" | "marketing-verify" | "payment-status";
+type ActionName = "autopilot-queue" | "ceo-cycle" | "company-cycle" | "google-refresh" | "catalog-repair" | "product-research" | "fashion-capsule" | "fashion-trends" | "fashion-fronts" | "fashion-backs" | "learning-review" | "marketing-verify" | "payment-status";
 
 type ActionSpec = {
   label: string;
@@ -15,6 +15,7 @@ type ActionSpec = {
 };
 
 const ACTIONS: Record<ActionName, ActionSpec> = {
+  "autopilot-queue": { label: "Queue today’s full company autopilot", path: "/api/automation/free-stack-schedule", method: "POST", body: {}, timeoutMs: 25_000 },
   "ceo-cycle": { label: "CEO operating cycle", path: "/api/automation/ceo-cycle?skipResearch=1", method: "POST", body: {}, timeoutMs: 150_000 },
   "company-cycle": { label: "Advance shared AI company queue", path: "/api/automation/company-cycle?limit=1", method: "POST", body: {}, timeoutMs: 220_000 },
   "google-refresh": { label: "Google market intelligence refresh", path: "/api/automation/google-intelligence", method: "POST", body: { force: true }, timeoutMs: 70_000 },
@@ -77,6 +78,10 @@ function compactService(value: any) {
   if (!value || typeof value !== "object") return { status: "UNKNOWN" };
   return {
     status: serviceStatus(value),
+    mode: value.mode,
+    queueMode: value.queueMode,
+    plannedAgentCount: value.plannedAgentCount,
+    laneCounts: value.laneCounts,
     provider: value.provider,
     styleVersion: value.styleVersion,
     photorealCurrentShots: value.photorealCurrentShots,
@@ -112,7 +117,8 @@ export async function GET(req: Request) {
       return { status: "ERROR", error: error instanceof Error ? error.message : String(error) };
     }
   }
-  const [fashion, fashionTrends, google, research, learning, agentSuite, agentHealth, advertising, payments] = await Promise.all([
+  const [autopilot, fashion, fashionTrends, google, research, learning, agentSuite, agentHealth, advertising, payments] = await Promise.all([
+    safeGet("/api/automation/free-stack-schedule"),
     safeGet("/api/automation/fashion-photo-studio"),
     safeGet("/api/automation/fashion-trend-intelligence"),
     safeGet("/api/automation/google-intelligence"),
@@ -128,6 +134,7 @@ export async function GET(req: Request) {
     operator: { id: admin.id, name: admin.name, role: admin.role },
     automationConfigured: Boolean(automationToken),
     services: {
+      companyAutopilot: compactService(autopilot),
       fashionStudio: compactService(fashion),
       fashionTrendIntelligence: compactService(fashionTrends),
       googleIntelligence: compactService(google),
@@ -139,7 +146,7 @@ export async function GET(req: Request) {
       agentSuite: { status: agentSuite?.suite ? "READY" : agentSuite?.status || "UNKNOWN", suite: agentSuite?.suite, promptVersion: agentSuite?.promptVersion, operationalAgents: Array.isArray(agentSuite?.operationalAgents) ? agentSuite.operationalAgents.length : 0 },
     },
     actions: Object.entries(ACTIONS).map(([id, spec]) => ({ id, label: spec.label })),
-    policy: "Command Centre only invokes existing evidence-gated workflows and the bounded shared company work queue. Fashion generation creates CEO-pending records only. Paid ad activation, supplier purchases/payments, refunds/payouts, credentials and destructive database actions are not exposed here.",
+    policy: "Company Autopilot coordinates CEO, supply, catalog, growth and learning agents through the shared PostgreSQL work bus. It may research, verify, draft, stage and recommend. Fashion generation creates CEO-pending records only. Paid ad activation, supplier purchases/payments, refunds/payouts, credentials and destructive database actions are never autonomously exposed.",
   });
 }
 
