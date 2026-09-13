@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "generatedAt": "2026-09-13",
   "policy": "Pin upstream revisions, integrate through isolated service or Agent Skills boundaries, and never overwrite BharatShop database/auth/deployment ownership.",
   "upstreams": [
@@ -98,6 +98,66 @@
       "integrationMode": "external-service",
       "license": "MIT",
       "productionDefault": "disabled"
+    },
+    {
+      "id": "agentmemory",
+      "repository": "https://github.com/rohitg00/agentmemory",
+      "commit": "e04ba88819c365c9acf9d6661ea802143e728bd6",
+      "integrationMode": "external-memory-service",
+      "license": "Apache-2.0",
+      "productionDefault": "disabled",
+      "decision": "adopt-isolated",
+      "reason": "Adds persistent cross-agent memory, searchable project context, provenance and handoff support without replacing BharatShop PostgreSQL."
+    },
+    {
+      "id": "openviking",
+      "repository": "https://github.com/volcengine/OpenViking",
+      "commit": "fafccb1c2bb3439632b9526f6a3e687c0058089b",
+      "integrationMode": "external-context-service",
+      "license": "AGPL-3.0",
+      "productionDefault": "blocked-pending-agpl-architecture-review",
+      "decision": "do-not-merge-code",
+      "reason": "Useful context database, but it overlaps AgentMemory and its AGPL network-service obligations make a direct BharatShop code merge inappropriate."
+    },
+    {
+      "id": "browser-use",
+      "repository": "https://github.com/browser-use/browser-use",
+      "commit": "6e1977daa0f67c9de0bc0e16aaec8b5833eeb8e0",
+      "integrationMode": "agent-skills-workstation",
+      "license": "MIT",
+      "productionDefault": "disabled",
+      "decision": "adopt-workstation-skill",
+      "reason": "Adds agentic browser control for research and operations while keeping browser execution out of the Netlify storefront runtime."
+    },
+    {
+      "id": "awesome-harness-engineering",
+      "repository": "https://github.com/ai-boost/awesome-harness-engineering",
+      "commit": "1cf81ec525f81fd21c2e1354df47e8e51e42e39c",
+      "integrationMode": "engineering-reference",
+      "license": "CC0-1.0",
+      "productionDefault": "reference-only",
+      "decision": "adopt-patterns-not-code",
+      "reason": "Reference collection rather than a runtime dependency; use its eval, memory, permissions and verification patterns in BharatShop tests and agent harnesses."
+    },
+    {
+      "id": "diagram-design",
+      "repository": "https://github.com/cathrynlavery/diagram-design",
+      "commit": "8d8b2993ee2256ee7dfc0eeb3b5713aba3b60792",
+      "integrationMode": "agent-skills",
+      "license": "MIT",
+      "productionDefault": "disabled",
+      "decision": "adopt-agent-skill",
+      "reason": "Useful for architecture, agent workflow, data-flow and deployment diagrams; safe as a workstation Agent Skill rather than storefront code."
+    },
+    {
+      "id": "scientific-agent-skills",
+      "repository": "https://github.com/K-Dense-AI/scientific-agent-skills",
+      "commit": "0b2afe68a5f9379097ad815e028af664f1e222b7",
+      "integrationMode": "selective-agent-skills",
+      "license": "MIT repository; individual skill licenses vary",
+      "productionDefault": "disabled-selective-skills-only",
+      "decision": "adopt-selected-skills",
+      "reason": "Only business-relevant statistical and visualization skills are approved; the full scientific bundle is intentionally not imported."
     }
   ]
 }
