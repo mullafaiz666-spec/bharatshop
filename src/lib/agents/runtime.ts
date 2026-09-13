@@ -11,6 +11,7 @@ import {
   resolveProductImages,
 } from "@/lib/ai/ceo-tools";
 import { recordAudit, recordToolExecution } from "@/lib/ai/audit";
+import { recallAgentMemory, rememberAgentMemory } from "@/lib/agents/agentmemory";
 import { catalogQuery } from "@/lib/agents/tools";
 import { AGENT_CONTRACTS, type OperationalAgentId } from "@/lib/agents/contracts";
 
@@ -50,7 +51,7 @@ export type AgentRuntimeResult = {
   toolExecutions: RuntimeTrace[];
   handoffs: Array<{ agentId: OperationalAgentId; objective: string; status: string }>;
   stepsUsed: number;
-  memory: "postgres+request" | "request-only";
+  memory: "agentmemory+postgres+request" | "agentmemory+request" | "postgres+request" | "request-only";
   modelError?: string;
 };
 
@@ -69,6 +70,7 @@ type RunState = {
   trace: RuntimeTrace[];
   handoffs: Array<{ agentId: OperationalAgentId; objective: string; status: string }>;
   memoryAvailable: boolean;
+  agentMemoryAvailable: boolean;
   depth: number;
 };
 
@@ -448,7 +450,7 @@ async function runAgentInternal(request: AgentRuntimeRequest, depth = 0, persist
   const runId = crypto.randomUUID();
   const sessionId = String(request.sessionId || crypto.randomUUID()).slice(0, 160);
   const origin = String(request.origin || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").replace(/\/$/, "");
-  const state: RunState = { runId, sessionId, origin, trace: [], handoffs: [], memoryAvailable: false, depth };
+  const state: RunState = { runId, sessionId, origin, trace: [], handoffs: [], memoryAvailable: false, agentMemoryAvailable: false, depth };
   const objective = String(request.objective || "").trim();
   const maxSteps = Math.max(2, Math.min(6, Number(request.maxSteps || 4)));
   const provider = aiProviderName();
@@ -457,6 +459,8 @@ async function runAgentInternal(request: AgentRuntimeRequest, depth = 0, persist
   if (!objective) throw new Error("objective is required");
 
   const saved = persistMemory ? await loadMemory(sessionId, agentId) : [];
+  const longTermMemory = persistMemory ? await recallAgentMemory({ agentId, sessionId, query: objective, limit: 5 }) : [];
+  state.agentMemoryAvailable = longTermMemory.length > 0;
   state.memoryAvailable = persistMemory ? await saveMemory(sessionId, agentId, "user", objective) : false;
   const requestHistory = Array.isArray(request.history) ? request.history.slice(-10) : [];
   const history = (saved.length ? saved : requestHistory).slice(-10);
@@ -467,7 +471,10 @@ async function runAgentInternal(request: AgentRuntimeRequest, depth = 0, persist
     ...history.filter((m) => m.content && !(m.role === "user" && m.content.trim() === objective)).map((m) => ({ role: m.role, content: truncate(m.content, 900) } as AIMessage)),
   ];
   const extraContext = contextMessage(request.context || {});
-  const initial = [objective, extraContext, seeded.length ? `Verified observations already gathered:\n${seeded.join("\n")}` : ""].filter(Boolean).join("\n\n");
+  const recalledContext = longTermMemory.length
+    ? `Long-term AgentMemory recall (historical context only; verify operational facts with tools):\n${longTermMemory.map((item, index) => `${index + 1}. ${truncate(item, 1200)}`).join("\n")}`
+    : "";
+  const initial = [objective, extraContext, recalledContext, seeded.length ? `Verified observations already gathered:\n${seeded.join("\n")}` : ""].filter(Boolean).join("\n\n");
   messages.push({ role: "user", content: truncate(initial, 6500) });
 
   let finalAnswer = "";
@@ -534,14 +541,21 @@ async function runAgentInternal(request: AgentRuntimeRequest, depth = 0, persist
 
   const status: AgentRuntimeResult["status"] = finalAnswer ? "completed" : "unavailable";
   const reply = finalAnswer || `The local ${model} model is unavailable, so ${contract.name} will not invent an answer. ${state.trace.filter((x) => x.kind === "tool" && x.status === "SUCCESS").length} verified tool step(s) completed before the model stopped.`;
-  if (persistMemory) state.memoryAvailable = (await saveMemory(sessionId, agentId, "assistant", reply)) || state.memoryAvailable;
+  if (persistMemory) {
+    state.memoryAvailable = (await saveMemory(sessionId, agentId, "assistant", reply)) || state.memoryAvailable;
+    state.agentMemoryAvailable = (await rememberAgentMemory({
+      agentId,
+      sessionId,
+      content: `Objective: ${objective}\nOutcome: ${reply}`,
+    })) || state.agentMemoryAvailable;
+  }
   try {
     await recordAudit({
       agentName: contract.name,
       eventType: "AGENT_RUNTIME_RUN",
       status: status === "completed" ? "SUCCESS" : "FAILED",
       summary: status === "completed" ? "Multi-step conversational agent run completed." : "Agent model was unavailable before a final answer.",
-      evidence: { runId, sessionId, agentId, tools: state.trace.map((x) => ({ tool: x.tool, status: x.status, durationMs: x.durationMs })), handoffs: state.handoffs, stepsUsed, model, provider, modelError: modelError || undefined },
+      evidence: { runId, sessionId, agentId, tools: state.trace.map((x) => ({ tool: x.tool, status: x.status, durationMs: x.durationMs })), handoffs: state.handoffs, stepsUsed, model, provider, agentMemory: state.agentMemoryAvailable, modelError: modelError || undefined },
     });
   } catch {}
 
@@ -559,7 +573,9 @@ async function runAgentInternal(request: AgentRuntimeRequest, depth = 0, persist
     toolExecutions: state.trace,
     handoffs: state.handoffs,
     stepsUsed,
-    memory: state.memoryAvailable ? "postgres+request" : "request-only",
+    memory: state.agentMemoryAvailable
+      ? (state.memoryAvailable ? "agentmemory+postgres+request" : "agentmemory+request")
+      : (state.memoryAvailable ? "postgres+request" : "request-only"),
     ...(modelError ? { modelError: modelError.slice(0, 700) } : {}),
   };
 }
