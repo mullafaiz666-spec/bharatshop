@@ -16,7 +16,7 @@ test('exposes one-command Personal AI setup/start/status/task scripts', () => {
 
 test('Personal AI routes core free capabilities through local Ollama', () => {
   assert.match(personalAi, /qwen3\.5:4b/);
-  assert.match(personalAi, /ollama', \['launch', 'dsh'/);
+  assert.match(personalAi, /run\(ollama, \['launch', 'dsh'/);
   assert.match(personalAi, /Browser Use/);
   assert.match(personalAi, /agencyAnswer/);
   assert.match(personalAi, /runCompany/);
