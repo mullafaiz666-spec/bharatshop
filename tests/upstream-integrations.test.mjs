@@ -23,6 +23,11 @@ test("requested upstream repositories are pinned exactly once", () => {
     ["marketing-skills", "https://github.com/coreyhaines31/marketingskills"],
     ["dify", "https://github.com/langgenius/dify"],
     ["librechat", "https://github.com/danny-avila/LibreChat"],
+    ["vercel-ai-sdk", "https://github.com/vercel/ai"],
+    ["crawlee-research", "https://github.com/apify/crawlee"],
+    ["trigger-dev", "https://github.com/triggerdotdev/trigger.dev"],
+    ["langfuse-js", "https://github.com/langfuse/langfuse-js"],
+    ["uptime-kuma", "https://github.com/louislam/uptime-kuma"],
   ]);
   assert.equal(manifest.upstreams.length, expected.size);
   assert.equal(new Set(manifest.upstreams.map((item) => item.id)).size, expected.size);
