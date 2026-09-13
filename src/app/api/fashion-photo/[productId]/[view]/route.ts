@@ -1,4 +1,5 @@
 import { pool } from "@/db";
+import { getAdminUser } from "@/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +30,32 @@ function localArtFallback(req: Request, productId: number, view: number, reason:
   });
 }
 
+async function loadCachedImage(productId: number, view: number) {
+  const published = await pool.query(
+    `SELECT c.mime_type,c.image_bytes,c.provider,c.created_at
+       FROM fashion_media_cache c
+       JOIN products p ON p.id=c.product_id
+       WHERE c.product_id=$1 AND c.view=$2 AND p.status='Published' LIMIT 1`,
+    [productId, view]
+  );
+
+  if (published.rows[0]) return { row: published.rows[0], preview: false };
+
+  // Pending/draft product photos are visible only inside the owning admin session.
+  const admin = await getAdminUser();
+  if (!admin) return null;
+
+  const preview = await pool.query(
+    `SELECT c.mime_type,c.image_bytes,c.provider,c.created_at
+       FROM fashion_media_cache c
+       JOIN products p ON p.id=c.product_id
+       WHERE c.product_id=$1 AND c.view=$2 AND p.user_id=$3 LIMIT 1`,
+    [productId, view, admin.id]
+  );
+
+  return preview.rows[0] ? { row: preview.rows[0], preview: true } : null;
+}
+
 export async function GET(req: Request, { params }: { params: Promise<{ productId: string; view: string }> }) {
   const { productId, view } = await params;
   const id = Number(productId);
@@ -39,14 +66,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ productI
 
   try {
     await ensureTable();
-    const result = await pool.query(
-      `SELECT c.mime_type,c.image_bytes,c.provider,c.created_at
-       FROM fashion_media_cache c
-       JOIN products p ON p.id=c.product_id
-       WHERE c.product_id=$1 AND c.view=$2 AND p.status='Published' LIMIT 1`,
-      [id, v]
-    );
-    const row = result.rows[0];
+    const image = await loadCachedImage(id, v);
+    const row = image?.row;
     const mimeType = String(row?.mime_type || "");
     const byteLength = Number(row?.image_bytes?.length || 0);
 
@@ -58,14 +79,16 @@ export async function GET(req: Request, { params }: { params: Promise<{ productI
 
     const style = new URL(req.url).searchParams.get("style") || "legacy";
     const createdAt = new Date(row.created_at);
+    const preview = image?.preview === true;
     return new Response(row.image_bytes, {
       headers: {
         "Content-Type": mimeType,
-        "Cache-Control": "public, max-age=300, must-revalidate",
+        "Cache-Control": preview ? "private, no-store" : "public, max-age=300, must-revalidate",
         ...(Number.isNaN(createdAt.getTime()) ? {} : { "Last-Modified": createdAt.toUTCString() }),
         "X-Fashion-Image-Provider": String(row.provider || "editorial-ai"),
         "X-Fashion-Style": style,
         "X-Content-Type-Options": "nosniff",
+        ...(preview ? { "X-BharatShop-Fashion-Preview": "admin" } : {}),
       },
     });
   } catch (error) {
