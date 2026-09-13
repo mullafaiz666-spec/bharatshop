@@ -23,9 +23,6 @@ const PRODUCT_PROFILES = ['web', 'headless'];
 
 const mode = (process.argv[2] || 'status').toLowerCase();
 const args = process.argv.slice(3);
-const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-const dsh = process.platform === 'win32' ? 'dsh.cmd' : 'dsh';
 const ollama = process.platform === 'win32' ? 'ollama.exe' : 'ollama';
 
 function parseNodeVersion() {
@@ -89,9 +86,45 @@ function runOrExit(command, commandArgs, options = {}) {
   if (status !== 0) process.exit(status);
 }
 
+function resolveNpmCli(kind) {
+  const filename = kind === 'npx' ? 'npx-cli.js' : 'npm-cli.js';
+  const npmExecPath = process.env.npm_execpath;
+
+  if (npmExecPath) {
+    const candidate = join(dirname(npmExecPath), filename);
+    if (existsSync(candidate)) return candidate;
+  }
+
+  const bundledCandidate = join(dirname(process.execPath), 'node_modules', 'npm', 'bin', filename);
+  if (existsSync(bundledCandidate)) return bundledCandidate;
+
+  return null;
+}
+
+function runPackageCli(kind, cliArgs, options = {}) {
+  if (process.platform !== 'win32') {
+    return run(kind, cliArgs, options);
+  }
+
+  const cliPath = resolveNpmCli(kind);
+  if (!cliPath) {
+    console.error(`Could not locate ${kind}-cli.js next to the active Node.js installation.`);
+    console.error(`Node executable: ${process.execPath}`);
+    console.error('Repair or reinstall Node.js/npm, then rerun this command.');
+    return 1;
+  }
+
+  return run(process.execPath, [cliPath, ...cliArgs], options);
+}
+
+function runPackageCliOrExit(kind, cliArgs, options = {}) {
+  const status = runPackageCli(kind, cliArgs, options);
+  if (status !== 0) process.exit(status);
+}
+
 function npxDsh(dshArgs, env = safeHarnessEnv()) {
   mkdirSync(DSH_HOME, { recursive: true });
-  return run(npx, ['--yes', `@deepseek-ai/dsh@${DSH_VERSION}`, ...dshArgs], { env });
+  return runPackageCli('npx', ['--yes', `@deepseek-ai/dsh@${DSH_VERSION}`, ...dshArgs], { env });
 }
 
 function npxDshOrExit(dshArgs, env = safeHarnessEnv()) {
@@ -148,15 +181,25 @@ function assertProductSetup({ requirePreset = false, profile } = {}) {
   process.exit(2);
 }
 
+function globalDshStatus() {
+  if (process.platform === 'win32') {
+    const where = commandResult('where.exe', ['dsh']);
+    return where.status === 0 ? 'installed' : 'not installed (npx launcher still supported)';
+  }
+
+  const dshVersion = commandResult('dsh', ['--version']);
+  return dshVersion.status === 0
+    ? (dshVersion.stdout || '').trim() || 'installed'
+    : 'not installed (npx launcher still supported)';
+}
+
 function printStatus() {
   console.log('=== BharatShop DeepSeek Harness status ===');
   console.log(`workspace: ${ROOT}`);
   console.log(`DSH_HOME: ${DSH_HOME}`);
   console.log(`pinned DSH: ${DSH_VERSION}`);
   console.log(`Node: ${process.versions.node} (${nodeIsSupported() ? 'READY' : 'UPGRADE REQUIRED'})`);
-
-  const dshVersion = commandResult(dsh, ['--version']);
-  console.log(`global dsh: ${dshVersion.status === 0 ? (dshVersion.stdout || '').trim() || 'installed' : 'not installed (npx launcher still supported)'}`);
+  console.log(`global dsh: ${globalDshStatus()}`);
 
   const ollamaVersion = commandResult(ollama, ['--version']);
   console.log(`Ollama: ${ollamaVersion.status === 0 ? (ollamaVersion.stdout || ollamaVersion.stderr || '').trim() || 'installed' : 'not detected'}`);
@@ -199,7 +242,7 @@ switch (mode) {
     assertSupportedNode();
     mkdirSync(DSH_HOME, { recursive: true });
     console.log(`Installing @deepseek-ai/dsh@${DSH_VERSION} globally...`);
-    runOrExit(npm, ['install', '--global', `@deepseek-ai/dsh@${DSH_VERSION}`], { env: safeHarnessEnv() });
+    runPackageCliOrExit('npm', ['install', '--global', `@deepseek-ai/dsh@${DSH_VERSION}`], { env: safeHarnessEnv() });
     console.log('DeepSeek Harness installed.');
     console.log('Next: node scripts/deepseek-harness.mjs subagents');
     break;
