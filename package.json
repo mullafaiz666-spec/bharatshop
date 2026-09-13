@@ -21,6 +21,8 @@
     "agents:status": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-company-autopilot.ps1 -Mode Status",
     "skills:marketing:sync": "node scripts/sync-marketing-skills.mjs --apply",
     "skills:marketing:check": "node scripts/sync-marketing-skills.mjs --check",
+    "skills:upgrades:sync": "node scripts/sync-agent-upgrade-skills.mjs --apply",
+    "skills:upgrades:check": "node scripts/sync-agent-upgrade-skills.mjs --check",
     "upstreams:bootstrap": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-upstream-runtime.ps1 -Mode Bootstrap",
     "upstreams:status": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-upstream-runtime.ps1 -Mode Status",
     "upstreams:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-upstream-runtime.ps1 -Mode Stop",
