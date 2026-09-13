@@ -6,6 +6,8 @@ const manifest = JSON.parse(fs.readFileSync(new URL("../upstreams/bharatshop-ups
 const envExample = fs.readFileSync(new URL("../.env.example", import.meta.url), "utf8");
 const registry = fs.readFileSync(new URL("../src/lib/integrations/upstream-ai.ts", import.meta.url), "utf8");
 const route = fs.readFileSync(new URL("../src/app/api/integrations/upstream/route.ts", import.meta.url), "utf8");
+const commandPage = fs.readFileSync(new URL("../src/app/dashboard/command-centre/page.tsx", import.meta.url), "utf8");
+const panel = fs.readFileSync(new URL("../src/components/UpstreamIntegrationsPanel.tsx", import.meta.url), "utf8");
 
 test("requested upstream repositories are pinned exactly once", () => {
   const expected = new Map([
@@ -47,4 +49,19 @@ test("health verification requires the existing automation token", () => {
   assert.match(route, /hasAutomationAccess/);
   assert.match(route, /verificationPerformed: canVerify/);
   assert.match(route, /BHARATSHOP_AUTOMATION_TOKEN/);
+});
+
+test("local pinned marketing skills are surfaced as installed", () => {
+  assert.match(route, /\.bharatshop-marketingskills\.json/);
+  assert.match(route, /localInstalled/);
+  assert.match(route, /MARKETING_SKILLS_PIN/);
+});
+
+test("command centre exposes all upstream capability tracks", () => {
+  assert.match(commandPage, /UpstreamIntegrationsPanel/);
+  for (const id of ["remotion", "openhands", "personalive", "mumu-ai-novel", "marketing-skills"]) {
+    assert.match(panel, new RegExp(id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+  assert.match(panel, /\/api\/integrations\/upstream/);
+  assert.match(panel, /PERSONALIVE_COMMERCIAL_USE_APPROVED/);
 });
