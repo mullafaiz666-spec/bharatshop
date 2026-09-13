@@ -15,10 +15,56 @@ $AiPort = 8209
 $ResearchPort = 8207
 $UptimePort = 8210
 $UptimeImage = "louislam/uptime-kuma:2.5.4"
+$script:DockerCli = $null
 
 New-Item -ItemType Directory -Force -Path $Runtime | Out-Null
 if (!(Test-Path $EnvFile)) { New-Item -ItemType File -Path $EnvFile | Out-Null }
 if (!(Test-Path $SecretsFile)) { New-Item -ItemType File -Path $SecretsFile | Out-Null }
+
+function Resolve-DockerCli {
+  $existing = Get-Command docker -ErrorAction SilentlyContinue
+  if ($existing) { return $existing.Source }
+
+  $candidates = @(
+    (Join-Path $env:ProgramFiles "Docker\Docker\resources\bin\docker.exe"),
+    (Join-Path $env:ProgramFiles "Docker\Docker\resources\docker.exe"),
+    (Join-Path ${env:ProgramFiles(x86)} "Docker\Docker\resources\bin\docker.exe")
+  ) | Where-Object { $_ -and (Test-Path $_) }
+
+  $docker = $candidates | Select-Object -First 1
+  if ($docker) {
+    $bin = Split-Path -Parent $docker
+    if (($env:PATH -split ';') -notcontains $bin) { $env:PATH = "$bin;$env:PATH" }
+  }
+  return $docker
+}
+
+function Ensure-DockerReady([int]$Seconds = 240) {
+  $script:DockerCli = Resolve-DockerCli
+  if (!$script:DockerCli) { return $false }
+  try {
+    & $script:DockerCli info *> $null
+    if ($LASTEXITCODE -eq 0) { return $true }
+  } catch {}
+
+  $desktop = Join-Path $env:ProgramFiles "Docker\Docker\Docker Desktop.exe"
+  if (Test-Path $desktop) {
+    if (!(Get-Process "Docker Desktop" -ErrorAction SilentlyContinue)) {
+      Write-Host "Starting Docker Desktop..." -ForegroundColor Cyan
+      Start-Process $desktop | Out-Null
+    }
+  }
+
+  $deadline = (Get-Date).AddSeconds($Seconds)
+  do {
+    try {
+      & $script:DockerCli info *> $null
+      if ($LASTEXITCODE -eq 0) { return $true }
+    } catch {}
+    Start-Sleep 3
+  } while ((Get-Date) -lt $deadline)
+  return $false
+}
 
 function Set-EnvFileValue([string]$File, [string]$Key, [string]$Value) {
   $lines = @(Get-Content $File -ErrorAction SilentlyContinue)
@@ -79,7 +125,9 @@ function Stop-Pid([string]$Name) {
   }
 }
 function Docker-Ready {
-  try { & docker info *> $null; return ($LASTEXITCODE -eq 0) } catch { return $false }
+  if (!$script:DockerCli) { $script:DockerCli = Resolve-DockerCli }
+  if (!$script:DockerCli) { return $false }
+  try { & $script:DockerCli info *> $null; return ($LASTEXITCODE -eq 0) } catch { return $false }
 }
 function Show-Status {
   Write-Host "`nBharatShop enhancement stack" -ForegroundColor Cyan
@@ -90,11 +138,13 @@ function Show-Status {
   ) | Format-Table -AutoSize
 }
 
+$script:DockerCli = Resolve-DockerCli
+
 if ($Mode -eq "Status") { Show-Status; exit 0 }
 if ($Mode -eq "Stop") {
   Stop-Pid "research-runner"
   Stop-Pid "ai-gateway"
-  if (Docker-Ready) { try { & docker rm -f bharatshop-uptime-kuma *> $null } catch {} }
+  if (Docker-Ready) { try { & $script:DockerCli rm -f bharatshop-uptime-kuma *> $null } catch {} }
   Show-Status
   exit 0
 }
@@ -122,11 +172,11 @@ Set-DotEnvValue "BHARATSHOP_AI_SDK_GATEWAY_ENABLED" "true"
 Set-DotEnvValue "AI_GATEWAY_URL" "http://127.0.0.1:$AiPort"
 Set-DotEnvValue "AI_GATEWAY_TOKEN" $aiToken
 
-if (Docker-Ready) {
-  & docker pull $UptimeImage
+if (Ensure-DockerReady) {
+  & $script:DockerCli pull $UptimeImage
   if ($LASTEXITCODE -ne 0) { throw "Uptime Kuma image pull failed." }
-  try { & docker rm -f bharatshop-uptime-kuma *> $null } catch {}
-  & docker run -d --name bharatshop-uptime-kuma --restart unless-stopped -p "127.0.0.1:$UptimePort`:3001" -v "bharatshop-uptime-kuma:/app/data" $UptimeImage | Out-Null
+  try { & $script:DockerCli rm -f bharatshop-uptime-kuma *> $null } catch {}
+  & $script:DockerCli run -d --name bharatshop-uptime-kuma --restart unless-stopped -p "127.0.0.1:$UptimePort`:3001" -v "bharatshop-uptime-kuma:/app/data" $UptimeImage | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "Uptime Kuma container failed to start." }
   if (!(Wait-Http "http://127.0.0.1:$UptimePort/" @{} 180)) { throw "Uptime Kuma did not become ready." }
   Set-DotEnvValue "BHARATSHOP_UPTIME_KUMA_ENABLED" "true"
