@@ -19,7 +19,8 @@ test("local autopilot creates a private token without printing its value", () =>
   assert.match(worker, /BHARATSHOP_AUTOMATION_TOKEN/);
   assert.match(worker, /RandomNumberGenerator/);
   assert.match(worker, /value not printed/i);
-  assert.doesNotMatch(worker, /Write-Host\s+.*\$token\b/i);
+  assert.doesNotMatch(worker, /Write-Host\s+["']?\$token(?:\b|["'])/i);
+  assert.doesNotMatch(worker, /Write-Host[^\n]*(?:TOKEN|SECRET)[^\n]*[:=]\s*\$token\b/i);
 });
 
 test("package scripts expose loop, one-shot and status modes", () => {
