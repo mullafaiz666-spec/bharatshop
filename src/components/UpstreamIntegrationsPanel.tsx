@@ -1,10 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Bot, CheckCircle2, CircleAlert, Film, RefreshCw, ShieldAlert, Sparkles, Wrench } from "lucide-react";
+import { Bot, CheckCircle2, CircleAlert, Film, MessageSquareText, RefreshCw, ShieldAlert, Sparkles, Workflow, Wrench } from "lucide-react";
 
 type Integration = {
-  id: "remotion" | "openhands" | "personalive" | "mumu-ai-novel" | "marketing-skills";
+  id: "remotion" | "openhands" | "personalive" | "mumu-ai-novel" | "marketing-skills" | "dify" | "librechat";
   name: string;
   repository: string;
   commit: string;
@@ -38,6 +38,8 @@ const ICONS = {
   personalive: Bot,
   "mumu-ai-novel": Sparkles,
   "marketing-skills": CheckCircle2,
+  dify: Workflow,
+  librechat: MessageSquareText,
 } satisfies Record<Integration["id"], typeof Film>;
 
 function statusFor(item: Integration) {
@@ -81,6 +83,7 @@ export default function UpstreamIntegrationsPanel() {
   }, [load]);
 
   const readyCount = useMemo(() => (data?.integrations || []).filter((item) => statusFor(item) === "READY").length, [data]);
+  const total = data?.summary?.total || 7;
 
   const runAction = useCallback(async (integration: Integration["id"], action: string) => {
     const key = `${integration}:${action}`;
@@ -121,12 +124,12 @@ export default function UpstreamIntegrationsPanel() {
             <div>
               <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.2em] text-orange-300"><Bot size={17} /> Connected Build Runtime</div>
               <h1 className="mt-2 text-3xl font-black tracking-tight text-white md:text-4xl">BharatShop AI service automation</h1>
-              <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-300">
-                This panel live-probes the local services. Remotion renders product videos, OpenHands runs the isolated developer cockpit, MuMu runs the creative-writing studio, and Marketing Skills are loaded into the agent workspace. PersonaLive remains rights-gated.
+              <p className="mt-2 max-w-5xl text-sm leading-6 text-slate-300">
+                Live control for Remotion, OpenHands, MuMu, Dify, LibreChat and Marketing Skills. Dify provides isolated workflow/app orchestration, LibreChat provides the operator chat/agent workspace, and PersonaLive remains rights-gated.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <span className={`rounded-full border px-4 py-2 text-sm font-black ${readyCount >= 4 ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" : "border-amber-500/30 bg-amber-500/10 text-amber-300"}`}>{readyCount}/5 LIVE</span>
+              <span className={`rounded-full border px-4 py-2 text-sm font-black ${readyCount >= Math.max(1, total - 1) ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" : "border-amber-500/30 bg-amber-500/10 text-amber-300"}`}>{readyCount}/{total} LIVE</span>
               <button onClick={() => void load()} disabled={loading} className="rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-bold text-slate-100 hover:border-slate-500 disabled:opacity-50">
                 <RefreshCw size={15} className={`mr-2 inline ${loading ? "animate-spin" : ""}`} />Verify live
               </button>
@@ -137,7 +140,7 @@ export default function UpstreamIntegrationsPanel() {
             <div className="rounded-2xl border border-slate-700 bg-black/30 px-4 py-3">
               <div className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">One-command workstation</div>
               <code className="mt-1 block break-all text-sm font-bold text-cyan-300">{data?.bootstrap?.fullWorkstationCommand || "npm run dev:full"}</code>
-              <p className="mt-1 text-xs text-slate-500">Syncs Marketing Skills, starts Remotion, starts Docker-isolated OpenHands + MuMu when Docker Desktop is available, validates TypeScript, then launches Next.js with Webpack.</p>
+              <p className="mt-1 text-xs text-slate-500">Syncs Marketing Skills, starts Remotion, then Docker-isolated OpenHands, MuMu, Dify and LibreChat when Docker Desktop is available; validates TypeScript and launches Next.js with Webpack.</p>
             </div>
             <div className="text-xs text-slate-500">Live verification: <span className="font-bold text-slate-300">{data?.verificationPerformed ? "authenticated" : "pending"}</span></div>
           </div>
@@ -147,7 +150,7 @@ export default function UpstreamIntegrationsPanel() {
           {error && <div className="mb-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">{error}</div>}
           {notice && <div className="mb-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">{notice}</div>}
 
-          <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-5">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
             {(data?.integrations || []).map((item) => {
               const Icon = ICONS[item.id];
               const status = statusFor(item);
@@ -163,6 +166,10 @@ export default function UpstreamIntegrationsPanel() {
 
                   {item.id === "marketing-skills" && item.localInstalled && (
                     <div className="mt-3 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">Local install verified{item.localFiles ? ` · ${item.localFiles} files` : ""}</div>
+                  )}
+
+                  {item.id === "dify" && (
+                    <div className="mt-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-200">Single-workspace integration only. Multi-tenant SaaS use or Dify frontend branding changes require license review.</div>
                   )}
 
                   {item.blockedByPolicy && (
@@ -182,6 +189,12 @@ export default function UpstreamIntegrationsPanel() {
                     )}
                     {item.id === "mumu-ai-novel" && (
                       <button disabled={!ready || Boolean(busy)} onClick={() => void runAction("mumu-ai-novel", "open")} className="rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-xs font-black text-violet-200 disabled:cursor-not-allowed disabled:opacity-40">Open Creative Studio</button>
+                    )}
+                    {item.id === "dify" && (
+                      <button disabled={!ready || Boolean(busy)} onClick={() => void runAction("dify", "open")} className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs font-black text-blue-200 disabled:cursor-not-allowed disabled:opacity-40">Open Dify Studio</button>
+                    )}
+                    {item.id === "librechat" && (
+                      <button disabled={!ready || Boolean(busy)} onClick={() => void runAction("librechat", "open")} className="rounded-lg border border-teal-500/30 bg-teal-500/10 px-3 py-2 text-xs font-black text-teal-200 disabled:cursor-not-allowed disabled:opacity-40">Open LibreChat</button>
                     )}
                     {item.id === "marketing-skills" && ready && <span className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs font-black text-emerald-200">Agent skills active</span>}
                   </div>
