@@ -12,8 +12,8 @@ export default async function CommandCentrePage() {
   if (!admin) redirect("/admin-login");
   return (
     <>
-      <CommandCentreV3 />
       <UpstreamIntegrationsPanel />
+      <CommandCentreV3 />
     </>
   );
 }
