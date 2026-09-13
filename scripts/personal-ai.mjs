@@ -2,7 +2,7 @@
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import readline from 'node:readline/promises';
@@ -97,7 +97,7 @@ function pixverseEntry() {
   }
 }
 
-function runPixVerse(args = [], options = {}) {
+function runPixVerseCli(args = [], options = {}) {
   const entry = pixverseEntry();
   if (!entry) return { status: 1, stdout: '', stderr: 'PixVerse CLI is not installed.' };
   return run(process.execPath, [entry, ...args], options);
@@ -321,7 +321,7 @@ async function agencyCount() {
 }
 
 function harnessConfigured() {
-  return existsSync(join(homedir(), '.ollama', 'launch', 'dsh', 'settings.yaml')) || existsSync(join(homedir(), '.dsh-bharatshop'));
+  return existsSync(join(homedir(), '.ollama', 'launch', 'dsh', 'settings.yaml'));
 }
 
 function companyWired() {
@@ -330,7 +330,7 @@ function companyWired() {
 
 function pixverseAuthReady() {
   if (!pixverseEntry()) return false;
-  const result = runPixVerse(['auth', 'status', '--json'], { stdio: 'pipe', quiet: true });
+  const result = runPixVerseCli(['auth', 'status', '--json'], { stdio: 'pipe', quiet: true });
   return result.status === 0;
 }
 
@@ -365,7 +365,7 @@ async function runBuild(task) {
   if (!harnessConfigured()) throw new Error('DeepSeek Harness local bridge is not configured. Run npm.cmd run ai:setup.');
   const guardrailsPath = join(ROOT, 'agents', 'DEEPSEEK_SYSTEM_AGENT.md');
   const guardrails = existsSync(guardrailsPath) ? readFileSync(guardrailsPath, 'utf8') : '';
-  const prompt = `${guardrails}\n\nLOCAL-ONLY MODE\nUse the local Ollama model only. Do not invoke Claude Code, Codex, paid APIs, billing, publishing, production database mutation, or credential inspection. Work only inside the current repository. Verify edits with relevant tests/build checks.\n\nTASK\n${task}`.trim();
+  const prompt = `${guardrails}\n\nLOCAL-ONLY MODE\nUse the local Ollama model only. Do not invoke Claude Code, Codex, paid APIs, cloud web search, billing, publishing, production database mutation, or credential inspection. Work only inside the current repository. Verify edits with relevant tests/build checks.\n\nTASK\n${task}`.trim();
   const result = run(ollama, ['launch', 'dsh', '--model', MODEL, '--', '--profile', 'headless', prompt]);
   if (result.status !== 0) throw new Error(`Local DeepSeek Harness task failed with exit code ${result.status}.`);
   return 'Local coding task completed. Review the Harness output and git diff before committing or deploying.';
@@ -405,10 +405,6 @@ async function generalAnswer(task) {
   const mem = recentMemory().map(item => `${item.role}: ${item.content}`).join('\n');
   const system = `You are the user's private local Personal AI running through Ollama on their own machine. Be practical and concise. You may explain and plan, but never claim that tools or external actions ran unless this orchestrator actually ran them. Never request secrets.\n${mem ? `Recent local memory:\n${mem}` : ''}`;
   return localChat(system, [{ role: 'user', content: task }]);
-}
-
-async function needsApproval(route) {
-  return new Set(['build', 'browser', 'company', 'pixverse']).has(route);
 }
 
 async function confirmExecution(rl, route) {
