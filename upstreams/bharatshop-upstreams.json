@@ -58,6 +58,46 @@
       "integrationMode": "external-service",
       "license": "MIT",
       "productionDefault": "disabled"
+    },
+    {
+      "id": "vercel-ai-sdk",
+      "repository": "https://github.com/vercel/ai",
+      "commit": "6c6c2210b9532a4c369615c044a16d595f3db117",
+      "integrationMode": "isolated-service",
+      "license": "Apache-2.0",
+      "productionDefault": "disabled"
+    },
+    {
+      "id": "crawlee-research",
+      "repository": "https://github.com/apify/crawlee",
+      "commit": "0b2ac45323d7be8d9d3d146d4873cec1cafdc095",
+      "integrationMode": "isolated-service",
+      "license": "Apache-2.0",
+      "productionDefault": "disabled"
+    },
+    {
+      "id": "trigger-dev",
+      "repository": "https://github.com/triggerdotdev/trigger.dev",
+      "commit": "8b72e6c0616b1570d57f35b5e2a736791ad3c6f0",
+      "integrationMode": "external-job-service",
+      "license": "Trigger.dev SDK MIT; repository includes separately licensed components",
+      "productionDefault": "disabled-pending-project-configuration"
+    },
+    {
+      "id": "langfuse-js",
+      "repository": "https://github.com/langfuse/langfuse-js",
+      "commit": "8927c3f13a99f7e0f43e06a49a9caad56883f945",
+      "integrationMode": "observability-adapter",
+      "license": "MIT",
+      "productionDefault": "disabled"
+    },
+    {
+      "id": "uptime-kuma",
+      "repository": "https://github.com/louislam/uptime-kuma",
+      "commit": "3afdc9ca86752587cc5a88147403194b5f83196d",
+      "integrationMode": "external-service",
+      "license": "MIT",
+      "productionDefault": "disabled"
     }
   ]
 }
