@@ -12,25 +12,35 @@ test("production deploy safely fails over across existing Netlify credentials", 
   assert.match(workflow, /NETLIFY_PERSONAL_ACCESS_TOKEN:-/);
   assert.match(workflow, /NETLIFY_TOKEN:-/);
   assert.match(workflow, /NETLIFY_AUTH_TOKEN:-/);
-  assert.match(workflow, /-X POST/);
-  assert.match(workflow, /sites\/\$\{NETLIFY_SITE_ID\}\/builds/);
-  assert.match(workflow, /NETLIFY_READ_TOKEN=\$candidate/);
   assert.match(workflow, /::add-mask::\$candidate/);
-  assert.match(workflow, /No configured Netlify credential can trigger a production build/);
-  assert.match(workflow, /sites\/\$\{NETLIFY_SITE_ID\}\/deploys\?branch=main&per_page=30/);
-  assert.match(workflow, /\.commit_ref\s*===\s*expected/);
-  assert.match(workflow, /\.context\s*===\s*["']production["']/);
+  assert.match(workflow, /npx --yes netlify-cli@27\.5\.2 deploy/);
+  assert.match(workflow, /--build/);
+  assert.match(workflow, /--prod/);
+  assert.match(workflow, /--site "\$NETLIFY_SITE_ID"/);
+  assert.match(workflow, /--auth "\$candidate"/);
+  assert.match(workflow, /BHARATSHOP_BUILD_REVISION="\$GITHUB_SHA"/);
+  assert.match(workflow, /NETLIFY_READ_TOKEN=\$candidate/);
+  assert.match(workflow, /No configured Netlify credential can deploy the BharatShop production checkout/);
+  assert.doesNotMatch(workflow, /sites\/\$\{NETLIFY_SITE_ID\}\/builds/);
   assert.doesNotMatch(workflow, /CHATGPT_NETLIFY_DEPLOY_PROXY/);
   assert.doesNotMatch(workflow, /netlify-mcp\.netlify\.app\/proxy\//);
-  assert.doesNotMatch(workflow, /netlify-cli@27\.5\.2 deploy/);
-  assert.doesNotMatch(workflow, /--auth "\$candidate"/);
 });
 
 test("deployment remains pinned to the owned BharatShop site", () => {
   const workflow = read(".github/workflows/netlify-production-deploy.yml");
   assert.match(workflow, /NETLIFY_SITE_URL: https:\/\/bharatshop-35fd\.netlify\.app/);
   assert.match(workflow, /NETLIFY_SITE_ID: 75b5c168-6679-479d-b3a6-244e393fe1b0/);
+  assert.match(workflow, /NETLIFY_SITE_NAME: bharatshop-35fd/);
   assert.match(workflow, /Verified Netlify target/);
+});
+
+test("production deploy verifies the exact live revision before storefront acceptance", () => {
+  const workflow = read(".github/workflows/netlify-production-deploy.yml");
+  assert.match(workflow, /expected="\$GITHUB_SHA"/);
+  assert.match(workflow, /\/netlify-deploy-health/);
+  assert.match(workflow, /test "\$live" = "\$expected"/);
+  assert.match(workflow, /\/api\/storefront\/products\?limit=1&page=1/);
+  assert.match(workflow, /catalogue is empty/);
 });
 
 test("storefront smoke waits for a successful production deploy and exact revision", () => {
