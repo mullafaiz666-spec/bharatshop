@@ -20,6 +20,14 @@ if (!local && process.env.ALLOW_REMOTE_DB_PUSH !== "YES") {
   process.exit(2);
 }
 
-const command = process.platform === "win32" ? "npx.cmd" : "npx";
-const result = spawnSync(command, ["drizzle-kit", "push"], { stdio: "inherit", env: process.env });
+const env = process.env;
+const result = process.platform === "win32"
+  ? spawnSync("cmd.exe", ["/d", "/s", "/c", "npx.cmd drizzle-kit push"], { stdio: "inherit", env })
+  : spawnSync("npx", ["drizzle-kit", "push"], { stdio: "inherit", env });
+
+if (result.error) {
+  console.error("Unable to launch drizzle-kit push:", result.error.message);
+  process.exit(1);
+}
+
 process.exit(result.status ?? 1);
