@@ -1,15 +1,26 @@
 #!/usr/bin/env node
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(SCRIPT_DIR, '..');
-const DEFAULT_DSH_VERSION = '0.1.1-rc.2';
+const DEFAULT_DSH_VERSION = '0.1.5-rc.2';
 const DSH_VERSION = process.env.DSH_VERSION || DEFAULT_DSH_VERSION;
-const DSH_HOME = process.env.DSH_HOME || join(ROOT, '.runtime', 'deepseek-harness');
+const DSH_HOME = process.env.DSH_HOME || join(homedir(), '.dsh-bharatshop');
+const PRESET_ID = 'bharatshop-system';
+const PRESET_SOURCE = join(ROOT, 'harness', 'presets', PRESET_ID);
+const PRESET_TARGET = join(DSH_HOME, '.agent-presets', PRESET_ID);
+const HEADLESS_SUBAGENT_PATCH = join(ROOT, 'harness', 'patches', 'headless-product-subagents.patch.yml');
+const PRODUCT_BUNDLES = [
+  '@deepseek-ai/dsh-subagent-codex',
+  '@deepseek-ai/dsh-subagent-claude-code',
+];
+const PRODUCT_PROFILES = ['web', 'headless'];
+
 const mode = (process.argv[2] || 'status').toLowerCase();
 const args = process.argv.slice(3);
 const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
@@ -34,18 +45,13 @@ function assertSupportedNode() {
   process.exit(2);
 }
 
-function commandResult(command, commandArgs = []) {
+function commandResult(command, commandArgs = [], env = process.env) {
   return spawnSync(command, commandArgs, {
     cwd: ROOT,
     encoding: 'utf8',
     windowsHide: true,
-    env: process.env,
+    env,
   });
-}
-
-function hasCommand(command, commandArgs = ['--version']) {
-  const result = commandResult(command, commandArgs);
-  return !result.error && result.status === 0;
 }
 
 function safeHarnessEnv() {
@@ -73,10 +79,14 @@ function run(command, commandArgs, options = {}) {
   });
   if (result.error) {
     console.error(result.error.message);
-    process.exit(1);
+    return 1;
   }
-  process.exitCode = result.status ?? 1;
   return result.status ?? 1;
+}
+
+function runOrExit(command, commandArgs, options = {}) {
+  const status = run(command, commandArgs, options);
+  if (status !== 0) process.exit(status);
 }
 
 function npxDsh(dshArgs, env = safeHarnessEnv()) {
@@ -84,8 +94,61 @@ function npxDsh(dshArgs, env = safeHarnessEnv()) {
   return run(npx, ['--yes', `@deepseek-ai/dsh@${DSH_VERSION}`, ...dshArgs], { env });
 }
 
+function npxDshOrExit(dshArgs, env = safeHarnessEnv()) {
+  const status = npxDsh(dshArgs, env);
+  if (status !== 0) process.exit(status);
+}
+
+function readJson(path) {
+  try {
+    return JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function profileManifest(profile) {
+  return readJson(join(DSH_HOME, 'profiles', profile, 'package.json'));
+}
+
+function profileHasBundle(profile, packageName) {
+  const manifest = profileManifest(profile);
+  return Boolean(manifest?.dependencies?.[packageName]);
+}
+
+function profileProductsReady(profile) {
+  return PRODUCT_BUNDLES.every(packageName => profileHasBundle(profile, packageName));
+}
+
+function installPreset({ refresh = false } = {}) {
+  if (!existsSync(PRESET_SOURCE)) {
+    console.error(`BharatShop Harness preset source is missing: ${PRESET_SOURCE}`);
+    process.exit(2);
+  }
+  if (existsSync(PRESET_TARGET)) {
+    if (!refresh) {
+      console.log(`Preset already present: ${PRESET_TARGET}`);
+      console.log('Use `subagents --refresh-preset` only when you intentionally want to replace the local preset copy.');
+      return;
+    }
+    rmSync(PRESET_TARGET, { recursive: true, force: true });
+  }
+  mkdirSync(dirname(PRESET_TARGET), { recursive: true });
+  cpSync(PRESET_SOURCE, PRESET_TARGET, { recursive: true });
+  console.log(`Installed BharatShop Harness preset: ${PRESET_TARGET}`);
+}
+
+function assertProductSetup({ requirePreset = false, profile } = {}) {
+  const missing = [];
+  if (profile && !profileProductsReady(profile)) missing.push(`${profile} product bundles`);
+  if (requirePreset && !existsSync(join(PRESET_TARGET, 'agent.cordis.yml'))) missing.push('BharatShop System Agent preset');
+  if (missing.length === 0) return;
+  console.error(`DeepSeek Harness subagent setup is incomplete: ${missing.join(', ')}.`);
+  console.error('Run: node scripts/deepseek-harness.mjs subagents');
+  process.exit(2);
+}
+
 function printStatus() {
-  const node = parseNodeVersion();
   console.log('=== BharatShop DeepSeek Harness status ===');
   console.log(`workspace: ${ROOT}`);
   console.log(`DSH_HOME: ${DSH_HOME}`);
@@ -98,15 +161,26 @@ function printStatus() {
   const ollamaVersion = commandResult(ollama, ['--version']);
   console.log(`Ollama: ${ollamaVersion.status === 0 ? (ollamaVersion.stdout || ollamaVersion.stderr || '').trim() || 'installed' : 'not detected'}`);
 
+  for (const profile of PRODUCT_PROFILES) {
+    const codex = profileHasBundle(profile, PRODUCT_BUNDLES[0]);
+    const claude = profileHasBundle(profile, PRODUCT_BUNDLES[1]);
+    console.log(`${profile} subagents: Codex=${codex ? 'READY' : 'NOT INSTALLED'} | Claude Code=${claude ? 'READY' : 'NOT INSTALLED'}`);
+  }
+
+  console.log(`BharatShop preset: ${existsSync(join(PRESET_TARGET, 'agent.cordis.yml')) ? 'READY' : 'NOT INSTALLED'}`);
+  console.log(`Headless subagent patch: ${existsSync(HEADLESS_SUBAGENT_PATCH) ? 'READY' : 'MISSING'}`);
+
   const localEnv = join(ROOT, '.env.local');
   if (existsSync(localEnv)) {
-    console.log('Safety: .env.local exists in this checkout. The launcher removes ambient secrets from the Harness process, but the agent can still read workspace files. Do not authorize it to inspect .env files.');
+    console.log('Safety: .env.local exists in this checkout. Harness state is kept outside the repo, but coding agents can still read workspace files. Never authorize credential-file inspection.');
   }
 
   if (!nodeIsSupported()) {
     console.log('Next: upgrade Node to 22.19+ or 24+, then run: node scripts/deepseek-harness.mjs install');
+  } else if (!PRODUCT_PROFILES.every(profileProductsReady) || !existsSync(join(PRESET_TARGET, 'agent.cordis.yml'))) {
+    console.log('Next: node scripts/deepseek-harness.mjs subagents');
   } else {
-    console.log('Next: node scripts/deepseek-harness.mjs install');
+    console.log('Next: node scripts/deepseek-harness.mjs web');
   }
 }
 
@@ -125,37 +199,62 @@ switch (mode) {
     assertSupportedNode();
     mkdirSync(DSH_HOME, { recursive: true });
     console.log(`Installing @deepseek-ai/dsh@${DSH_VERSION} globally...`);
-    run(npm, ['install', '--global', `@deepseek-ai/dsh@${DSH_VERSION}`]);
-    if (process.exitCode === 0) {
-      console.log('DeepSeek Harness installed. Run: node scripts/deepseek-harness.mjs web');
-    }
+    runOrExit(npm, ['install', '--global', `@deepseek-ai/dsh@${DSH_VERSION}`], { env: safeHarnessEnv() });
+    console.log('DeepSeek Harness installed.');
+    console.log('Next: node scripts/deepseek-harness.mjs subagents');
     break;
+
+  case 'subagents': {
+    assertSupportedNode();
+    const refreshPreset = args.includes('--refresh-preset');
+    mkdirSync(DSH_HOME, { recursive: true });
+
+    for (const profile of PRODUCT_PROFILES) {
+      console.log(`Configuring official product subagents in Harness profile: ${profile}`);
+      for (const packageName of PRODUCT_BUNDLES) {
+        npxDshOrExit(['plugin', '--profile', profile, 'add', `${packageName}@${DSH_VERSION}`]);
+      }
+    }
+
+    installPreset({ refresh: refreshPreset });
+    console.log('Codex and Claude Code providers are installed for Web and headless Harness profiles.');
+    console.log('Their account/login state remains native to each product; this bootstrap does not create or expose credentials.');
+    console.log('Web: start Harness, then choose “BharatShop System Agent” for the new session.');
+    console.log('Headless: the launcher automatically applies the BharatShop product-subagent tool patch.');
+    break;
+  }
 
   case 'web': {
     assertSupportedNode();
+    assertProductSetup({ profile: 'web', requirePreset: true });
     const portIndex = args.indexOf('--port');
     const port = portIndex >= 0 && args[portIndex + 1] ? args[portIndex + 1] : (process.env.DSH_PORT || '3080');
     console.log(`Starting DeepSeek Harness for BharatShop at http://127.0.0.1:${port}`);
-    console.log('Use a local Ollama/OpenAI-compatible provider in Settings -> Models. Keep production credentials out of the workspace session.');
-    npxDsh(['web', '--host', '127.0.0.1', '--port', port, '--no-open']);
+    console.log('Create/select a session with the “BharatShop System Agent” preset to expose subagent_codex and subagent_claude_code.');
+    npxDshOrExit(['--profile', 'web', '--host', '127.0.0.1', '--port', port, '--no-open']);
     break;
   }
 
   case 'task': {
     assertSupportedNode();
+    assertProductSetup({ profile: 'headless' });
+    if (!existsSync(HEADLESS_SUBAGENT_PATCH)) {
+      console.error(`Missing headless subagent overlay: ${HEADLESS_SUBAGENT_PATCH}`);
+      process.exit(2);
+    }
     const task = args.join(' ').trim();
     if (!task) {
       console.error('Usage: node scripts/deepseek-harness.mjs task "your task"');
       process.exit(2);
     }
     const guardrails = readGuardrails();
-    const prompt = `${guardrails}\n\nCURRENT TASK\n${task}`.trim();
-    console.log('Running one guarded DeepSeek Harness headless task in the BharatShop workspace...');
-    npxDsh(['--profile', 'headless', prompt]);
+    const prompt = `${guardrails}\n\nDELEGATION\nYou may delegate bounded independent work to subagent_codex and subagent_claude_code when useful. Keep final responsibility for verification and safety.\n\nCURRENT TASK\n${task}`.trim();
+    console.log('Running one guarded DeepSeek Harness headless task with Codex + Claude Code delegation available...');
+    npxDshOrExit(['--profile', 'headless', '--patch', HEADLESS_SUBAGENT_PATCH, prompt]);
     break;
   }
 
   default:
-    console.error('Unknown mode. Use: status | install | web | task');
+    console.error('Unknown mode. Use: status | install | subagents | web | task');
     process.exit(2);
 }
