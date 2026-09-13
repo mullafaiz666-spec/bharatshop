@@ -74,68 +74,44 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Trigger Git-linked Netlify production build
+      - name: Deploy exact checkout to Netlify production with credential failover
         shell: bash
         run: |
           set -euo pipefail
           success=0
           attempt=0
+          rm -f /tmp/netlify-cli-deploy.json /tmp/netlify-cli-deploy.err
+
           for candidate in "${NETLIFY_PERSONAL_ACCESS_TOKEN:-}" "${NETLIFY_TOKEN:-}" "${NETLIFY_AUTH_TOKEN:-}"; do
             [ -z "$candidate" ] && continue
             attempt=$((attempt + 1))
             echo "::add-mask::$candidate"
-            echo "Trying configured Netlify build credential #${attempt}."
-            http=$(curl -sS -o /tmp/netlify-build.json -w '%{http_code}' \
-              -X POST \
-              -H "Authorization: Bearer ${candidate}" \
-              -H "Content-Type: application/json" \
-              --data '{}' \
-              "https://api.netlify.com/api/v1/sites/${NETLIFY_SITE_ID}/builds" || true)
-            if [ "$http" -ge 200 ] 2>/dev/null && [ "$http" -lt 300 ] 2>/dev/null; then
+            echo "Trying configured Netlify deploy credential #${attempt}."
+
+            if BHARATSHOP_BUILD_REVISION="$GITHUB_SHA" \
+              npx --yes netlify-cli@27.5.2 deploy \
+                --build \
+                --prod \
+                --site "$NETLIFY_SITE_ID" \
+                --auth "$candidate" \
+                --message "GitHub ${GITHUB_SHA}" \
+                --json \
+                > /tmp/netlify-cli-deploy.json \
+                2> /tmp/netlify-cli-deploy.err; then
               echo "NETLIFY_READ_TOKEN=$candidate" >> "$GITHUB_ENV"
               success=1
-              echo "Netlify Git build accepted."
+              node -e 'const fs=require("fs");const d=JSON.parse(fs.readFileSync("/tmp/netlify-cli-deploy.json","utf8"));console.log(`Netlify production deploy accepted: ${d.deploy_id||d.deployId||d.id||"unknown"}`);'
               break
             fi
-            echo "Credential #${attempt} could not trigger the Git-linked build (HTTP ${http})."
+
+            echo "Credential #${attempt} could not deploy the validated checkout."
+            sed -n '1,120p' /tmp/netlify-cli-deploy.err >&2 || true
           done
+
           if [ "$success" != "1" ]; then
-            echo 'No configured Netlify credential can trigger a production build. Ensure builds are active and the token has site deploy permission.' >&2
-            cat /tmp/netlify-build.json >&2 2>/dev/null || true
+            echo 'No configured Netlify credential can deploy the BharatShop production checkout.' >&2
             exit 22
           fi
-
-      - name: Wait for exact Netlify commit to become ready
-        shell: bash
-        run: |
-          set -euo pipefail
-          deploy_id=""
-          state=""
-          for i in $(seq 1 150); do
-            curl -fsS \
-              -H "Authorization: Bearer ${NETLIFY_READ_TOKEN}" \
-              "https://api.netlify.com/api/v1/sites/${NETLIFY_SITE_ID}/deploys?branch=main&per_page=30" \
-              -o /tmp/netlify-deploys.json
-            result=$(node -e 'const fs=require("fs");const deploys=JSON.parse(fs.readFileSync("/tmp/netlify-deploys.json","utf8"));const expected=process.env.GITHUB_SHA;const match=Array.isArray(deploys)?deploys.find(d=>d.commit_ref===expected&&d.context==="production"):null;if(match)process.stdout.write([match.id||"",match.state||"",String(match.error_message||"").replace(/[\t\n]/g," ")].join("\t"));')
-            if [ -n "$result" ]; then
-              IFS=$'\t' read -r deploy_id state deploy_error <<< "$result"
-              echo "Netlify deploy=${deploy_id} state=${state} attempt=${i}"
-              if [ "$state" = "ready" ]; then break; fi
-              if [ "$state" = "error" ]; then
-                echo "Netlify deployment failed: ${deploy_error}" >&2
-                exit 23
-              fi
-            else
-              echo "Waiting for Netlify to register commit ${GITHUB_SHA}; attempt=${i}"
-            fi
-            if [ "$i" = "150" ]; then
-              echo 'Netlify did not publish the exact Git commit within the bounded wait.' >&2
-              exit 24
-            fi
-            sleep 5
-          done
-          test -n "$deploy_id"
-          test "$state" = "ready"
 
       - name: Verify exact live revision and storefront routes
         shell: bash
@@ -143,7 +119,7 @@ jobs:
           set -euo pipefail
           expected="$GITHUB_SHA"
           live=""
-          for i in $(seq 1 36); do
+          for i in $(seq 1 48); do
             body=$(curl -fsS --max-time 20 "$NETLIFY_SITE_URL/netlify-deploy-health" || true)
             live=$(printf '%s' "$body" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log(JSON.parse(s).revision||'')}catch{console.log('')}})")
             echo "attempt=$i expected=$expected live=$live"
