@@ -1,4 +1,5 @@
 import { pool } from "@/db";
+import { getAdminUser } from "@/lib/admin-auth";
 import { generateLocalEditorialRaster } from "@/lib/fashion/local-editorial-raster";
 
 export const dynamic = "force-dynamic";
@@ -8,6 +9,36 @@ function jsonObject(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+}
+
+async function loadProductForImage(id: number) {
+  const published = await pool.query(
+    `SELECT p.title, p.category, p.brand, d.specifications_json
+       FROM products p
+       LEFT JOIN product_details d ON d.product_id = p.id
+      WHERE p.id = $1 AND p.status = 'Published'
+      LIMIT 1`,
+    [id],
+  );
+
+  if (published.rows[0]) return published.rows[0];
+
+  // Admin dashboards need to preview CEO_PENDING / draft fashion products without
+  // making those products publicly readable. Browser image requests carry the
+  // existing admin session cookie, so only the owning signed-in admin can preview.
+  const admin = await getAdminUser();
+  if (!admin) return null;
+
+  const preview = await pool.query(
+    `SELECT p.title, p.category, p.brand, d.specifications_json
+       FROM products p
+       LEFT JOIN product_details d ON d.product_id = p.id
+      WHERE p.id = $1 AND p.user_id = $2
+      LIMIT 1`,
+    [id, admin.id],
+  );
+
+  return preview.rows[0] || null;
 }
 
 export async function GET(
@@ -23,20 +54,12 @@ export async function GET(
     return new Response("Invalid product", { status: 400 });
   }
 
-  const result = await pool.query(
-    `SELECT p.title, p.category, p.brand, d.specifications_json
-       FROM products p
-       LEFT JOIN product_details d ON d.product_id = p.id
-      WHERE p.id = $1 AND p.status = 'Published'
-      LIMIT 1`,
-    [id],
-  );
+  const row = await loadProductForImage(id);
 
-  if (!result.rows[0]) {
+  if (!row) {
     return new Response("Not found", { status: 404 });
   }
 
-  const row = result.rows[0];
   const specs = jsonObject(row.specifications_json);
   const palette = Array.isArray(specs.palette) ? specs.palette : [];
   const image = generateLocalEditorialRaster({
