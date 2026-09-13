@@ -16,10 +16,6 @@ function clean(value: unknown, max = 500) {
   return String(value || "").replace(/[<>]/g, "").replace(/\s+/g, " ").trim().slice(0, max);
 }
 
-function titleCase(value: string) {
-  return value.replace(/\b\w/g, (m) => m.toUpperCase());
-}
-
 function garmentLabel(name: string) {
   const n = name.toLowerCase();
   if (n.includes("varsity")) return "Varsity Jacket";
@@ -128,9 +124,9 @@ export async function GET() {
       finalModel: "Nano Banana Pro",
       batchModel: "Nano Banana 2",
       mode: "prompt-packet-ready",
-      note: "The ChatGPT Higgsfield plugin can generate these assets interactively. Deployed BharatShop keeps provider prompts and accepts the resulting image URL/upload without assuming undocumented Higgsfield API fields.",
+      note: "The ChatGPT Higgsfield plugin can generate these assets interactively. BharatShop keeps provider prompts and accepts the resulting image URL without assuming undocumented Higgsfield API fields.",
     },
-    pipeline: ["Trend scan", "Qikink garment pick", "Original design plan", "UGC creative", "Economics/IP gate", "Store listing"],
+    pipeline: ["Trend scan", "Qikink garment pick", "Original design plan", "Higgsfield media", "Economics/IP gate", "CEO approval", "Store listing"],
   });
 }
 
@@ -148,8 +144,15 @@ export async function POST(req: Request) {
     }
     const found = await pool.query(`SELECT id,title FROM products WHERE id=$1 AND user_id=$2 AND brand='BharatDrip' LIMIT 1`, [productId, admin.id]);
     if (!found.rows[0]) return NextResponse.json({ error: "BharatDrip product not found" }, { status: 404 });
+
     await pool.query(`UPDATE products SET image_url=$2,updated_at=NOW() WHERE id=$1`, [productId, imageUrl]);
-    await pool.query(`INSERT INTO product_images (product_id,image_url,source_url,sort_order,alt_text,verification_status,verification_confidence,verification_model,verification_provider,verification_metadata,verified_at) VALUES ($1,$2,$2,0,$3,'AI_GENERATED_ORIGINAL',1,'nano-banana-pro','higgsfield',$4,NOW())`, [productId, imageUrl, `${found.rows[0].title} UGC hero`, JSON.stringify({ provider: "Higgsfield", intendedModel: "Nano Banana Pro", usage: "UGC hero image", attachedBy: admin.id })]);
+    const primary = await pool.query(`SELECT id FROM product_images WHERE product_id=$1 ORDER BY sort_order ASC,id ASC LIMIT 1`, [productId]);
+    const metadata = JSON.stringify({ provider: "Higgsfield", intendedModel: "Nano Banana Pro", usage: "UGC hero image", attachedBy: admin.id, disclosure: "AI-generated model/editorial image" });
+    if (primary.rows[0]) {
+      await pool.query(`UPDATE product_images SET image_url=$2,source_url=$2,sort_order=0,alt_text=$3,verification_status='AI_GENERATED_EDITORIAL',verification_confidence=1,verification_model='nano-banana-pro',verification_provider='higgsfield',verification_metadata=$4,verified_at=NOW() WHERE id=$1`, [primary.rows[0].id, imageUrl, `${found.rows[0].title} UGC hero`, metadata]);
+    } else {
+      await pool.query(`INSERT INTO product_images (product_id,image_url,source_url,sort_order,alt_text,verification_status,verification_confidence,verification_model,verification_provider,verification_metadata,verified_at) VALUES ($1,$2,$2,0,$3,'AI_GENERATED_EDITORIAL',1,'nano-banana-pro','higgsfield',$4,NOW())`, [productId, imageUrl, `${found.rows[0].title} UGC hero`, metadata]);
+    }
     await pool.query(`INSERT INTO ai_activity_logs (user_id,agent_name,action_type,message,metadata_json,status) VALUES ($1,'AI Fashion Designer','HIGGSFIELD_UGC_ATTACHED',$2,$3,'SUCCESS')`, [admin.id, `Higgsfield UGC hero attached to ${found.rows[0].title}.`, JSON.stringify({ productId, imageUrl })]);
     return NextResponse.json({ success: true, status: "UGC_ATTACHED", productId, imageUrl });
   }
@@ -164,7 +167,7 @@ export async function POST(req: Request) {
   if (action === "plan") return NextResponse.json({ success: true, status: "PLAN_READY", plan });
   if (action !== "queue-and-list") return NextResponse.json({ error: "Unknown fashion-agent action" }, { status: 400 });
 
-  const publishNow = body.publishNow !== false;
+  const publishNow = body.publishNow === true;
   const { garment, economics } = plan;
   if (economics.marginPct < 30 || economics.profitInr < 200) {
     return NextResponse.json({ error: "Drop blocked by profitability gate", plan }, { status: 422 });
@@ -225,7 +228,7 @@ export async function POST(req: Request) {
     for (let view = 0; view < fallbackImages.length; view++) {
       await client.query(`INSERT INTO product_images (product_id,image_url,source_url,sort_order,alt_text,verification_status,verification_confidence,verification_model,verification_provider,verification_metadata,verified_at) VALUES ($1,$2,$3,$4,$5,'AI_GENERATED_ORIGINAL',1,'bharatshop-fashion-art-v1','bharatshop-studio',$6,NOW())`, [productId, fallbackImages[view], rate.sourceUrl, view + 1, `${plan.title} design view ${view + 1}`, JSON.stringify({ providerTarget: "Higgsfield", ugcAssetPending: true, view })]);
     }
-    await client.query(`INSERT INTO ai_activity_logs (user_id,agent_name,action_type,message,metadata_json,status) VALUES ($1,'AI Fashion Designer',$2,$3,$4,'SUCCESS')`, [admin.id, publishNow ? "TREND_DROP_PUBLISHED" : "TREND_DROP_QUEUED", `${plan.title} ${publishNow ? "published" : "queued"} from live trend intelligence and Qikink production economics.`, JSON.stringify({ productId, sku, trend: plan.trend.trendName, qikinkProductCode: garment.code, economics, creativeProviderTarget: "Higgsfield", ugcStatus: "PROMPT_READY_ASSET_PENDING" })]);
+    await client.query(`INSERT INTO ai_activity_logs (user_id,agent_name,action_type,message,metadata_json,status) VALUES ($1,'AI Fashion Designer',$2,$3,$4,'SUCCESS')`, [admin.id, publishNow ? "TREND_DROP_PUBLISHED" : "TREND_DROP_QUEUED", `${plan.title} ${publishNow ? "published" : "queued"} from trend intelligence and Qikink production economics.`, JSON.stringify({ productId, sku, trend: plan.trend.trendName, qikinkProductCode: garment.code, economics, creativeProviderTarget: "Higgsfield", ugcStatus: "PROMPT_READY_ASSET_PENDING" })]);
     await client.query("COMMIT");
     return NextResponse.json({ success: true, status: publishNow ? "PUBLISHED" : "CEO_PENDING", productId, sku, plan, fallbackImages, storeUrl: `${origin}/store/product/${productId}` });
   } catch (error) {
