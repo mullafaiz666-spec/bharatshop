@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { NextResponse } from "next/server";
+import { getAdminUser } from "@/lib/admin-auth";
 import { getUpstreamIntegrationStatus, probeUpstreamIntegrations } from "@/lib/integrations/upstream-ai";
 
 export const dynamic = "force-dynamic";
@@ -31,7 +32,8 @@ function localMarketingSkills() {
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const verifyRequested = url.searchParams.get("verify") === "1";
-  const canVerify = verifyRequested && hasAutomationAccess(req);
+  const admin = verifyRequested ? await getAdminUser().catch(() => null) : null;
+  const canVerify = verifyRequested && (Boolean(admin) || hasAutomationAccess(req));
   const baseIntegrations = canVerify
     ? await probeUpstreamIntegrations()
     : getUpstreamIntegrationStatus();
@@ -58,7 +60,7 @@ export async function GET(req: Request) {
 
   return NextResponse.json({
     status: errors.length ? "PARTIAL" : "READY",
-    mode: "feature-gated-upstream-adapters",
+    mode: "automated-local-upstream-runtime",
     verificationPerformed: canVerify,
     anyConfigured: configured > 0,
     anyConnected: integrations.some((item) => String("health" in item ? item.health || "" : "").toUpperCase() === "READY" || item.enabled),
@@ -70,6 +72,12 @@ export async function GET(req: Request) {
       blocked,
       errors,
     },
-    policy: "Upstream repositories remain isolated behind service or Agent Skills boundaries. No integration can modify production data merely by being configured. PersonaLive is hard-blocked until commercial/model rights are explicitly approved.",
+    bootstrap: {
+      command: "npm run upstreams:bootstrap",
+      fullWorkstationCommand: "npm run dev:full",
+      statusCommand: "npm run upstreams:status",
+      stopCommand: "npm run upstreams:stop",
+    },
+    policy: "Remotion runs as an isolated local render service. OpenHands and MuMuAINovel run in Docker isolation when Docker Desktop is available. Marketing Skills stay pinned locally. PersonaLive remains hard-blocked until commercial/model rights are explicitly approved.",
   });
 }
