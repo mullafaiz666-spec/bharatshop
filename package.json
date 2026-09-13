@@ -15,6 +15,8 @@
     "typecheck": "tsc --noEmit",
     "test:production": "node scripts/production-acceptance-v3.mjs",
     "test:integrations": "node --test tests/*.test.mjs",
+    "skills:marketing:sync": "node scripts/sync-marketing-skills.mjs --apply",
+    "skills:marketing:check": "node scripts/sync-marketing-skills.mjs --check",
     "pixverse:status": "node scripts/pixverse-creative.mjs status",
     "pixverse:capabilities": "node scripts/pixverse-creative.mjs capabilities",
     "pixverse:create": "node scripts/pixverse-creative.mjs create",
