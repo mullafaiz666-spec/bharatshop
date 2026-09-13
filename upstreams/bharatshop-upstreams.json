@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-09-13",
+  "policy": "Pin upstream revisions, integrate through isolated service or Agent Skills boundaries, and never overwrite BharatShop database/auth/deployment ownership.",
+  "upstreams": [
+    {
+      "id": "remotion",
+      "repository": "https://github.com/remotion-dev/remotion",
+      "commit": "2a285616cf5ef219f92573e452886a98db2949e9",
+      "integrationMode": "external-service",
+      "license": "custom/remotion",
+      "productionDefault": "disabled"
+    },
+    {
+      "id": "openhands",
+      "repository": "https://github.com/OpenHands/OpenHands",
+      "commit": "28464621d879e3e9b3ceeae9d70a71d96da6212d",
+      "integrationMode": "external-service",
+      "license": "MIT",
+      "productionDefault": "disabled"
+    },
+    {
+      "id": "personalive",
+      "repository": "https://github.com/GVCLab/PersonaLive",
+      "commit": "abdd112e01dcf7d89122c2e5efa29fcff0669740",
+      "integrationMode": "external-service",
+      "license": "Apache-2.0 repository code plus separate research/model restrictions",
+      "productionDefault": "blocked-pending-rights-clearance"
+    },
+    {
+      "id": "mumu-ai-novel",
+      "repository": "https://github.com/xiamuceer-j/MuMuAINovel",
+      "commit": "600be7038539e4dd0568b63e6e534fdcfaf91687",
+      "integrationMode": "external-service",
+      "license": "GPL-3.0",
+      "productionDefault": "disabled"
+    },
+    {
+      "id": "marketing-skills",
+      "repository": "https://github.com/coreyhaines31/marketingskills",
+      "commit": "5b2c0007766c6a1cf1d53fd8fc73e979e0821022",
+      "integrationMode": "agent-skills",
+      "license": "MIT",
+      "productionDefault": "disabled"
+    }
+  ]
+}
