@@ -1,0 +1,29 @@
+name: Export Netlify Live Source
+
+on:
+  push:
+    branches: [ops/netlify-source-artifact-live]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 537d65f953e8d0bf92d6e8595c72050442a1a9f6
+      - name: Pack exact validated source
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "537d65f953e8d0bf92d6e8595c72050442a1a9f6"
+          tar --exclude='.git' --exclude='node_modules' --exclude='.next' --exclude='bharatshop-source.tgz' -czf bharatshop-source.tgz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bharatshop-source-537d65f
+          path: bharatshop-source.tgz
+          if-no-files-found: error
+          retention-days: 1
