@@ -1,5 +1,5 @@
 param(
-  [ValidateSet("Status", "Once", "Loop")]
+  [ValidateSet("Status", "Once", "Drain", "Loop")]
   [string]$Mode = "Loop",
   [string]$Origin = "http://127.0.0.1:3000",
   [int]$PollSeconds = 20
@@ -165,6 +165,28 @@ function Run-OneCycle {
 if ($Mode -eq "Once") {
   [void](Run-OneCycle)
   exit 0
+}
+
+if ($Mode -eq "Drain") {
+  Write-Host "`nDraining the current company queue and exiting when no queued work remains..." -ForegroundColor Cyan
+  $processed = 0
+  while ($true) {
+    $result = Run-OneCycle
+    if ($result.deferred) {
+      Write-Host "DRAIN DEFERRED: use the configured native worker to finish queued work." -ForegroundColor Yellow
+      exit 2
+    }
+    if ([int]$result.claimed -lt 0) {
+      Write-Host "DRAIN FAILED: a company cycle returned an error." -ForegroundColor Red
+      exit 1
+    }
+    if ([int]$result.claimed -eq 0) {
+      Write-Host "QUEUE DRAINED: $processed work item(s) processed in this run. BharatShop agent queue is finished for the current plan." -ForegroundColor Green
+      exit 0
+    }
+    $processed += [int]$result.claimed
+    Start-Sleep -Milliseconds 500
+  }
 }
 
 Write-Host "`nBharatShop agents are now working from the shared queue." -ForegroundColor Green
