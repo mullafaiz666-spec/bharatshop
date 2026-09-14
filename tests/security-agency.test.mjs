@@ -42,6 +42,10 @@ test('security audit tolerates slow local Ollama responses', () => {
   assert.match(securityAgency, /unavailable after retries/);
 });
 
+test('security audit uses non-thinking Ollama responses', () => {
+  assert.match(securityAgency, /think:\s*false/);
+});
+
 test('security audit never prints a blank final report', () => {
   assert.match(securityAgency, /Ollama returned an empty response/);
   assert.match(securityAgency, /SECURITY_SYNTHESIS_TIMEOUT_MS/);
