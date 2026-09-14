@@ -80,6 +80,7 @@ async function localChat(systemPrompt, messages, options = {}) {
   const payload = {
     model: MODEL,
     stream: false,
+    think: false,
     messages: [{ role: 'system', content: systemPrompt }, ...messages],
     options: {
       num_ctx: SECURITY_CONTEXT,
