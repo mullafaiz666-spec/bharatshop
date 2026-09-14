@@ -4,14 +4,23 @@ import { readFileSync } from 'node:fs';
 
 const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const personalAi = readFileSync(new URL('../scripts/personal-ai.mjs', import.meta.url), 'utf8');
+const personalAiSetup = readFileSync(new URL('../scripts/personal-ai-setup.mjs', import.meta.url), 'utf8');
 const browserRunner = readFileSync(new URL('../services/browser-use-local/runner.py', import.meta.url), 'utf8');
 const pixverse = readFileSync(new URL('../scripts/pixverse-creative.mjs', import.meta.url), 'utf8');
 
 test('exposes one-command Personal AI setup/start/status/task scripts', () => {
-  assert.equal(packageJson.scripts['ai:setup'], 'node scripts/personal-ai.mjs setup');
+  assert.equal(packageJson.scripts['ai:setup'], 'node scripts/personal-ai-setup.mjs');
   assert.equal(packageJson.scripts['ai:start'], 'node scripts/personal-ai.mjs start');
   assert.equal(packageJson.scripts['ai:status'], 'node scripts/personal-ai.mjs status');
   assert.equal(packageJson.scripts['ai:task'], 'node scripts/personal-ai.mjs task');
+});
+
+test('free/local setup installs Playwright and pins DeepSeek Harness to the local model', () => {
+  assert.match(personalAiSetup, /browser-use==\$\{BROWSER_USE_VERSION\}.*playwright/s);
+  assert.match(personalAiSetup, /'playwright', 'install', 'chromium'/);
+  assert.match(personalAiSetup, /'launch', 'dsh', '--model', MODEL, '--config'/);
+  assert.match(personalAiSetup, /qwen3\.5:4b/);
+  assert.doesNotMatch(personalAiSetup, /glm-5\.3-flash:cloud/);
 });
 
 test('Personal AI routes core free capabilities through local Ollama', () => {
