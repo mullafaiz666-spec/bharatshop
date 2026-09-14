@@ -11,7 +11,7 @@ The screenshot pattern is useful, but BharatShop should implement it as a produc
 | Semantic memory | What is generally true | Persistent | architecture rules, verified facts, project knowledge |
 | Personal memory | User-specific preferences | Persistent | preferred workflows, style, recurring choices |
 
-This separation follows the established agent-memory pattern: working, episodic, semantic and procedural/personalized layers should not be collapsed into one store. citeturn0search6turn0search9
+This separation keeps the four memory roles distinct instead of treating one transcript as every kind of memory.
 
 ## Current implementation
 
