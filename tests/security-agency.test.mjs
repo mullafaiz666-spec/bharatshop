@@ -33,6 +33,16 @@ test('security department is local and defensive by design', () => {
   assert.doesNotMatch(securityAgency, /OPENAI_API_KEY|ANTHROPIC_API_KEY/);
 });
 
+test('security audit tolerates slow local Ollama responses', () => {
+  assert.match(securityAgency, /SECURITY_LLM_TIMEOUT_MS/);
+  assert.match(securityAgency, /SECURITY_LLM_RETRIES/);
+  assert.match(securityAgency, /SECURITY_CONTEXT/);
+  assert.match(securityAgency, /httpRequest/);
+  assert.match(securityAgency, /req\.setTimeout/);
+  assert.match(securityAgency, /unavailable after retries/);
+  assert.match(securityAgency, /Partial Reports/);
+});
+
 test('browser worker disables Browser Use bundled extensions by default', () => {
   assert.match(browserRunner, /BROWSER_USE_DISABLE_EXTENSIONS/);
 });
