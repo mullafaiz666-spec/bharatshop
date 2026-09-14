@@ -5,7 +5,7 @@ import { localCompanyWorkerErrors, localCompanyHealthErrors } from "../scripts/l
 
 const supervisor = await readFile(new URL("../scripts/agency-24x7-supervisor.mjs", import.meta.url), "utf8");
 const manager = await readFile(new URL("../scripts/agency-24x7-manager.mjs", import.meta.url), "utf8");
-const pairer = await readFile(new URL("../scripts/pair-live-24x7-agency.ps1", import.meta.url), "utf8");
+const pairer = await readFile(new URL("../scripts/pair-live-24x7-agency.mjs", import.meta.url), "utf8");
 const launcher = await readFile(new URL("../scripts/run-local-company-worker.mjs", import.meta.url), "utf8");
 const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
 
@@ -51,10 +51,12 @@ test("local worker requires exact local/live revision parity and reuses guarded 
   assert.match(launcher, /Private local Ollama\/Qwen shim is not ready/);
 });
 
-test("live pairing never marks an unverified database migration as accepted", () => {
+test("live pairing uses Node and never marks an unverified database migration as accepted", () => {
   assert.match(pairer, /BHARATSHOP_AUTOMATION_TOKEN/);
   assert.match(pairer, /bharatshop-35fd\.netlify\.app/);
-  assert.doesNotMatch(pairer, /Upsert-Env\s+\$EnvFile\s+["']BHARATSHOP_MIGRATION_VERIFIED["']\s+["']true["']/i);
+  assert.match(pairer, /netlify-cli@latest/);
+  assert.doesNotMatch(pairer, /BHARATSHOP_MIGRATION_VERIFIED\s*[:=]\s*["']true["']/i);
+  assert.equal(pkg.scripts["agency:24x7:pair-live"], "node scripts/pair-live-24x7-agency.mjs");
 });
 
 test("Windows startup manager uses user Startup folder without scheduled tasks, elevation or PowerShell bypass", () => {
