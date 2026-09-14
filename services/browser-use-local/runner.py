@@ -5,9 +5,10 @@ import json
 import os
 import sys
 
-# Browser Use reads telemetry configuration during import.
+# Browser Use reads telemetry and extension configuration during import.
 os.environ.setdefault("ANONYMIZED_TELEMETRY", "false")
 os.environ.setdefault("BROWSER_USE_VERSION_CHECK", "false")
+os.environ.setdefault("BROWSER_USE_DISABLE_EXTENSIONS", "true")
 
 from browser_use import Agent, Browser, ChatOllama
 
