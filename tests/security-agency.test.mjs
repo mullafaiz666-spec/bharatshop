@@ -40,7 +40,14 @@ test('security audit tolerates slow local Ollama responses', () => {
   assert.match(securityAgency, /httpRequest/);
   assert.match(securityAgency, /req\.setTimeout/);
   assert.match(securityAgency, /unavailable after retries/);
-  assert.match(securityAgency, /Partial Reports/);
+});
+
+test('security audit never prints a blank final report', () => {
+  assert.match(securityAgency, /Ollama returned an empty response/);
+  assert.match(securityAgency, /SECURITY_SYNTHESIS_TIMEOUT_MS/);
+  assert.match(securityAgency, /SECURITY_SYNTHESIS_RETRIES/);
+  assert.match(securityAgency, /specialist fallback/);
+  assert.match(securityAgency, /printFallbackReport/);
 });
 
 test('browser worker disables Browser Use bundled extensions by default', () => {
