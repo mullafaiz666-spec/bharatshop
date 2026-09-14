@@ -36,6 +36,8 @@
     "agency:run": "node scripts/local-agency.mjs run",
     "agency:chat": "node scripts/local-agency.mjs chat",
     "agency:team": "node scripts/local-agency.mjs team",
+    "security:status": "node scripts/security-agency.mjs status",
+    "security:audit": "node scripts/security-agency.mjs audit",
     "ai:setup": "node scripts/personal-ai-setup.mjs",
     "ai:start": "node scripts/personal-ai.mjs start",
     "ai:status": "node scripts/personal-ai.mjs status",
