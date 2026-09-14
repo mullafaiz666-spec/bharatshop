@@ -33,15 +33,12 @@ export function localCompanyWorkerErrors(env) {
   const base = String(env.AI_BASE_URL || env.LOCAL_AI_BASE_URL || '').replace(/\/+$/, '');
   try {
     const url = new URL(base);
-    if (url.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) || (url.port && url.port !== '11434')) throw new Error();
+    if (url.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) || url.port !== '11555') throw new Error();
   } catch {
-    errors.push('AI_BASE_URL must point only to the private local Ollama endpoint on port 11434');
+    errors.push('AI_BASE_URL must point only to the private BharatShop Qwen shim on port 11555');
   }
   if (!String(env.AI_TEXT_MODEL || env.LOCAL_AI_TEXT_MODEL || '').trim()) {
     errors.push('AI_TEXT_MODEL is required');
-  }
-  if (String(env.AI_DISABLE_THINKING || '').toLowerCase() !== 'true') {
-    errors.push('AI_DISABLE_THINKING must be true for the configured local Qwen runtime');
   }
 
   return errors;
