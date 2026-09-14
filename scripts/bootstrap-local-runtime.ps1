@@ -88,7 +88,7 @@ function Container-Exists([string]$Name) {
 function Container-Running([string]$Name) {
   if (!(Container-Exists $Name)) { return $false }
   $running = docker inspect -f "{{.State.Running}}" $Name 2>$null
-  return ($LASTEXITCODE -eq 0 -and String($running).Trim().ToLowerInvariant() -eq "true")
+  return ($LASTEXITCODE -eq 0 -and ([string]$running).Trim().ToLowerInvariant() -eq "true")
 }
 
 function Stop-TrackedProcess([string]$PidFile) {
@@ -121,11 +121,13 @@ function Show-Endpoint([string]$Url) {
 
 function Show-Status {
   Write-Host "`n=== BharatShop local runtime ===" -ForegroundColor Cyan
-  [pscustomobject]@{ Service="Ollama"; Port=11434; Ready=(Test-Port 11434) },
-  [pscustomobject]@{ Service="Ollama Qwen shim"; Port=$ShimPort; Ready=(Test-Port $ShimPort) },
-  [pscustomobject]@{ Service="Local PostgreSQL"; Port=$PgPort; Ready=(Test-Port $PgPort) },
-  [pscustomobject]@{ Service="SearXNG"; Port=$SearxPort; Ready=(Test-Port $SearxPort) },
-  [pscustomobject]@{ Service="BharatShop Next"; Port=$AppPort; Ready=(Test-Port $AppPort) } | Format-Table -AutoSize
+  @(
+    [pscustomobject]@{ Service="Ollama"; Port=11434; Ready=(Test-Port 11434) }
+    [pscustomobject]@{ Service="Ollama Qwen shim"; Port=$ShimPort; Ready=(Test-Port $ShimPort) }
+    [pscustomobject]@{ Service="Local PostgreSQL"; Port=$PgPort; Ready=(Test-Port $PgPort) }
+    [pscustomobject]@{ Service="SearXNG"; Port=$SearxPort; Ready=(Test-Port $SearxPort) }
+    [pscustomobject]@{ Service="BharatShop Next"; Port=$AppPort; Ready=(Test-Port $AppPort) }
+  ) | Format-Table -AutoSize
 }
 
 if ($Mode -eq "Status") {
