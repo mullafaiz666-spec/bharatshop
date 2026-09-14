@@ -11,9 +11,12 @@ const mode = (process.argv[2] || 'audit').toLowerCase();
 const task = process.argv.slice(3).join(' ').trim() || 'Perform a defensive cybersecurity review of BharatShop. Prioritize application security, secrets handling, dependency and supply-chain risk, browser/AI integrations, authentication, payments, database safety, logging, incident readiness, and deployment hardening. Do not attack external systems, expose secrets, or modify production data.';
 const LLM_TIMEOUT_MS = Number(process.env.SECURITY_LLM_TIMEOUT_MS || 600000);
 const LLM_RETRIES = Number(process.env.SECURITY_LLM_RETRIES || 2);
+const SYNTHESIS_TIMEOUT_MS = Number(process.env.SECURITY_SYNTHESIS_TIMEOUT_MS || 180000);
+const SYNTHESIS_RETRIES = Number(process.env.SECURITY_SYNTHESIS_RETRIES || 0);
 const SECURITY_CONTEXT = Number(process.env.SECURITY_CONTEXT || 8192);
 const MAX_AGENT_PROMPT_CHARS = Number(process.env.SECURITY_AGENT_PROMPT_CHARS || 9000);
 const MAX_REPORT_CHARS = Number(process.env.SECURITY_REPORT_CHARS || 4500);
+const SYNTHESIS_REPORT_CHARS = Number(process.env.SECURITY_SYNTHESIS_REPORT_CHARS || 1800);
 
 const REQUIRED = [
   'security-architect',
@@ -29,7 +32,7 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function postJson(urlString, payload) {
+function postJson(urlString, payload, timeoutMs = LLM_TIMEOUT_MS) {
   const url = new URL(urlString);
   const body = JSON.stringify(payload);
   const transport = url.protocol === 'https:' ? httpsRequest : httpRequest;
@@ -62,8 +65,8 @@ function postJson(urlString, payload) {
       });
     });
 
-    req.setTimeout(LLM_TIMEOUT_MS, () => {
-      req.destroy(new Error(`Ollama request timed out after ${Math.round(LLM_TIMEOUT_MS / 1000)} seconds`));
+    req.setTimeout(timeoutMs, () => {
+      req.destroy(new Error(`Ollama request timed out after ${Math.round(timeoutMs / 1000)} seconds`));
     });
     req.on('error', reject);
     req.write(body);
@@ -71,26 +74,30 @@ function postJson(urlString, payload) {
   });
 }
 
-async function localChat(systemPrompt, messages) {
+async function localChat(systemPrompt, messages, options = {}) {
+  const timeoutMs = options.timeoutMs ?? LLM_TIMEOUT_MS;
+  const retries = options.retries ?? LLM_RETRIES;
   const payload = {
     model: MODEL,
     stream: false,
     messages: [{ role: 'system', content: systemPrompt }, ...messages],
     options: {
       num_ctx: SECURITY_CONTEXT,
-      num_predict: Number(process.env.SECURITY_NUM_PREDICT || 1000),
+      num_predict: Number(options.numPredict ?? process.env.SECURITY_NUM_PREDICT ?? 1000),
       temperature: Number(process.env.SECURITY_TEMPERATURE || 0.2),
     },
   };
 
   let lastError;
-  for (let attempt = 0; attempt <= LLM_RETRIES; attempt += 1) {
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
     try {
-      const response = await postJson(`${OLLAMA_BASE_URL}/api/chat`, payload);
-      return response?.message?.content?.trim() || '';
+      const response = await postJson(`${OLLAMA_BASE_URL}/api/chat`, payload, timeoutMs);
+      const content = response?.message?.content?.trim() || '';
+      if (!content) throw new Error('Ollama returned an empty response');
+      return content;
     } catch (error) {
       lastError = error;
-      if (attempt >= LLM_RETRIES) break;
+      if (attempt >= retries) break;
       console.warn(`Ollama attempt ${attempt + 1} failed: ${error.message}. Retrying...`);
       await sleep(1500 * (attempt + 1));
     }
@@ -115,10 +122,21 @@ function getTeam() {
   return REQUIRED.map(spec => resolveAgent(spec, agents));
 }
 
+function printFallbackReport(reports, reason) {
+  console.warn(`\nCISO synthesis unavailable: ${reason}`);
+  console.log('\n=== BharatShop Security Department Report (specialist fallback) ===');
+  console.log('All available specialist findings are preserved below. This fallback is used instead of printing an empty report.');
+  for (const report of reports) {
+    const state = report.ok ? 'COMPLETE' : 'UNAVAILABLE';
+    console.log(`\n## ${report.name} [${state}]\n${report.answer}\n`);
+  }
+}
+
 async function audit() {
   const team = getTeam();
   console.log(`Security team: ${team.map(agent => agent.name).join(' + ')}`);
   console.log(`Local runtime: ${MODEL}, context=${SECURITY_CONTEXT}, timeout=${Math.round(LLM_TIMEOUT_MS / 1000)}s, retries=${LLM_RETRIES}`);
+  console.log(`CISO synthesis: timeout=${Math.round(SYNTHESIS_TIMEOUT_MS / 1000)}s, retries=${SYNTHESIS_RETRIES}`);
   const reports = [];
 
   for (const agent of team) {
@@ -139,22 +157,18 @@ async function audit() {
   }
 
   const synthesisInput = reports
-    .map(item => `## ${item.name}\n${item.answer}`)
+    .map(item => `## ${item.name}\n${item.answer.slice(0, SYNTHESIS_REPORT_CHARS)}`)
     .join('\n\n');
 
   try {
     const synthesis = await localChat(
       'You are BharatShop CISO. Synthesize the defensive specialist reports into one concise prioritized security report. Use severity labels Critical/High/Medium/Low, list evidence, remediation, and verification steps. Treat unavailable specialists as gaps, not findings. Do not invent evidence, expose secrets, attack external systems, or modify production data.',
       [{ role: 'user', content: `TASK:\n${task}\n\nREPORTS:\n${synthesisInput}` }],
+      { timeoutMs: SYNTHESIS_TIMEOUT_MS, retries: SYNTHESIS_RETRIES, numPredict: 800 },
     );
     console.log(`\n=== BharatShop Security Department Report ===\n${synthesis}\n`);
   } catch (error) {
-    console.warn(`\nCISO synthesis unavailable: ${error.message}`);
-    console.log('\n=== BharatShop Security Department Partial Reports ===');
-    for (const report of reports) {
-      console.log(`\n## ${report.name}\n${report.answer}\n`);
-    }
-    process.exitCode = 1;
+    printFallbackReport(reports, error.message);
   }
 }
 
@@ -167,6 +181,7 @@ function status() {
   console.log(`Model: ${MODEL}`);
   console.log(`Security specialists ready: ${found.length}/${REQUIRED.length}`);
   console.log(`Audit runtime: context=${SECURITY_CONTEXT}, timeout=${Math.round(LLM_TIMEOUT_MS / 1000)}s, retries=${LLM_RETRIES}`);
+  console.log(`CISO synthesis: timeout=${Math.round(SYNTHESIS_TIMEOUT_MS / 1000)}s, retries=${SYNTHESIS_RETRIES}`);
   for (const agent of found) console.log(`🟢 ${agent.name} — ${agent.slug}`);
   if (found.length !== REQUIRED.length) process.exitCode = 1;
 }
