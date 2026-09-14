@@ -63,18 +63,14 @@ try {
   Write-Host "Live health check is currently unavailable; local configuration was preserved and no worker task was claimed." -ForegroundColor Yellow
 }
 
-$temp = Join-Path $env:TEMP ("bharatshop-netlify-pair-" + [guid]::NewGuid().ToString("N") + ".env")
-try {
-  $utf8 = New-Object System.Text.UTF8Encoding($false)
-  [System.IO.File]::WriteAllText($temp, "BHARATSHOP_AUTOMATION_TOKEN=$token`n", $utf8)
-  Write-Host "Pairing the private worker token with the existing Netlify project. The token value will not be printed." -ForegroundColor Cyan
-  & npx.cmd --yes netlify-cli@latest env:import $temp --site $SiteId
-  if ($LASTEXITCODE -ne 0) { throw "Netlify token pairing failed. Authenticate the Netlify CLI and rerun this command." }
-  & npx.cmd --yes netlify-cli@latest env:set BHARATSHOP_AUTOMATION_TOKEN --secret --site $SiteId --force
-  if ($LASTEXITCODE -ne 0) { throw "Netlify could not mark the automation token as secret." }
-} finally {
-  Remove-Item $temp -Force -ErrorAction SilentlyContinue
+Write-Host "Pairing the private worker token with the existing Netlify production Functions environment. The token value will not be printed." -ForegroundColor Cyan
+# Netlify env:set requires the value argument. It is supplied only to the local CLI
+# process and is never echoed by this script or committed to git.
+& npx.cmd --yes netlify-cli@latest env:set BHARATSHOP_AUTOMATION_TOKEN $token --context production --scope functions --secret --site $SiteId
+if ($LASTEXITCODE -ne 0) {
+  throw "Netlify token pairing failed. Authenticate the Netlify CLI and rerun this command."
 }
 
 Write-Host "Live origin and private automation authentication are paired." -ForegroundColor Green
+Write-Host "Netlify environment changes require a new deployment before the running production Functions receive the token." -ForegroundColor Yellow
 Write-Host "The 24x7 worker will still refuse production execution until the shared production database migration and live revision gates are verified." -ForegroundColor Yellow
