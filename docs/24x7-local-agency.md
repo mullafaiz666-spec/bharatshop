@@ -8,9 +8,9 @@ The live storefront remains hosted on Netlify. Its scheduled function creates th
 
 The local path is:
 
-`Netlify storefront -> shared PostgreSQL work bus -> Windows 24x7 supervisor -> guarded company worker -> local Qwen/Ollama -> persisted results`
+`Netlify storefront -> shared PostgreSQL work bus -> Windows 24x7 Node supervisor -> guarded company worker -> local Qwen/Ollama -> persisted results`
 
-Ollama is never exposed publicly. It listens on `127.0.0.1:11434`. BharatShop's local OpenAI-compatible Qwen shim listens on `127.0.0.1:11555` and injects non-thinking mode for Qwen chat-completion requests.
+Ollama is never exposed publicly. It listens on `127.0.0.1:11434`. BharatShop's local OpenAI-compatible Qwen shim listens on `127.0.0.1:11555`.
 
 ## What the supervisor does
 
@@ -22,11 +22,25 @@ Ollama is never exposed publicly. It listens on `127.0.0.1:11434`. BharatShop's 
 - Runs a non-mutating local-worker preflight before claiming production work.
 - Claims at most one shared company work item per worker pass.
 - Repeats the guarded queue pass while Windows remains online.
-- Restarts after worker failure and records heartbeat/log state under `%LOCALAPPDATA%\BharatShop\Agency24x7`.
-- Installs as a Windows Scheduled Task for automatic logon/startup operation.
+- Records heartbeat/log state under `%LOCALAPPDATA%\BharatShop\Agency24x7`.
 - Preserves existing approval gates for payments, paid advertising, supplier purchases, refunds/payouts, credentials, destructive database operations and other consequential actions.
 
 Interrupted RUNNING work is moved to HOLD by the existing native worker rather than automatically replayed, preventing accidental duplicate side effects.
+
+## Antivirus-friendly Windows startup
+
+After a local antivirus product flagged the previous PowerShell Scheduled Task manager, the 24x7 startup path was replaced with a plain Node.js supervisor and a normal user Startup-folder `.cmd` entry.
+
+The current installer:
+
+- does not create a Windows Scheduled Task;
+- does not request Administrator elevation;
+- does not use `ExecutionPolicy Bypass`;
+- does not install a pre-login service;
+- starts only after the Windows user signs in;
+- keeps the startup command visible and inspectable in the user's Startup folder.
+
+This reduces suspicious persistence behavior while preserving automatic restart at normal user logon. The machine still must remain powered on and awake for the local agency to work continuously.
 
 ## Hard safety gates
 
@@ -40,25 +54,6 @@ The live local worker does **not** execute production work until all of these ar
 - The private local Qwen/Ollama runtime is healthy.
 
 Never set the migration flag merely to make the worker start. Production database parity must be verified first.
-
-## Local configuration
-
-Do not commit secrets. Relevant `.env.local` values are:
-
-```env
-BHARATSHOP_AGENT_ORIGIN=https://bharatshop-35fd.netlify.app
-BHARATSHOP_PUBLIC_ORIGIN=https://bharatshop-35fd.netlify.app
-BHARATSHOP_AUTOMATION_TOKEN=<private paired token>
-BHARATSHOP_NATIVE_REVISION=<accepted 40-character deployment revision>
-BHARATSHOP_MIGRATION_VERIFIED=true
-SUPABASE_DB_URL=<verified shared production PostgreSQL connection>
-PERSONAL_AI_MODEL=qwen3.5:4b
-AI_PROVIDER=local-openai-compatible
-AI_BASE_URL=http://127.0.0.1:11555
-AI_TEXT_MODEL=qwen3.5:4b
-```
-
-`BHARATSHOP_MIGRATION_VERIFIED=true` and the database connection must only be added after the guarded migration/verification workflow has succeeded.
 
 ## Commands
 
@@ -84,7 +79,7 @@ npm.cmd run agency:24x7:stop
 npm.cmd run agency:24x7:uninstall
 ```
 
-When PowerShell is elevated, installation creates startup and logon triggers. Without elevation it installs a logon trigger only.
+`agency:24x7:install` writes `BharatShop-Agency-24x7.cmd` to the current user's Windows Startup folder and starts the Node supervisor immediately. It requires no elevation.
 
 ## 24x7 machine requirements
 
