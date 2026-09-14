@@ -21,6 +21,8 @@
     "agents:once": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-company-autopilot.ps1 -Mode Once",
     "agents:status": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-company-autopilot.ps1 -Mode Status",
     "agency:24x7": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-24x7-agency.ps1",
+    "agency:24x7:pair-live": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/pair-live-24x7-agency.ps1",
+    "agency:24x7:worker:check": "node scripts/run-local-company-worker.mjs --check",
     "agency:24x7:install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/manage-24x7-agency.ps1 -Mode Install",
     "agency:24x7:start": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/manage-24x7-agency.ps1 -Mode Start",
     "agency:24x7:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/manage-24x7-agency.ps1 -Mode Stop",
