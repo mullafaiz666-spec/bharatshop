@@ -18,13 +18,14 @@ Agency mode additionally reads the existing local Agency Agents catalogue and as
 - No production database mutation is used by this UI.
 - No secret values are required by this UI.
 - External connectors are not silently invoked.
+- The system dock is read-only and only exposes whitelisted local runtime counters/status fields.
 
 ## Start
 
 From the BharatShop repository:
 
 ```powershell
-node scripts\start-local-ai-web.mjs
+npm.cmd run machine:web
 ```
 
 The launcher opens:
@@ -40,8 +41,23 @@ Press `Ctrl+C` in the launcher terminal to stop the local web server.
 - Streaming direct chat from the active Ollama model.
 - Explicit `Agency` mode using up to three local specialist agents plus manager synthesis.
 - Live runtime status showing model, Ollama readiness and agent count.
+- Collapsible **System** dock with Machine AI state, agent count, memory-entry count, pending/completed task counters and runtime details.
+- Quick links from the System dock to BharatShop, BharatDrip, Agents and the BharatShop Command Centre.
 - No web deployment is required for local use.
 
-## Deliberately not included yet
+## System endpoint
 
-File uploads, image generation, microphone/voice, browser automation buttons and production-changing company actions are separate follow-up integrations. They should remain explicit and approval-gated rather than being silently enabled in the first chat UI.
+`GET /api/local-ai/system`
+
+The endpoint reads only local status data:
+
+- `%LOCALAPPDATA%/BharatShop/MachineAI/heartbeat.json`
+- pending/result JSON counts under the Machine AI state directory
+- memory entry counts under `~/.bharatshop-ai/memory`
+- local Agency catalogue metadata (agent/division counts)
+
+It does not execute shell commands, mutate files, expose memory contents, access production databases or reveal secret values.
+
+## Deliberately approval-gated / next integrations
+
+File uploads, image generation, microphone/voice, browser automation, coding actions and production-changing company actions are separate integrations. They should remain explicit and approval-gated rather than being silently enabled by the chat UI.
