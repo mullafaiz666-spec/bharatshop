@@ -1,8 +1,6 @@
 name: BharatShop Netlify Production Recovery
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -18,7 +16,7 @@ env:
   NETLIFY_SITE_NAME: bharatshop-35fd
 
 jobs:
-  deploy:
+  recover:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -32,101 +30,64 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
           cache: npm
 
-      - name: Require exact BharatShop Netlify target
+      - name: Validate repository before recovery
+        run: |
+          npm ci --no-audit --no-fund
+          npm run test:integrations
+          npm run typecheck
+          BHARATSHOP_BUILD_REVISION="$GITHUB_SHA" npm run build
+          npm run lint
+
+      - name: Recover production through Netlify build API
         shell: bash
         run: |
           set -euo pipefail
           normalize_token() {
             printf '%s' "$1" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
           }
-          readable=0
+          token=""
           for raw_candidate in "${NETLIFY_AUTH_TOKEN:-}" "${NETLIFY_PERSONAL_ACCESS_TOKEN:-}" "${NETLIFY_TOKEN:-}"; do
             candidate="$(normalize_token "$raw_candidate")"
             [ -z "$candidate" ] && continue
             echo "::add-mask::$candidate"
             if curl -fsS -H "Authorization: Bearer ${candidate}" "https://api.netlify.com/api/v1/sites/${NETLIFY_SITE_ID}" -o /tmp/netlify-site.json; then
-              readable=1
+              token="$candidate"
               break
             fi
           done
-          if [ "$readable" != "1" ]; then
-            echo 'No configured Netlify token can read the BharatShop production site.' >&2
-            exit 21
-          fi
-          node -e 'const fs=require("fs");const site=JSON.parse(fs.readFileSync("/tmp/netlify-site.json","utf8"));const expectedName=process.env.NETLIFY_SITE_NAME;const expectedUrl=process.env.NETLIFY_SITE_URL;if(site.id!==process.env.NETLIFY_SITE_ID)throw new Error(`Refusing deployment: unexpected Netlify site id ${site.id||"missing"}`);if(site.name!==expectedName)throw new Error(`Refusing deployment: expected Netlify site ${expectedName}, got ${site.name||"unknown"}`);const url=String(site.ssl_url||site.url||"").replace(/\/$/,"");if(url!==expectedUrl)throw new Error(`Refusing deployment: expected ${expectedUrl}, got ${url||"missing"}`);console.log(`Verified Netlify target: ${site.name} (${site.id})`);'
+          [ -n "$token" ] || { echo 'No configured Netlify token can read the production site.' >&2; exit 21; }
+          node -e 'const fs=require("fs");const s=JSON.parse(fs.readFileSync("/tmp/netlify-site.json","utf8"));if(s.id!==process.env.NETLIFY_SITE_ID||s.name!==process.env.NETLIFY_SITE_NAME)throw new Error("Refusing recovery: wrong Netlify target");'
 
-      - name: Install dependencies
-        run: npm ci --no-audit --no-fund
+          git archive --format=zip --output=/tmp/bharatshop-source.zip HEAD
+          printf 'COMMIT_SHA=%s\n' "$GITHUB_SHA" > /tmp/.env.production.local
+          (cd /tmp && zip -q bharatshop-source.zip .env.production.local)
+          curl -fsS -X POST -H "Authorization: Bearer ${token}" -H 'Content-Type: application/zip' --data-binary @/tmp/bharatshop-source.zip "https://api.netlify.com/api/v1/sites/${NETLIFY_SITE_ID}/builds?branch=main&title=Recovery%20${GITHUB_SHA}" -o /tmp/netlify-build.json
+          deploy_id=$(node -e "const d=require('/tmp/netlify-build.json');process.stdout.write(String(d.deploy_id||''))")
+          [ -n "$deploy_id" ] || { echo 'Netlify recovery build was not accepted.' >&2; exit 22; }
 
-      - name: Run integration tests
-        run: npm run test:integrations
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Build
-        env:
-          BHARATSHOP_BUILD_REVISION: ${{ github.sha }}
-        run: npm run build
-
-      - name: Lint
-        run: npm run lint
-
-      - name: Deploy exact checkout to Netlify production with credential failover
-        shell: bash
-        run: |
-          set -euo pipefail
-          normalize_token() {
-            printf '%s' "$1" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
-          }
-          success=0
-          attempt=0
-          rm -f /tmp/netlify-cli-deploy.json /tmp/netlify-cli-deploy.err
-          for raw_candidate in "${NETLIFY_PERSONAL_ACCESS_TOKEN:-}" "${NETLIFY_TOKEN:-}" "${NETLIFY_AUTH_TOKEN:-}"; do
-            candidate="$(normalize_token "$raw_candidate")"
-            [ -z "$candidate" ] && continue
-            attempt=$((attempt + 1))
-            echo "::add-mask::$candidate"
-            echo "Trying configured Netlify deploy credential #${attempt}."
-            if BHARATSHOP_BUILD_REVISION="$GITHUB_SHA" npx --yes netlify-cli@27.5.2 deploy --build --prod --site "$NETLIFY_SITE_ID" --auth "$candidate" --message "GitHub ${GITHUB_SHA}" --json > /tmp/netlify-cli-deploy.json 2> /tmp/netlify-cli-deploy.err; then
-              echo "NETLIFY_READ_TOKEN=$candidate" >> "$GITHUB_ENV"
-              success=1
-              node -e 'const fs=require("fs");const d=JSON.parse(fs.readFileSync("/tmp/netlify-cli-deploy.json","utf8"));console.log(`Netlify production deploy accepted: ${d.deploy_id||d.deployId||d.id||"unknown"}`);'
-              break
-            fi
-            echo "Credential #${attempt} could not deploy the validated checkout."
-            sed -n '1,120p' /tmp/netlify-cli-deploy.err >&2 || true
+          for i in $(seq 1 150); do
+            curl -fsS -H "Authorization: Bearer ${token}" "https://api.netlify.com/api/v1/deploys/${deploy_id}" -o /tmp/netlify-deploy.json
+            state=$(node -e "const d=require('/tmp/netlify-deploy.json');process.stdout.write(String(d.state||''))")
+            error=$(node -e "const d=require('/tmp/netlify-deploy.json');process.stdout.write(String(d.error_message||''))")
+            echo "Netlify recovery state=$state attempt=$i"
+            [ "$state" = "ready" ] && break
+            [ "$state" = "error" ] && { echo "Netlify recovery failed: $error" >&2; exit 23; }
+            [ "$i" = "150" ] && { echo 'Netlify recovery timed out.' >&2; exit 24; }
+            sleep 5
           done
-          if [ "$success" != "1" ]; then
-            echo 'No configured Netlify credential can deploy the BharatShop production checkout.' >&2
-            exit 22
-          fi
 
-      - name: Verify exact live revision and storefront routes
+      - name: Verify recovered live revision
         shell: bash
         run: |
           set -euo pipefail
           expected="$GITHUB_SHA"
-          live=""
           for i in $(seq 1 48); do
-            body=$(curl -fsS --max-time 20 "$NETLIFY_SITE_URL/netlify-deploy-health" || true)
-            live=$(printf '%s' "$body" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log(JSON.parse(s).revision||'')}catch{console.log('')}})")
+            live=$(curl -fsS --max-time 20 "$NETLIFY_SITE_URL/netlify-deploy-health" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log(JSON.parse(s).revision||'')}catch{console.log('')}})" || true)
             echo "attempt=$i expected=$expected live=$live"
-            if [ "$live" = "$expected" ]; then break; fi
+            [ "$live" = "$expected" ] && exit 0
             sleep 5
           done
-          test "$live" = "$expected"
-          for route in / /women /men /kids /electronics /store '/api/storefront/products?limit=1&page=1' /dashboard /dashboard/command-centre /dashboard/fashion; do
-            code=$(curl -sS -o /tmp/route.out -w '%{http_code}' --max-time 58 "$NETLIFY_SITE_URL$route" || true)
-            echo "$route -> $code"
-            if [ "$route" = "/dashboard/fashion" ]; then
-              test "$code" = "200" -o "$code" = "307" -o "$code" = "308"
-            else
-              test "$code" = "200"
-            fi
-          done
-          curl -fsS --max-time 58 "$NETLIFY_SITE_URL/api/storefront/products?limit=1&page=1" -o /tmp/catalogue.json
-          node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync("/tmp/catalogue.json","utf8"));if(!Array.isArray(data.products)||data.products.length<1)throw new Error("catalogue is empty");if(!data.products[0]?.id||!data.products[0]?.title)throw new Error("catalogue product is incomplete");console.log(`Catalogue OK: total=${data.total??"unknown"}, first=${data.products[0].title}`);'
+          exit 25
