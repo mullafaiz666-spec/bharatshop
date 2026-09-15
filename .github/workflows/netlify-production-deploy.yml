@@ -32,10 +32,10 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
           cache: npm
 
-      - name: Require the exact BharatShop Netlify target
+      - name: Require exact BharatShop Netlify target
         shell: bash
         run: |
           set -euo pipefail
@@ -47,10 +47,8 @@ jobs:
             candidate="$(normalize_token "$raw_candidate")"
             [ -z "$candidate" ] && continue
             echo "::add-mask::$candidate"
-            if curl -fsS \
-              -H "Authorization: Bearer ${candidate}" \
-              "https://api.netlify.com/api/v1/sites/${NETLIFY_SITE_ID}" \
-              -o /tmp/netlify-site.json; then
+            if curl -fsS -H "Authorization: Bearer ${candidate}" "https://api.netlify.com/api/v1/sites/${NETLIFY_SITE_ID}" -o /tmp/netlify-site.json; then
+              echo "NETLIFY_READ_TOKEN=$candidate" >> "$GITHUB_ENV"
               readable=1
               break
             fi
@@ -78,48 +76,45 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Deploy exact checkout to Netlify production with credential failover
+      - name: Upload exact source to Netlify build API
         shell: bash
         run: |
           set -euo pipefail
-          normalize_token() {
-            printf '%s' "$1" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
-          }
-          success=0
-          attempt=0
-          rm -f /tmp/netlify-cli-deploy.json /tmp/netlify-cli-deploy.err
+          git archive --format=zip --output=/tmp/bharatshop-source.zip HEAD
+          printf 'COMMIT_SHA=%s\n' "$GITHUB_SHA" > /tmp/.env.production.local
+          (cd /tmp && zip -q bharatshop-source.zip .env.production.local)
 
-          for raw_candidate in "${NETLIFY_PERSONAL_ACCESS_TOKEN:-}" "${NETLIFY_TOKEN:-}" "${NETLIFY_AUTH_TOKEN:-}"; do
-            candidate="$(normalize_token "$raw_candidate")"
-            [ -z "$candidate" ] && continue
-            attempt=$((attempt + 1))
-            echo "::add-mask::$candidate"
-            echo "Trying configured Netlify deploy credential #${attempt}."
+          curl -fsS -X POST \
+            -H "Authorization: Bearer ${NETLIFY_READ_TOKEN}" \
+            -H 'Content-Type: application/zip' \
+            --data-binary @/tmp/bharatshop-source.zip \
+            "https://api.netlify.com/api/v1/sites/${NETLIFY_SITE_ID}/builds?branch=main&title=GitHub%20${GITHUB_SHA}" \
+            -o /tmp/netlify-build.json
 
-            if BHARATSHOP_BUILD_REVISION="$GITHUB_SHA" \
-              npx --yes netlify-cli@27.5.2 deploy \
-                --build \
-                --prod \
-                --site "$NETLIFY_SITE_ID" \
-                --auth "$candidate" \
-                --message "GitHub ${GITHUB_SHA}" \
-                --json \
-                > /tmp/netlify-cli-deploy.json \
-                2> /tmp/netlify-cli-deploy.err; then
-              echo "NETLIFY_READ_TOKEN=$candidate" >> "$GITHUB_ENV"
-              success=1
-              node -e 'const fs=require("fs");const d=JSON.parse(fs.readFileSync("/tmp/netlify-cli-deploy.json","utf8"));console.log(`Netlify production deploy accepted: ${d.deploy_id||d.deployId||d.id||"unknown"}`);'
-              break
-            fi
-
-            echo "Credential #${attempt} could not deploy the validated checkout."
-            sed -n '1,120p' /tmp/netlify-cli-deploy.err >&2 || true
-          done
-
-          if [ "$success" != "1" ]; then
-            echo 'No configured Netlify credential can deploy the BharatShop production checkout.' >&2
+          build_id=$(node -e "const d=require('/tmp/netlify-build.json');process.stdout.write(String(d.id||''))")
+          deploy_id=$(node -e "const d=require('/tmp/netlify-build.json');process.stdout.write(String(d.deploy_id||''))")
+          if [ -z "$build_id" ] || [ -z "$deploy_id" ]; then
+            echo 'Netlify build API did not return build/deploy identifiers.' >&2
             exit 22
           fi
+          echo "Netlify build accepted: $build_id"
+
+          for i in $(seq 1 150); do
+            curl -fsS -H "Authorization: Bearer ${NETLIFY_READ_TOKEN}" "https://api.netlify.com/api/v1/deploys/${deploy_id}" -o /tmp/netlify-deploy.json
+            state=$(node -e "const d=require('/tmp/netlify-deploy.json');process.stdout.write(String(d.state||''))")
+            error=$(node -e "const d=require('/tmp/netlify-deploy.json');process.stdout.write(String(d.error_message||''))")
+            echo "Netlify deploy state=$state attempt=$i"
+            if [ "$state" = "ready" ]; then break; fi
+            if [ "$state" = "error" ]; then
+              echo "Netlify deployment failed: $error" >&2
+              exit 23
+            fi
+            if [ "$i" = "150" ]; then
+              echo 'Netlify deployment did not become ready within the bounded wait.' >&2
+              exit 24
+            fi
+            sleep 5
+          done
 
       - name: Verify exact live revision and storefront routes
         shell: bash
