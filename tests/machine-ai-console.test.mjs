@@ -19,6 +19,20 @@ test('bare machine-console text stays chat and agency requires explicit command'
   assert.match(consoleScript, /never silently switch to agency\/browser\/company mode/);
 });
 
+test('runtime identity is reported from actual Ollama state rather than model guesses', () => {
+  assert.match(consoleScript, /Authoritative Runtime Info/);
+  assert.match(consoleScript, /INSTALLED MODELS/);
+  assert.match(consoleScript, /CLOUD-LISTED BUT NOT ACTIVE/);
+  assert.match(consoleScript, /asksRuntimeIdentity/);
+  assert.match(consoleScript, /never invent model names/i);
+});
+
+test('privacy statement distinguishes local inference from external connectors', () => {
+  assert.match(consoleScript, /loopback Ollama endpoint/);
+  assert.match(consoleScript, /external connectors may send data to their provider/);
+  assert.doesNotMatch(consoleScript, /No data is sent to external servers/);
+});
+
 test('background machine tasks default to chat and allow only chat or agency', () => {
   assert.match(taskScript, /let route = 'chat'/);
   assert.match(taskScript, /\['chat', 'agency'\]\.includes\(route\)/);
