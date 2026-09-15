@@ -2,7 +2,8 @@
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const HOME = process.env.PERSONAL_AI_HOME || join(homedir(), '.bharatshop-ai');
 const MEMORY_HOME = join(HOME, 'memory');
@@ -51,22 +52,36 @@ function usage() {
   console.log(`Personal AI memory agent\n\nCommands:\n  status\n  clear-working\n  remember <working|episodic|semantic|personal> <text>\n  recall <working|episodic|semantic|personal> [query] [limit]\n`);
 }
 
-const [command, type, ...rest] = process.argv.slice(2);
-if (!command) { usage(); process.exit(0); }
-
-if (command === 'status') {
-  console.log(JSON.stringify(status(), null, 2));
-} else if (command === 'clear-working') {
-  clearWorking();
-  console.log('working memory cleared');
-} else if (command === 'remember') {
-  const content = rest.join(' ').trim();
-  console.log(remember(type, content) ? `stored in ${type}` : 'not stored');
-} else if (command === 'recall') {
-  const limitArg = rest.at(-1);
-  const limit = /^\d+$/.test(limitArg || '') ? Number(rest.pop()) : 8;
-  console.log(JSON.stringify(recall(type, limit, rest.join(' ')), null, 2));
-} else {
-  usage();
-  process.exit(2);
+function isDirectRun() {
+  if (!process.argv[1]) return false;
+  try {
+    return resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
 }
+
+function runCli() {
+  const [command, type, ...rest] = process.argv.slice(2);
+  if (!command) { usage(); return 0; }
+
+  if (command === 'status') {
+    console.log(JSON.stringify(status(), null, 2));
+  } else if (command === 'clear-working') {
+    clearWorking();
+    console.log('working memory cleared');
+  } else if (command === 'remember') {
+    const content = rest.join(' ').trim();
+    console.log(remember(type, content) ? `stored in ${type}` : 'not stored');
+  } else if (command === 'recall') {
+    const limitArg = rest.at(-1);
+    const limit = /^\d+$/.test(limitArg || '') ? Number(rest.pop()) : 8;
+    console.log(JSON.stringify(recall(type, limit, rest.join(' ')), null, 2));
+  } else {
+    usage();
+    return 2;
+  }
+  return 0;
+}
+
+if (isDirectRun()) process.exitCode = runCli();
