@@ -79,6 +79,7 @@ export default function MarketplaceHome() {
           <Link href="/" className="text-xl font-black tracking-[-0.05em] sm:text-2xl">BHARATSHOP</Link>
           <nav className="hidden flex-1 items-center justify-center gap-7 lg:flex">
             {departments.map((item) => <Link key={item.href} href={item.href} className="text-sm font-bold text-slate-600 hover:text-black">{item.label}</Link>)}
+            <Link href="/bharatdrip" className="text-sm font-black text-slate-900 hover:text-black">BharatDrip</Link>
             <Link href="/store" className="text-sm font-bold text-slate-600 hover:text-black">All products</Link>
           </nav>
           <div className="ml-auto flex items-center gap-2">
@@ -86,7 +87,7 @@ export default function MarketplaceHome() {
             <Link href="/store" aria-label="Shopping bag" className="grid h-10 w-10 place-items-center rounded-full bg-black text-white"><ShoppingBag size={18} /></Link>
           </div>
         </div>
-        <div className="overflow-x-auto border-t border-black/5 lg:hidden"><div className="flex min-w-max gap-2 px-4 py-2.5">{departments.map((item) => <Link key={item.href} href={item.href} className="rounded-full bg-slate-100 px-4 py-2 text-xs font-black text-slate-700">{item.label}</Link>)}<Link href="/store" className="rounded-full bg-black px-4 py-2 text-xs font-black text-white">All products</Link></div></div>
+        <div className="overflow-x-auto border-t border-black/5 lg:hidden"><div className="flex min-w-max gap-2 px-4 py-2.5">{departments.map((item) => <Link key={item.href} href={item.href} className="rounded-full bg-slate-100 px-4 py-2 text-xs font-black text-slate-700">{item.label}</Link>)}<Link href="/bharatdrip" className="rounded-full bg-[#d8fc58] px-4 py-2 text-xs font-black text-black">BharatDrip</Link><Link href="/store" className="rounded-full bg-black px-4 py-2 text-xs font-black text-white">All products</Link></div></div>
       </header>
 
       <section className="mx-auto max-w-[1440px] px-4 pt-5 sm:px-8 sm:pt-8">
