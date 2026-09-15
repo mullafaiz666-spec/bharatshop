@@ -1,0 +1,31 @@
+name: BharatShop Release Source Artifact
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Package exact checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/release
+          git archive --format=tar.gz --output=/tmp/release/bharatshop-${GITHUB_SHA}.tar.gz HEAD
+          printf '%s\n' "$GITHUB_SHA" > /tmp/release/REVISION
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bharatshop-release-${{ github.sha }}
+          path: /tmp/release/
+          if-no-files-found: error
+          retention-days: 3
