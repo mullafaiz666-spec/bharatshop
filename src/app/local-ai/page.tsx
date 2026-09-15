@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import LocalAIChat from "@/components/local-ai/LocalAIChat";
+import LocalAIToolDock from "@/components/local-ai/LocalAIToolDock";
 
 export const metadata: Metadata = {
   title: "Laptop AI",
@@ -8,5 +9,10 @@ export const metadata: Metadata = {
 };
 
 export default function LocalAIPage() {
-  return <LocalAIChat />;
+  return (
+    <>
+      <LocalAIChat />
+      <LocalAIToolDock />
+    </>
+  );
 }
