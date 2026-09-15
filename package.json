@@ -35,6 +35,7 @@
     "machine:24x7:status": "node scripts/machine-ai-manager.mjs status",
     "machine:24x7:uninstall": "node scripts/machine-ai-manager.mjs uninstall",
     "machine:task": "node scripts/machine-ai-task.mjs",
+    "machine:chat": "node scripts/machine-ai-console.mjs",
     "agentmemory:start": "npx -y @agentmemory/agentmemory@latest",
     "agentmemory:status": "npx -y @agentmemory/agentmemory@latest status",
     "memory:status": "node scripts/personal-ai-memory.mjs status",
