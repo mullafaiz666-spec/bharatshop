@@ -18,15 +18,13 @@ test("production deploy safely fails over across normalized existing Netlify cre
   assert.match(workflow, /s\/\[\[:space:\]\]\*\$\/\//);
   assert.match(workflow, /candidate="\$\(normalize_token "\$raw_candidate"\)"/);
   assert.match(workflow, /::add-mask::\$candidate/);
-  assert.match(workflow, /npx --yes netlify-cli@27\.5\.2 deploy/);
-  assert.match(workflow, /--build/);
-  assert.match(workflow, /--prod/);
-  assert.match(workflow, /--site "\$NETLIFY_SITE_ID"/);
-  assert.match(workflow, /--auth "\$candidate"/);
-  assert.match(workflow, /BHARATSHOP_BUILD_REVISION="\$GITHUB_SHA"/);
   assert.match(workflow, /NETLIFY_READ_TOKEN=\$candidate/);
-  assert.match(workflow, /No configured Netlify credential can deploy the BharatShop production checkout/);
-  assert.doesNotMatch(workflow, /sites\/\$\{NETLIFY_SITE_ID\}\/builds/);
+  assert.match(workflow, /git archive --format=zip/);
+  assert.match(workflow, /Content-Type: application\/zip/);
+  assert.match(workflow, /sites\/\$\{NETLIFY_SITE_ID\}\/builds\?branch=main/);
+  assert.match(workflow, /api\/v1\/deploys\/\$\{deploy_id\}/);
+  assert.match(workflow, /state" = "ready/);
+  assert.doesNotMatch(workflow, /netlify-cli@27\.5\.2 deploy/);
   assert.doesNotMatch(workflow, /CHATGPT_NETLIFY_DEPLOY_PROXY/);
   assert.doesNotMatch(workflow, /netlify-mcp\.netlify\.app\/proxy\//);
 });
@@ -46,6 +44,13 @@ test("production deploy verifies the exact live revision before storefront accep
   assert.match(workflow, /test "\$live" = "\$expected"/);
   assert.match(workflow, /\/api\/storefront\/products\?limit=1&page=1/);
   assert.match(workflow, /catalogue is empty/);
+});
+
+test("recovery workflow is manual-only so it cannot race normal production pushes", () => {
+  const workflow = read(".github/workflows/netlify-production-recovery.yml");
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.doesNotMatch(workflow, /\n\s*push:\s*\n/);
+  assert.match(workflow, /sites\/\$\{NETLIFY_SITE_ID\}\/builds\?branch=main/);
 });
 
 test("storefront smoke waits for a successful production deploy and exact revision", () => {
