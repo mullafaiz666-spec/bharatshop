@@ -77,7 +77,13 @@
     "pixverse:status": "node scripts/pixverse-creative.mjs status",
     "pixverse:capabilities": "node scripts/pixverse-creative.mjs capabilities",
     "pixverse:create": "node scripts/pixverse-creative.mjs create",
-    "pixverse:download": "node scripts/pixverse-creative.mjs download"
+    "pixverse:download": "node scripts/pixverse-creative.mjs download",
+    "machine:web": "node scripts/machine-ai-web-manager.mjs start --open",
+    "machine:web:install": "node scripts/machine-ai-web-manager.mjs install",
+    "machine:web:stop": "node scripts/machine-ai-web-manager.mjs stop",
+    "machine:web:status": "node scripts/machine-ai-web-manager.mjs status",
+    "machine:web:uninstall": "node scripts/machine-ai-web-manager.mjs uninstall",
+    "machine:web:foreground": "node scripts/machine-ai-web.mjs"
   },
   "dependencies": {
     "@types/node": "22.19.15",

@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <title>BharatShop Machine AI</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <aside class="sidebar">
+      <div class="brand-row">
+        <div class="brand-mark">B</div>
+        <div>
+          <div class="brand-title">Machine AI</div>
+          <div class="brand-subtitle">BharatShop local runtime</div>
+        </div>
+      </div>
+      <button id="newChat" class="primary sidebar-action">＋ New chat</button>
+      <div class="sidebar-section-label">Chats</div>
+      <div id="chatList" class="chat-list"></div>
+      <div class="sidebar-spacer"></div>
+      <div class="runtime-card">
+        <div class="runtime-line"><span id="localDot" class="dot"></span><span id="localText">Checking local AI…</span></div>
+        <div class="runtime-line"><span id="supervisorDot" class="dot"></span><span id="supervisorText">Supervisor</span></div>
+        <div class="runtime-model"><span>Model</span><strong id="modelText">qwen3.5:4b</strong></div>
+      </div>
+    </aside>
+
+    <main class="main-panel">
+      <header class="topbar">
+        <div class="topbar-title">
+          <button id="mobileSidebar" class="icon-button mobile-only" title="Chats">☰</button>
+          <div>
+            <div id="chatTitle" class="chat-title">New chat</div>
+            <div class="topbar-sub"><span id="connectionBadge" class="badge">LOCAL</span><span id="agentCountText">264 agents</span></div>
+          </div>
+        </div>
+        <div class="top-actions">
+          <button class="ghost" data-drawer="agents">Agents</button>
+          <button class="ghost" data-drawer="tasks">Tasks</button>
+          <button class="ghost" data-drawer="memory">Memory</button>
+          <button class="ghost" data-drawer="project">BharatShop</button>
+        </div>
+      </header>
+
+      <section id="messages" class="messages" aria-live="polite"></section>
+
+      <div class="composer-wrap">
+        <div id="attachmentStrip" class="attachment-strip hidden"></div>
+        <form id="composer" class="composer">
+          <label class="attach-button" title="Attach text/code/image files">
+            <input id="fileInput" type="file" multiple hidden />
+            ＋
+          </label>
+          <textarea id="prompt" rows="1" placeholder="Message your local Machine AI…" autocomplete="off"></textarea>
+          <div class="composer-right">
+            <select id="mode" class="mode-select" title="Routing mode">
+              <option value="chat">Chat</option>
+              <option value="agency">Agency</option>
+            </select>
+            <button id="send" type="submit" class="send-button" title="Send">↑</button>
+          </div>
+        </form>
+        <div class="composer-note">Local Qwen inference stays on your laptop. Browser, deploy, payments and destructive actions remain approval-gated.</div>
+      </div>
+    </main>
+
+    <div id="drawerBackdrop" class="drawer-backdrop hidden"></div>
+    <aside id="drawer" class="drawer" aria-hidden="true">
+      <div class="drawer-header">
+        <div>
+          <div id="drawerTitle" class="drawer-title">Panel</div>
+          <div id="drawerSubtitle" class="drawer-subtitle"></div>
+        </div>
+        <button id="closeDrawer" class="icon-button">×</button>
+      </div>
+      <div id="drawerContent" class="drawer-content"></div>
+    </aside>
+  </div>
+  <script src="/app.js" defer></script>
+</body>
+</html>

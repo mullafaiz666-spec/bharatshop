@@ -130,9 +130,10 @@ async function localChat(systemPrompt, messages, { json = false } = {}) {
     body: JSON.stringify({
       model: MODEL,
       stream: false,
+      think: false,
       format: json ? 'json' : undefined,
       messages: [{ role: 'system', content: systemPrompt }, ...messages],
-      options: { num_ctx: Number(process.env.PERSONAL_AI_CONTEXT || 32768) },
+      options: { num_ctx: Number(process.env.PERSONAL_AI_CONTEXT || 4096) },
     }),
   });
   if (!response.ok) throw new Error(`Ollama request failed (${response.status}): ${await response.text()}`);
@@ -284,7 +285,7 @@ function setupHarnessLocal() {
     console.log('DeepSeek Harness local bridge skipped because Ollama was not found.');
     return;
   }
-  console.log('\nConfiguring official Ollama → DeepSeek Harness local bridge...');
+  console.log('\nConfiguring official Ollama â†’ DeepSeek Harness local bridge...');
   const result = run(ollama, ['launch', 'dsh', '--config']);
   if (result.status !== 0) {
     console.log('Ollama could not configure DeepSeek Harness automatically. Update Ollama, then rerun ai:setup.');
@@ -292,7 +293,7 @@ function setupHarnessLocal() {
 }
 
 async function setupAll() {
-  console.log('=== BharatShop Personal AI — free/local setup ===');
+  console.log('=== BharatShop Personal AI â€” free/local setup ===');
   console.log(`Local model: ${MODEL}`);
   const agency = run(process.execPath, [join(ROOT, 'scripts', 'local-agency.mjs'), 'setup']);
   if (agency.status !== 0) throw new Error('Local Agency/Ollama setup failed.');
@@ -354,9 +355,9 @@ async function statusRows() {
 async function printStatus() {
   console.log('=== Personal AI capability matrix ===');
   for (const row of await statusRows()) {
-    console.log(`${row.ready ? '🟢' : '🟡'} ${row.name.padEnd(32)} ${row.note}`);
+    console.log(`${row.ready ? 'ðŸŸ¢' : 'ðŸŸ¡'} ${row.name.padEnd(32)} ${row.note}`);
   }
-  console.log('\nGreen means the local connector/runtime is actually detected. PixVerse generation is intentionally not called “free” because its provider requires subscription/credits.');
+  console.log('\nGreen means the local connector/runtime is actually detected. PixVerse generation is intentionally not called â€œfreeâ€ because its provider requires subscription/credits.');
 }
 
 async function runBuild(task) {
@@ -459,7 +460,7 @@ function printHelp() {
 
 async function interactive() {
   if (!(await ollamaHealthy())) throw new Error('Local Ollama is not responding. Run npm.cmd run ai:setup first.');
-  console.log(`\nBharatShop Personal AI — ${MODEL}`);
+  console.log(`\nBharatShop Personal AI â€” ${MODEL}`);
   console.log('Private/local brain + Agency Agents + app builder + browser worker. Type /help for commands.');
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   try {

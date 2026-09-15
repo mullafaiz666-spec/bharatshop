@@ -243,12 +243,13 @@ async function localChat(systemPrompt, messages, model = DEFAULT_MODEL) {
     body: JSON.stringify({
       model,
       stream: false,
+      think: false,
       messages: [
         { role: 'system', content: systemPrompt },
         ...messages,
       ],
       options: {
-        num_ctx: Number(process.env.AGENCY_CONTEXT || 32768),
+        num_ctx: Number(process.env.AGENCY_CONTEXT || 4096),
       },
     }),
   });

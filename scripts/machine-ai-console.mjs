@@ -3,6 +3,7 @@
 import readline from 'node:readline/promises';
 import process from 'node:process';
 import { discoverAgents } from './local-agency.mjs';
+import { chooseDepartmentAgents } from './bharatshop-operator-router.mjs';
 
 const MODEL = process.env.PERSONAL_AI_MODEL || process.env.AGENCY_MODEL || process.env.AI_TEXT_MODEL || 'qwen3.5:4b';
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434';
@@ -46,13 +47,7 @@ function agentScore(agent, task) {
 async function runAgency(task) {
   const agents = discoverAgents();
   if (!agents.length) throw new Error('Agency catalog is not installed. Run npm.cmd run agency:setup first.');
-  const selected = [...agents]
-    .map(agent => ({ agent, score: agentScore(agent, task) }))
-    .sort((a, b) => b.score - a.score || a.agent.slug.localeCompare(b.agent.slug))
-    .filter(item => item.score > 0)
-    .slice(0, 3)
-    .map(item => item.agent);
-  if (!selected.length) selected.push(...agents.slice(0, 3));
+  const selected = chooseDepartmentAgents(agents, task);
 
   console.log(`Agency team: ${selected.map(agent => agent.name).join(' + ')}`);
   const reports = [];
