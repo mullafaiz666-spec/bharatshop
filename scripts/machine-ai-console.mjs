@@ -81,8 +81,29 @@ async function printStatus() {
   console.log('CLOUD TOKEN BILLING: NO for this local Ollama console');
 }
 
+async function printAbout() {
+  const installed = await models();
+  const agents = discoverAgents();
+  const cloudListed = installed.filter(name => /:cloud$/i.test(name));
+  console.log('\n=== BharatShop Laptop AI - Authoritative Runtime Info ===');
+  console.log(`ACTIVE MODEL: ${MODEL}`);
+  console.log(`INFERENCE: LOCAL via ${OLLAMA_BASE_URL}`);
+  console.log(`INSTALLED MODELS: ${installed.join(', ') || 'none'}`);
+  console.log(`LOCAL SPECIALIST AGENTS: ${agents.length}`);
+  console.log('THIS CONSOLE: direct local chat + explicit /agency specialist teamwork');
+  console.log('BROADER LAPTOP STACK: 24x7 local task queue, local memory, Browser Use and coding/company tools through separate approval-gated commands');
+  console.log('PRIVACY: this console\'s Qwen inference stays on the loopback Ollama endpoint; separately invoked external connectors may send data to their provider');
+  console.log('COST: no per-token cloud billing for the active local Qwen model');
+  if (cloudListed.length) console.log(`CLOUD-LISTED BUT NOT ACTIVE: ${cloudListed.join(', ')}`);
+}
+
+function asksRuntimeIdentity(input) {
+  const text = String(input || '').toLowerCase();
+  return /(?:what|tell me|which).*model/.test(text) && /(?:local|cloud|ollama|laptop|can you do|capabilit)/.test(text);
+}
+
 function help() {
-  console.log(`\nCommands:\n  /status              show actual local runtime status\n  /models              list actual Ollama models\n  /agency <task>       explicitly use up to 3 local specialist agents\n  /chat <task>         direct local chat\n  /help                show commands\n  /exit                exit\n\nBare text always stays in direct chat. It will never silently switch to agency/browser/company mode.`);
+  console.log(`\nCommands:\n  /status              show actual local runtime status\n  /about               authoritative model/local/cloud/capability info\n  /models              list actual Ollama models\n  /agency <task>       explicitly use up to 3 local specialist agents\n  /chat <task>         direct local chat\n  /help                show commands\n  /exit                exit\n\nBare text always stays in direct chat. It will never silently switch to agency/browser/company mode.`);
 }
 
 async function main() {
@@ -100,6 +121,7 @@ async function main() {
       if (input === '/exit' || input === '/quit') break;
       if (input === '/help') { help(); continue; }
       if (input === '/status') { await printStatus(); continue; }
+      if (input === '/about' || asksRuntimeIdentity(input)) { await printAbout(); continue; }
       if (input === '/models' || /^ollama\s+list$/i.test(input)) {
         console.log(`\nModels: ${(await models()).join(', ') || 'none'}`);
         continue;
@@ -115,7 +137,7 @@ async function main() {
       const explicitChat = input.match(/^\/chat\s+(.+)$/i);
       const task = explicitChat ? explicitChat[1].trim() : input;
       const installedNow = await models();
-      const system = `You are the user's private BharatShop laptop AI running locally through Ollama. Your exact active model is ${MODEL}. Ollama endpoint is ${OLLAMA_BASE_URL}. The currently installed Ollama models are: ${installedNow.join(', ') || MODEL}. Never say the model is unspecified and never guess other models. You do not automatically run commands, browser actions, company actions, deployments or paid providers. Be practical and concise.`;
+      const system = `You are the user's private BharatShop laptop AI running locally through Ollama. Your exact active model is ${MODEL}. Ollama endpoint is ${OLLAMA_BASE_URL}. The currently installed Ollama model names, which you must reproduce exactly if referenced, are: ${installedNow.join(', ') || MODEL}. The active local model is ${MODEL}; a model name ending in :cloud is only listed by Ollama and is not active unless explicitly selected. This console itself provides direct chat and explicit /agency specialist reasoning. The broader BharatShop laptop stack has separate approval-gated browser, coding, company and external-provider tools, so never claim those capabilities do not exist. Do not claim all laptop data can never leave the machine: local Qwen inference uses loopback, while separately invoked external connectors may transmit data. Never say the model is unspecified and never invent model names. Be practical and concise.`;
       history.push({ role: 'user', content: task });
       const answer = await localChat(system, history.slice(-12));
       console.log(`\nAI> ${answer}`);
