@@ -1,0 +1,51 @@
+name: Netlify Draft Deploy Capability Probe
+
+on:
+  push:
+    branches:
+      - ops/netlify-draft-deploy-probe-20260916
+
+permissions:
+  contents: read
+
+env:
+  NETLIFY_SITE_ID: 75b5c168-6679-479d-b3a6-244e393fe1b0
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      NETLIFY_PERSONAL_ACCESS_TOKEN: ${{ secrets.NETLIFY_PERSONAL_ACCESS_TOKEN }}
+      NETLIFY_TOKEN: ${{ secrets.NETLIFY_TOKEN }}
+    steps:
+      - name: Probe draft deploy permission without publishing production
+        shell: bash
+        run: |
+          set -euo pipefail
+          normalize_token() {
+            printf '%s' "$1" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+          }
+          for raw_candidate in "${NETLIFY_AUTH_TOKEN:-}" "${NETLIFY_PERSONAL_ACCESS_TOKEN:-}" "${NETLIFY_TOKEN:-}"; do
+            token="$(normalize_token "$raw_candidate")"
+            [ -z "$token" ] && continue
+            echo "::add-mask::$token"
+            if ! curl -fsS -H "Authorization: Bearer ${token}" "https://api.netlify.com/api/v1/sites/${NETLIFY_SITE_ID}" -o /tmp/site.json; then
+              continue
+            fi
+            status=$(curl -sS -o /tmp/draft.json -w '%{http_code}' \
+              -X POST \
+              -H "Authorization: Bearer ${token}" \
+              -H 'Content-Type: application/json' \
+              --data '{"draft":true,"files":{}}' \
+              "https://api.netlify.com/api/v1/sites/${NETLIFY_SITE_ID}/deploys")
+            echo "draft-deploy-http=$status"
+            if [ "$status" = "200" ] || [ "$status" = "201" ]; then
+              node -e 'const fs=require("fs");const d=JSON.parse(fs.readFileSync("/tmp/draft.json","utf8"));console.log(`draft-deploy-created id=${d.id||"missing"} state=${d.state||"unknown"}`);if(!d.id)process.exit(2)'
+              exit 0
+            fi
+            node -e 'const fs=require("fs");let s=fs.readFileSync("/tmp/draft.json","utf8");try{const d=JSON.parse(s);console.error(`draft-deploy-rejected: ${d.message||d.error||d.code||"unknown"}`)}catch{console.error("draft-deploy-rejected: non-json response")}'
+          done
+          echo 'No configured Netlify credential could create a non-production draft deploy.' >&2
+          exit 31
