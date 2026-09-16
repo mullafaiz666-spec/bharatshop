@@ -76,45 +76,21 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Upload exact source to Netlify build API
+      - name: Deploy exact build with pinned Netlify CLI
         shell: bash
+        env:
+          BHARATSHOP_BUILD_REVISION: ${{ github.sha }}
         run: |
           set -euo pipefail
-          git archive --format=zip --output=/tmp/bharatshop-source.zip HEAD
-          printf 'COMMIT_SHA=%s\n' "$GITHUB_SHA" > /tmp/.env.production.local
-          (cd /tmp && zip -q bharatshop-source.zip .env.production.local)
-
-          curl -fsS -X POST \
-            -H "Authorization: Bearer ${NETLIFY_READ_TOKEN}" \
-            -H 'Content-Type: application/zip' \
-            --data-binary @/tmp/bharatshop-source.zip \
-            "https://api.netlify.com/api/v1/sites/${NETLIFY_SITE_ID}/builds?branch=main&title=GitHub%20${GITHUB_SHA}" \
-            -o /tmp/netlify-build.json
-
-          build_id=$(node -e "const d=require('/tmp/netlify-build.json');process.stdout.write(String(d.id||''))")
-          deploy_id=$(node -e "const d=require('/tmp/netlify-build.json');process.stdout.write(String(d.deploy_id||''))")
-          if [ -z "$build_id" ] || [ -z "$deploy_id" ]; then
-            echo 'Netlify build API did not return build/deploy identifiers.' >&2
-            exit 22
-          fi
-          echo "Netlify build accepted: $build_id"
-
-          for i in $(seq 1 150); do
-            curl -fsS -H "Authorization: Bearer ${NETLIFY_READ_TOKEN}" "https://api.netlify.com/api/v1/deploys/${deploy_id}" -o /tmp/netlify-deploy.json
-            state=$(node -e "const d=require('/tmp/netlify-deploy.json');process.stdout.write(String(d.state||''))")
-            error=$(node -e "const d=require('/tmp/netlify-deploy.json');process.stdout.write(String(d.error_message||''))")
-            echo "Netlify deploy state=$state attempt=$i"
-            if [ "$state" = "ready" ]; then break; fi
-            if [ "$state" = "error" ]; then
-              echo "Netlify deployment failed: $error" >&2
-              exit 23
-            fi
-            if [ "$i" = "150" ]; then
-              echo 'Netlify deployment did not become ready within the bounded wait.' >&2
-              exit 24
-            fi
-            sleep 5
-          done
+          # The site-level build API currently returns HTTP 404 for this project.
+          # Use the repository's retained known-good CLI release so Netlify builds
+          # and packages the Next.js runtime before publishing the exact checkout.
+          npx --yes netlify-cli@27.5.2 deploy \
+            --build \
+            --prod \
+            --site "$NETLIFY_SITE_ID" \
+            --auth "$NETLIFY_READ_TOKEN" \
+            --message "BharatShop production ${GITHUB_SHA}"
 
       - name: Verify exact live revision and storefront routes
         shell: bash
