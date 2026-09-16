@@ -19,16 +19,22 @@ assert(branch === 'feature/machine-ai-v2-local', `Wrong local branch: ${branch}`
 
 run('git',['fetch','origin','feature/machine-ai-grounding-installer-v3']);
 let src = capture('git',['show','origin/feature/machine-ai-grounding-installer-v3:scripts/machine-ai-grounding-installer-v3.mjs']);
-const oldLine = "run(process.platform==='win32'?'npm.cmd':'npm',['run','typecheck']);";
-const newLine = "if(process.platform==='win32')run('cmd.exe',['/d','/s','/c','npm.cmd run typecheck']);else run('npm',['run','typecheck']);";
-assert(src.includes(oldLine),'Windows typecheck anchor not found in v3 installer');
-src = src.replace(oldLine,newLine);
+const oldTypecheck = "run(process.platform==='win32'?'npm.cmd':'npm',['run','typecheck']);";
+const newTypecheck = "if(process.platform==='win32')run('cmd.exe',['/d','/s','/c','npm.cmd run typecheck']);else run('npm',['run','typecheck']);";
+assert(src.includes(oldTypecheck),'Windows typecheck anchor not found in v3 installer');
+src = src.replace(oldTypecheck,newTypecheck);
+
+const verifyAnchor = "run('git',['diff','--check','--',...targets]);";
+const verifyReplacement = "if(process.platform==='win32')run('cmd.exe',['/d','/s','/c','npm.cmd run build']);else run('npm',['run','build']);\n  run('git',['diff','--check','--',...targets]);";
+assert(src.includes(verifyAnchor),'Pre-commit verification anchor not found in v3 installer');
+src = src.replace(verifyAnchor,verifyReplacement);
 
 const temp = join(os.tmpdir(),'machine-ai-grounding-installer-v4-inner.mjs');
 writeFileSync(temp,src,'utf8');
 try {
   console.log('\n=== MACHINE AI GROUNDING V4 ===');
   run(process.execPath,[temp]);
+
   console.log('\n=== POST-INSTALL HEALTH ===');
   run(process.execPath,['scripts/machine-ai-web-manager.mjs','status']);
 
@@ -45,10 +51,7 @@ try {
   assert(/Machine AI|BharatShop/i.test(html),'Machine AI UI returned unexpected content');
   console.log('MACHINE AI UI: READY http://127.0.0.1:3001');
 
-  run('cmd.exe',['/d','/s','/c','npm.cmd run typecheck']);
-  run('cmd.exe',['/d','/s','/c','npm.cmd run build']);
   run('git',['diff','--check']);
-
   console.log('\n=== V4 VERIFIED ===');
   console.log(capture('git',['log','-2','--oneline']));
   console.log(capture('git',['status','--short']) || '(tracked tree clean)');
