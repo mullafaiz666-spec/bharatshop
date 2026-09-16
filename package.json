@@ -78,7 +78,11 @@
     "pixverse:status": "node scripts/pixverse-creative.mjs status",
     "pixverse:capabilities": "node scripts/pixverse-creative.mjs capabilities",
     "pixverse:create": "node scripts/pixverse-creative.mjs create",
-    "pixverse:download": "node scripts/pixverse-creative.mjs download"
+    "pixverse:download": "node scripts/pixverse-creative.mjs download",
+    "openmontage:status": "node scripts/openmontage-creative.mjs status",
+    "openmontage:bootstrap": "node scripts/openmontage-creative.mjs bootstrap",
+    "openmontage:plan": "node scripts/openmontage-creative.mjs plan",
+    "openmontage:backlot": "node scripts/openmontage-creative.mjs backlot"
   },
   "dependencies": {
     "@types/node": "22.19.15",
