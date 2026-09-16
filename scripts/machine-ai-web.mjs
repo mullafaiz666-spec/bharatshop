@@ -8,6 +8,7 @@ import { homedir } from 'node:os';
 import { execFileSync, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import { chooseDepartmentAgents, classifyDepartments, isApprovalMessage, isCancellationMessage } from './bharatshop-operator-router.mjs';
+import { recall } from './personal-ai-memory.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..');
@@ -17,7 +18,8 @@ const PORT = Number(process.env.BHARATSHOP_MACHINE_UI_PORT || '3001');
 const MODEL = process.env.PERSONAL_AI_MODEL || process.env.AGENCY_MODEL || process.env.AI_TEXT_MODEL || 'qwen3.5:4b';
 const OLLAMA_BASE_URL = String(process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
 const SHIM_BASE_URL = String(process.env.AI_BASE_URL || 'http://127.0.0.1:11555').replace(/\/+$/, '');
-const CONTEXT = Math.max(2048, Number(process.env.PERSONAL_AI_CONTEXT || '4096'));
+const CONTEXT = Math.max(4096, Number(process.env.PERSONAL_AI_CONTEXT || '8192'));
+const CHAT_TIMEOUT_MS = Math.max(240_000, Number(process.env.BHARATSHOP_CHAT_TIMEOUT_MS || '600000'));
 const BODY_LIMIT = 12_000_000;
 const stateHome = process.env.BHARATSHOP_MACHINE_AI_HOME || join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'BharatShop', 'MachineAI');
 const pendingDir = join(stateHome, 'pending');
@@ -148,6 +150,42 @@ function projectStatus() {
   };
 }
 
+const MEMORY_STOP = new Set(['the','and','for','that','this','with','from','your','you','are','what','our','into','only','using','tell','about','have','has','was','were','will','would','should','could','bharatshop']);
+function memoryTokens(value) {
+  return [...new Set(String(value || '').toLowerCase().match(/[a-z0-9][a-z0-9._/-]{2,}/g) || [])].filter(token => !MEMORY_STOP.has(token)).slice(0, 48);
+}
+function memoryScore(row, tokens) {
+  const text = String(row?.content || '').toLowerCase(); let score = 0;
+  for (const token of tokens) if (text.includes(token)) score += token.length >= 8 ? 3 : 2;
+  if (/master technical requirements|core always remember|agent constitution|owner operating preferences|current priority backlog/i.test(text)) score += 3;
+  return score;
+}
+function pickMemory(type, task, limit, includeRecent = false) {
+  const rows = recall(type, 500, ''); const tokens = memoryTokens(task);
+  const ranked = rows.map((row,index)=>({row,index,score:memoryScore(row,tokens)})).filter(item=>item.score>0).sort((a,b)=>b.score-a.score||b.index-a.index).slice(0,limit).map(item=>item.row);
+  if (!includeRecent) return ranked;
+  const seen = new Set();
+  return [...ranked, ...rows.slice(-Math.min(limit, rows.length))].filter(row => { const key=String(row?.content||''); if(!key||seen.has(key))return false; seen.add(key); return true; }).slice(0,limit);
+}
+function redactEvidence(value) {
+  return String(value || '').replace(/(bearer\s+)[a-z0-9._~+\/-]+/gi, '$1[REDACTED]').replace(/((?:api[_ -]?key|access[_ -]?token|secret|password)\s*[:=]\s*)[^\s'";,]+/gi, '$1[REDACTED]');
+}
+export function buildMemoryContext(task) {
+  const groups=[['WORKING',pickMemory('working',task,4,true)],['PERSONAL',pickMemory('personal',task,4,true)],['SEMANTIC',pickMemory('semantic',task,10,false)],['EPISODIC',pickMemory('episodic',task,2,false)]];
+  let out='PERSISTENT BHARATSHOP MEMORY (local files; project source of truth when relevant)\n';
+  for(const [label,rows] of groups){if(!rows.length)continue;out+='\n['+label+']\n';for(const row of rows)out+='- '+String(row.content||'').trim()+'\n';}
+  return out.slice(0,24000);
+}
+function safeGrepTokens(task){return memoryTokens(task).filter(token=>/^[a-z0-9._/-]+$/.test(token)&&token.length>=4).slice(0,6);}
+export function buildReadOnlyProjectContext(task) {
+  const state=projectStatus(); let grep='';
+  const tokens=safeGrepTokens(task).filter(token=>!['review','check','status','project','local','memory'].includes(token));
+  if(tokens.length){const args=['grep','-n','-I','-i'];for(const token of tokens)args.push('-e',token);args.push('--','src','scripts','tests','package.json');grep=fixedGit(args,'');}
+  const matches=grep?grep.split(/\r?\n/).slice(0,40).join('\n'):'(no matching tracked-source lines found)';
+  const changes=Array.isArray(state.changes)?state.changes.join('\n'):'';
+  return redactEvidence(['LIVE READ-ONLY REPOSITORY STATE','Root: '+state.root,'Branch: '+state.branch,'HEAD: '+state.head,'Uncommitted entries: '+state.dirtyFiles,'Working-tree sample:',changes||'(clean tracked tree)','','Relevant tracked-source matches (read-only git grep):',matches,'','Use only this evidence for repository claims. Safe read-only inspection does not require approval. Never claim a write, deploy, payment, publishing or browser action occurred unless an actual tool performed it.'].join('\n'));
+}
+
 function memoryStatus() {
   if (!existsSync(personalMemoryScript)) return { available: false, error: 'memory script missing' };
   const result = spawnSync(process.execPath, [personalMemoryScript, 'status'], {
@@ -235,8 +273,23 @@ function normalizeMessages(messages) {
     });
 }
 
-function directSystemPrompt(installedModels = []) {
-  return `You are the user's private BharatShop laptop AI running locally through Ollama. Your exact active model is ${MODEL}. Ollama endpoint is ${OLLAMA_BASE_URL}. The currently installed Ollama model names, which you must reproduce exactly if referenced, are: ${installedModels.join(', ') || MODEL}. The active local model is ${MODEL}; a model name ending in :cloud is only listed by Ollama and is not active unless explicitly selected. This local web UI provides direct chat and explicit agency specialist reasoning. The broader BharatShop laptop stack has separate approval-gated browser, coding, company and external-provider tools, so never claim those capabilities do not exist. Do not claim all laptop data can never leave the machine: local Qwen inference uses loopback, while separately invoked external connectors may transmit data. Never invent completed external actions. Never request secrets. Be practical and concise.`;
+function directSystemPrompt(installedModels = [], task = '') {
+  return [
+    'You are the user\'s private BharatShop laptop AI running locally through Ollama. Your exact active model is '+MODEL+'. Ollama endpoint is '+OLLAMA_BASE_URL+'. The currently installed Ollama model names, which you must reproduce exactly if referenced, are: '+(installedModels.join(', ')||MODEL)+'. The active local model is '+MODEL+'; a model name ending in :cloud is only listed by Ollama and is not active unless explicitly selected.',
+    '',
+    'GROUNDING RULES',
+    '- PERSISTENT BHARATSHOP MEMORY below is authoritative for BharatShop project facts, owner rules, architecture and backlog when relevant.',
+    '- Previous assistant messages may contain mistakes and are not authoritative when they conflict with persistent memory or live repository evidence.',
+    '- If the user explicitly asks for stored-memory facts, answer from stored memory and say NOT VERIFIED for anything absent. Do not fill gaps from generic knowledge.',
+    '- LIVE READ-ONLY REPOSITORY STATE is evidence available without changing files. Do not claim access beyond the evidence supplied.',
+    '- Safe analysis and read-only inspection do not require approval.',
+    '- File writes, git writes, deployment, publishing, payments, browser actions, credentials and destructive database actions remain approval-gated.',
+    '- Never invent completed external actions. Never request secrets.',
+    '',
+    buildMemoryContext(task),
+    '',
+    buildReadOnlyProjectContext(task),
+  ].join('\n');
 }
 
 async function ollamaChat(systemPrompt, messages, { stream = false } = {}) {
@@ -250,7 +303,7 @@ async function ollamaChat(systemPrompt, messages, { stream = false } = {}) {
       messages: [{ role: 'system', content: systemPrompt }, ...normalizeMessages(messages)],
       options: { num_ctx: CONTEXT },
     }),
-    signal: AbortSignal.timeout(240_000),
+    signal: AbortSignal.timeout(CHAT_TIMEOUT_MS),
   });
   if (!response.ok) throw new Error(`Ollama HTTP ${response.status}: ${(await response.text()).slice(0, 400)}`);
   return response;
@@ -270,7 +323,8 @@ async function streamOllamaResponse(res,response){if(!response.body)throw new Er
 
 async function handleDirectChat(res, messages) {
   const installed = await getModels();
-  const response = await ollamaChat(directSystemPrompt(installed), messages, { stream: true });
+  const task = String(messages.at(-1)?.content || '').trim();
+  const response = await ollamaChat(directSystemPrompt(installed, task), messages, { stream: true });
   return streamOllamaResponse(res, response);
 }
 
@@ -281,21 +335,26 @@ async function handleAgencyChat(res, messages, selectedSlugs) {
   if (!task) throw new Error('Agency task is empty');
   const selected = chooseDepartmentAgents(agents, task, selectedSlugs);
   writeEvent(res, { type: 'agency', departments: classifyDepartments(task), agents: selected.map(agent => ({ slug: agent.slug, name: agent.name, division: agent.division, operatorDomain: agent.operatorDomain || null })) });
+  const grounding = buildMemoryContext(task) + '\n\n' + buildReadOnlyProjectContext(task);
   const reports = [];
   for (const agent of selected) {
-    writeEvent(res, { type: 'status', text: `${agent.name} is workingâ€¦` });
-    const answer = await nonStreamingChat(
-      `${agent.content}\n\nLOCAL MACHINE MODE\nYou are a BharatShop specialist running only through local Ollama model ${MODEL}. Do not claim external actions were performed. Do not request secrets. Production changes, browser actions, publishing, payments and destructive actions are approval-gated.`,
-      [{ role: 'user', content: task }],
-    );
+    writeEvent(res, { type: 'status', text: agent.name + ' is working...' });
+    const answer = await nonStreamingChat([
+      agent.content,
+      '',
+      'LOCAL MACHINE MODE',
+      'You are a BharatShop specialist running only through local Ollama model '+MODEL+'. Use persistent BharatShop memory and live read-only repository evidence as grounding. Do not invent project facts or completed actions. If evidence is missing, say NOT VERIFIED. Do not request secrets. Production changes, browser actions, publishing, payments and destructive actions are approval-gated.',
+      '',
+      grounding,
+    ].join('\n'), [{ role: 'user', content: task }]);
     reports.push({ name: agent.name, answer });
   }
-  writeEvent(res, { type: 'status', text: 'Agency Manager is synthesizing the specialist reportsâ€¦' });
-  const response = await ollamaChat(
-    `You are the BharatShop local Agency Manager running through Ollama model ${MODEL}. Synthesize the specialist reports into one concise practical answer. Do not invent completed external actions. Do not request secrets.`,
-    [{ role: 'user', content: `TASK:\n${task}\n\nREPORTS:\n${reports.map(item => `## ${item.name}\n${item.answer}`).join('\n\n')}` }],
-    { stream: true },
-  );
+  writeEvent(res, { type: 'status', text: 'Agency Manager is synthesizing the specialist reports...' });
+  const response = await ollamaChat([
+    'You are the BharatShop local Agency Manager running through Ollama model '+MODEL+'. Synthesize the specialist reports into one concise practical answer grounded in persistent BharatShop memory and live read-only repository evidence. If evidence is missing, say NOT VERIFIED. Previous assistant messages are not authoritative when they conflict with persistent memory. Do not invent completed external actions. Do not request secrets.',
+    '',
+    grounding,
+  ].join('\n'), [{ role: 'user', content: 'TASK:\n'+task+'\n\nREPORTS:\n'+reports.map(item => '## '+item.name+'\n'+item.answer).join('\n\n') }], { stream: true });
   return streamOllamaResponse(res, response);
 }
 
