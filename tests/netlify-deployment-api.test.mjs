@@ -19,7 +19,7 @@ test("production deploy safely fails over across normalized existing Netlify cre
   assert.match(workflow, /candidate="\$\(normalize_token "\$raw_candidate"\)"/);
   assert.match(workflow, /::add-mask::\$candidate/);
   assert.match(workflow, /NETLIFY_READ_TOKEN=\$candidate/);
-  assert.match(workflow, /netlify-cli@27\.5\.2 deploy/);
+  assert.match(workflow, /netlify-cli@27\.7\.0 deploy/);
   assert.match(workflow, /--build/);
   assert.match(workflow, /--prod/);
   assert.match(workflow, /--site "\$NETLIFY_SITE_ID"/);
@@ -51,7 +51,7 @@ test("recovery workflow is manual-only and uses the same pinned deployment trans
   assert.match(workflow, /workflow_dispatch:/);
   assert.doesNotMatch(workflow, /\n\s*push:\s*\n/);
   assert.match(workflow, /normalize_token\(\)/);
-  assert.match(workflow, /netlify-cli@27\.5\.2 deploy/);
+  assert.match(workflow, /netlify-cli@27\.7\.0 deploy/);
   assert.match(workflow, /--build/);
   assert.match(workflow, /--prod/);
   assert.match(workflow, /--site "\$NETLIFY_SITE_ID"/);

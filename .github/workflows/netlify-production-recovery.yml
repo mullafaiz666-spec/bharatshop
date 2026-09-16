@@ -63,7 +63,7 @@ jobs:
           [ -n "$token" ] || { echo 'No configured Netlify token can read the production site.' >&2; exit 21; }
           node -e 'const fs=require("fs");const s=JSON.parse(fs.readFileSync("/tmp/netlify-site.json","utf8"));if(s.id!==process.env.NETLIFY_SITE_ID||s.name!==process.env.NETLIFY_SITE_NAME)throw new Error("Refusing recovery: wrong Netlify target");'
 
-          npx --yes netlify-cli@27.5.2 deploy \
+          npx --yes netlify-cli@27.7.0 deploy \
             --build \
             --prod \
             --site "$NETLIFY_SITE_ID" \
