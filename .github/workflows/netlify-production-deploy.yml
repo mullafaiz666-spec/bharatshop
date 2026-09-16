@@ -83,9 +83,9 @@ jobs:
         run: |
           set -euo pipefail
           # The site-level build API currently returns HTTP 404 for this project.
-          # Use the repository's retained known-good CLI release so Netlify builds
-          # and packages the Next.js runtime before publishing the exact checkout.
-          npx --yes netlify-cli@27.5.2 deploy \
+          # Use the current verified Netlify CLI release so Netlify builds and
+          # packages the Next.js runtime before publishing the exact checkout.
+          npx --yes netlify-cli@27.7.0 deploy \
             --build \
             --prod \
             --site "$NETLIFY_SITE_ID" \
