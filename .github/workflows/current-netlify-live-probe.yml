@@ -1,0 +1,39 @@
+name: Current BharatShop Netlify Live Probe
+
+on:
+  push:
+    branches:
+      - ops/netlify-draft-deploy-probe-20260916
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe current owned Netlify production safely
+        shell: bash
+        run: |
+          set -u
+          BASE='https://bharatshop-35fd.netlify.app'
+          probe() {
+            label="$1"; path="$2"
+            code=$(curl -sS -L -o "/tmp/${label}.body" -D "/tmp/${label}.headers" -w '%{http_code}' --max-time 30 "$BASE$path" || true)
+            echo "${label} HTTP=${code} PATH=${path}"
+            grep -Ei '^(server|location|x-nf-request-id|content-type):' "/tmp/${label}.headers" || true
+            echo "body: $(head -c 500 "/tmp/${label}.body" | tr '\n' ' ' || true)"
+            echo
+          }
+          probe revision '/netlify-deploy-health'
+          probe health '/api/health'
+          probe agents_health '/api/health/agents'
+          probe agents_readiness '/api/agents/health?deep=1'
+          probe home '/'
+          probe store '/store'
+          probe catalogue '/api/storefront/products?limit=1&page=1'
+          probe dashboard '/dashboard'
+          probe command_centre '/dashboard/command-centre'
+          probe fashion '/dashboard/fashion'
+          probe bharatdrip '/bharatdrip'
