@@ -41,8 +41,10 @@ jobs:
           BHARATSHOP_BUILD_REVISION="$GITHUB_SHA" npm run build
           npm run lint
 
-      - name: Recover production through Netlify build API
+      - name: Recover production with pinned Netlify CLI
         shell: bash
+        env:
+          BHARATSHOP_BUILD_REVISION: ${{ github.sha }}
         run: |
           set -euo pipefail
           normalize_token() {
@@ -61,23 +63,12 @@ jobs:
           [ -n "$token" ] || { echo 'No configured Netlify token can read the production site.' >&2; exit 21; }
           node -e 'const fs=require("fs");const s=JSON.parse(fs.readFileSync("/tmp/netlify-site.json","utf8"));if(s.id!==process.env.NETLIFY_SITE_ID||s.name!==process.env.NETLIFY_SITE_NAME)throw new Error("Refusing recovery: wrong Netlify target");'
 
-          git archive --format=zip --output=/tmp/bharatshop-source.zip HEAD
-          printf 'COMMIT_SHA=%s\n' "$GITHUB_SHA" > /tmp/.env.production.local
-          (cd /tmp && zip -q bharatshop-source.zip .env.production.local)
-          curl -fsS -X POST -H "Authorization: Bearer ${token}" -H 'Content-Type: application/zip' --data-binary @/tmp/bharatshop-source.zip "https://api.netlify.com/api/v1/sites/${NETLIFY_SITE_ID}/builds?branch=main&title=Recovery%20${GITHUB_SHA}" -o /tmp/netlify-build.json
-          deploy_id=$(node -e "const d=require('/tmp/netlify-build.json');process.stdout.write(String(d.deploy_id||''))")
-          [ -n "$deploy_id" ] || { echo 'Netlify recovery build was not accepted.' >&2; exit 22; }
-
-          for i in $(seq 1 150); do
-            curl -fsS -H "Authorization: Bearer ${token}" "https://api.netlify.com/api/v1/deploys/${deploy_id}" -o /tmp/netlify-deploy.json
-            state=$(node -e "const d=require('/tmp/netlify-deploy.json');process.stdout.write(String(d.state||''))")
-            error=$(node -e "const d=require('/tmp/netlify-deploy.json');process.stdout.write(String(d.error_message||''))")
-            echo "Netlify recovery state=$state attempt=$i"
-            [ "$state" = "ready" ] && break
-            [ "$state" = "error" ] && { echo "Netlify recovery failed: $error" >&2; exit 23; }
-            [ "$i" = "150" ] && { echo 'Netlify recovery timed out.' >&2; exit 24; }
-            sleep 5
-          done
+          npx --yes netlify-cli@27.5.2 deploy \
+            --build \
+            --prod \
+            --site "$NETLIFY_SITE_ID" \
+            --auth "$token" \
+            --message "BharatShop recovery ${GITHUB_SHA}"
 
       - name: Verify recovered live revision
         shell: bash
