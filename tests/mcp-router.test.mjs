@@ -88,7 +88,7 @@ test('MCP auth bridge reuses safe existing GitHub auth sources without printing 
   assert.doesNotMatch(authText, /console\.error\([^\n]*token/);
 });
 
-test('Apper OAuth bridge is pinned, local, Windows-safe, and never stores a credential in BharatShop', () => {
+test('Apper OAuth bridge is pinned, local, Windows-safe, uses fresh callback ports, and never stores a credential in BharatShop', () => {
   assert.match(apperText, /https:\/\/mcp\.apper\.io\/v1\/connect/);
   assert.match(apperText, /MCP_REMOTE_VERSION = '0\.1\.38'/);
   assert.match(apperText, /mcp-remote-client/);
@@ -96,6 +96,11 @@ test('Apper OAuth bridge is pinned, local, Windows-safe, and never stores a cred
   assert.match(apperText, /containsSecret:\s*false/);
   assert.match(apperText, /npx-cli\.js/);
   assert.match(apperText, /command:\s*process\.execPath/);
+  assert.match(apperText, /createServer/);
+  assert.match(apperText, /reserveFreeLoopbackPort/);
+  assert.match(apperText, /port:\s*0/);
+  assert.match(apperText, /String\(callbackPort\)/);
+  assert.match(apperText, /'--host',\s*'127\.0\.0\.1'/);
   assert.doesNotMatch(apperText, /spawn\(\s*npxCommand/);
   assert.doesNotMatch(apperText, /APPER_(?:TOKEN|SECRET|PASSWORD)\s*=/i);
   assert.doesNotMatch(apperText, /shell:\s*true/);
