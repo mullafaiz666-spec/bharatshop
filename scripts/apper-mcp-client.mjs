@@ -33,6 +33,25 @@ function spawnNpx(args, options) {
   });
 }
 
+async function terminateChildTree(child) {
+  if (!child?.pid || child.exitCode !== null) return;
+
+  if (process.platform !== 'win32') {
+    try { child.kill(); } catch {}
+    return;
+  }
+
+  await new Promise(resolve => {
+    const killer = spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+      windowsHide: true,
+      stdio: 'ignore',
+      shell: false,
+    });
+    killer.once('error', () => resolve());
+    killer.once('close', () => resolve());
+  });
+}
+
 async function reserveFreeLoopbackPort() {
   return new Promise((resolve, reject) => {
     const server = createServer();
@@ -154,7 +173,7 @@ async function spawnRemoteProxy(callbackPort) {
 
   async function close() {
     try { child.stdin.end(); } catch {}
-    try { child.kill(); } catch {}
+    await terminateChildTree(child);
   }
 
   return { request, notify, close };
@@ -204,10 +223,11 @@ async function connectInteractive() {
 
       if (!settled && /Connected successfully!/i.test(combinedTail)) {
         settled = true;
-        resolve('AUTHORIZED');
         setTimeout(() => {
-          try { child.kill(); } catch {}
-        }, 500).unref();
+          terminateChildTree(child)
+            .catch(() => {})
+            .finally(() => resolve('AUTHORIZED'));
+        }, 300);
       }
     }
 
