@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process';
-import { access, mkdir, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -59,19 +59,33 @@ async function hasMarker() {
   }
 }
 
-async function markAuthorized() {
+async function readAuthorizedState() {
+  if (!(await hasMarker())) return null;
+  try {
+    const parsed = JSON.parse(await readFile(MARKER_FILE, 'utf8'));
+    const callbackPort = Number(parsed?.callbackPort || 0);
+    if (parsed?.connector !== 'apper' || parsed?.endpoint !== APPER_MCP_URL) return null;
+    if (!Number.isInteger(callbackPort) || callbackPort < 1024 || callbackPort > 65535) return null;
+    return { ...parsed, callbackPort };
+  } catch {
+    return null;
+  }
+}
+
+async function markAuthorized(callbackPort) {
   await mkdir(dirname(MARKER_FILE), { recursive: true });
   await writeFile(MARKER_FILE, `${JSON.stringify({
     connector: 'apper',
     endpoint: APPER_MCP_URL,
+    callbackHost: '127.0.0.1',
+    callbackPort,
     authenticatedAt: new Date().toISOString(),
     credentialOwner: 'mcp-remote local OAuth cache',
     containsSecret: false,
   }, null, 2)}\n`, 'utf8');
 }
 
-async function spawnRemoteProxy() {
-  const callbackPort = await reserveFreeLoopbackPort();
+async function spawnRemoteProxy(callbackPort) {
   const child = spawnNpx(
     ['-y', `mcp-remote@${MCP_REMOTE_VERSION}`, APPER_MCP_URL, String(callbackPort), '--host', '127.0.0.1', '--transport', 'http-only'],
     {
@@ -147,10 +161,11 @@ async function spawnRemoteProxy() {
 }
 
 async function withApperProxy(operation) {
-  if (!(await hasMarker())) {
+  const authorized = await readAuthorizedState();
+  if (!authorized) {
     throw new Error('AUTH_REQUIRED:apper:run npm.cmd run mcp:apper:connect');
   }
-  const proxy = await spawnRemoteProxy();
+  const proxy = await spawnRemoteProxy(authorized.callbackPort);
   try {
     await proxy.request('initialize', {
       protocolVersion: '2025-11-25',
@@ -214,12 +229,14 @@ async function connectInteractive() {
   });
 
   if (authState !== 'AUTHORIZED') throw new Error('Apper OAuth did not reach an authorized connection state.');
-  await markAuthorized();
+  await markAuthorized(callbackPort);
   console.log(JSON.stringify({
     connector: 'apper',
     state: 'AUTHORIZED',
     readOnly: true,
     endpoint: APPER_MCP_URL,
+    callbackHost: '127.0.0.1',
+    callbackPort,
     note: 'OAuth credentials are owned by the local mcp-remote cache and are not stored in BharatShop.',
   }, null, 2));
 }
