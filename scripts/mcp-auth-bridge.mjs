@@ -1,10 +1,52 @@
 #!/usr/bin/env node
 
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createMcpRouter, redactText } from './mcp-router.mjs';
 
 const execFileAsync = promisify(execFile);
+
+async function gitCredentialToken() {
+  return new Promise(resolve => {
+    let settled = false;
+    let stdout = '';
+    const child = spawn('git', ['credential', 'fill'], {
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'ignore'],
+      env: {
+        ...process.env,
+        GCM_INTERACTIVE: 'Never',
+        GIT_TERMINAL_PROMPT: '0',
+      },
+    });
+
+    const finish = token => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(token || null);
+    };
+
+    const timer = setTimeout(() => {
+      try { child.kill(); } catch {}
+      finish(null);
+    }, 10_000);
+
+    child.stdout?.on('data', chunk => {
+      stdout += String(chunk || '');
+      if (stdout.length > 64 * 1024) stdout = stdout.slice(0, 64 * 1024);
+    });
+    child.on('error', () => finish(null));
+    child.on('close', code => {
+      if (code !== 0) return finish(null);
+      const passwordLine = stdout.split(/\r?\n/).find(line => line.startsWith('password='));
+      const token = passwordLine ? passwordLine.slice('password='.length).trim() : '';
+      finish(token || null);
+    });
+
+    child.stdin?.end('protocol=https\nhost=github.com\n\n');
+  });
+}
 
 async function hydrateGitHubAuth() {
   if (process.env.GITHUB_MCP_TOKEN) return { state: 'existing-env' };
@@ -32,6 +74,15 @@ async function hydrateGitHubAuth() {
     } catch {
       // Try the next executable spelling. Never print credential command output.
     }
+  }
+
+  // Git for Windows commonly authenticates via Git Credential Manager even when
+  // GitHub CLI is not installed. Ask Git's configured credential helper
+  // non-interactively and keep the returned password/token only in this process.
+  const credentialToken = await gitCredentialToken();
+  if (credentialToken) {
+    process.env.GITHUB_MCP_TOKEN = credentialToken;
+    return { state: 'loaded-from-git-credential-manager' };
   }
 
   return { state: 'not-available' };
