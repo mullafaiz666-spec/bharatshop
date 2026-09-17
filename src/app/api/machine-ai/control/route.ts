@@ -2,11 +2,11 @@ import { execFile } from "node:child_process";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import {
-  buildAgencyContext,
   buildSystemPrompt,
   ollamaChatOnce,
   ollamaModels,
   queueTask,
+  selectAgents,
   type MachineRoute,
 } from "@/lib/machine-ai/local-runtime";
 import {
@@ -89,12 +89,24 @@ export async function POST(request: Request) {
     }
 
     if (action === "agency") {
-      const agency = await buildAgencyContext(task);
-      const answer = await ollamaChatOnce(
-        agency.synthesisPrompt,
-        [{ role: "user", content: "Synthesize the specialist reports into the final answer now." }],
+      // Agency work can take several minutes on a local model. Running all
+      // specialists and the synthesis inside one browser request caused the
+      // control endpoint to time out. Queue the real agency job instead and
+      // return the selected team immediately; the existing supervisor executes
+      // it and the Tasks endpoint exposes the final result.
+      const selectedAgents = selectAgents(task, 3).map(({ slug, name, division }) => ({ slug, name, division }));
+      const queued = queueTask(task, "agency");
+      return Response.json(
+        {
+          ok: true,
+          action,
+          execution: "queued",
+          selectedAgents,
+          queued,
+          message: "Agency task queued for the local 24x7 worker. Follow progress and results in Tasks.",
+        },
+        { status: 202, headers },
       );
-      return Response.json({ ok: true, action, selectedAgents: agency.selected, answer }, { headers });
     }
 
     if (action === "developer") {
