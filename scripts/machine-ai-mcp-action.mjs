@@ -178,6 +178,12 @@ export function asksForApperAppDiscovery(task) {
     || (/\b(list|find|show|discover)\b/.test(text) && /\bapper\b/.test(text) && /\bapps?\b/.test(text));
 }
 
+export function asksForApperAppCreation(task) {
+  const text = String(task || '').toLowerCase();
+  return /\bcreate_app\b/.test(text)
+    || (/\b(create|make|bootstrap|start|new)\b/.test(text) && /\bapper\b/.test(text) && /\b(app|project)\b/.test(text));
+}
+
 export async function runMcpAction(task) {
   const cleanTask = String(task || '').trim();
   if (!cleanTask) throw new Error('MCP action task is empty.');
@@ -193,19 +199,44 @@ export async function runMcpAction(task) {
     tools.map(tool => String(tool?.function?.name || '').replace(/^apper__/, '')),
   );
 
-  let deterministicContext = '';
+  const deterministicParts = [];
+
   if (asksForApperAppDiscovery(cleanTask)) {
     if (!exposedNames.has('search_apps')) {
       throw new Error('Apper search_apps was not returned by live MCP tool discovery for this session.');
     }
     const apps = await callApper('search_apps', {});
-    deterministicContext = [
+    deterministicParts.push([
       'DETERMINISTIC LIVE TOOL RESULT',
       'The runner already called the verified Apper search_apps tool for this request.',
       compact(apps),
       'Answer from this real result. Do not claim search_apps is unavailable.',
-    ].join('\n');
+    ].join('\n'));
   }
+
+  if (asksForApperAppCreation(cleanTask)) {
+    for (const requiredTool of ['get_create_app_instructions', 'get_design_directives', 'create_app']) {
+      if (!exposedNames.has(requiredTool)) {
+        throw new Error(`Apper ${requiredTool} was not returned by live MCP tool discovery for this session.`);
+      }
+    }
+
+    const metadata = { provider: 'ChatGPT', model: MODEL, modelThinkingLevel: 'high' };
+    const [createInstructions, designDirectives] = await Promise.all([
+      callApper('get_create_app_instructions', { metadata }),
+      callApper('get_design_directives', { metadata }),
+    ]);
+
+    deterministicParts.push([
+      'DETERMINISTIC APP-CREATION PREFLIGHT',
+      'Before any create_app call, the runner fetched Apper create instructions and design directives from the live MCP server.',
+      `CREATE INSTRUCTIONS: ${compact(createInstructions)}`,
+      `DESIGN DIRECTIVES: ${compact(designDirectives)}`,
+      'Follow these live instructions. Create only the app explicitly requested by the user. Do not create a database, secrets, env keys, edge functions, deploy, publish, or delete anything.',
+    ].join('\n'));
+  }
+
+  const deterministicContext = deterministicParts.join('\n\n');
 
   const messages = [
     {
@@ -215,6 +246,7 @@ export async function runMcpAction(task) {
         'This turn is EXPLICIT CONTROLLED ACTION MODE for Apper.',
         `The live Apper tools exposed for this session are: ${[...exposedNames].join(', ')}.`,
         'You may use exposed read tools and only these safe write tools: create_app, write_files, patch_files, apply_patch.',
+        'For app creation, follow the deterministic live preflight context before calling create_app and honor the exact requested app name and visibility.',
         'File writes are forced by the router to shouldBuild=false, so they are commit-only and cannot deploy.',
         'Never call or attempt database changes, connect_database, update_database, secrets, env changes, edge-function create/update/delete, delete_files, deploy, publish, payments, production data mutation, or destructive operations.',
         'If the user asks for a high-risk action, explain that exact-action approval is required; do not substitute another tool.',
