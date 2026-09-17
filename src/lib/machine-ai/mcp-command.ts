@@ -6,6 +6,7 @@ const execFileAsync = promisify(execFile);
 const PROJECT_ROOT = resolve(process.env.BHARATSHOP_ROOT || process.cwd());
 const BRIDGE = join(PROJECT_ROOT, "scripts", "mcp-auth-bridge.mjs");
 const MCP_CHAT = join(PROJECT_ROOT, "scripts", "machine-ai-mcp-chat.mjs");
+const MCP_ACTION = join(PROJECT_ROOT, "scripts", "machine-ai-mcp-action.mjs");
 
 export type McpConnectorState = {
   name: string;
@@ -36,10 +37,10 @@ async function runNode(script: string, args: string[], timeout: number) {
     env: process.env,
     timeout,
     windowsHide: true,
-    maxBuffer: 2 * 1024 * 1024,
+    maxBuffer: 4 * 1024 * 1024,
   });
   if (!String(stdout || "").trim() && String(stderr || "").trim()) {
-    throw new Error(redact(String(stderr).trim()).slice(0, 1200));
+    throw new Error(redact(String(stderr).trim()).slice(0, 1600));
   }
   return redact(String(stdout || "").trim());
 }
@@ -62,11 +63,19 @@ export async function mcpControl(command: "status" | "tools" | "test", connector
   }
 }
 
-export async function mcpTask(task: string) {
+function cleanTask(task: string) {
   const clean = String(task || "").trim();
   if (!clean) throw new Error("MCP task is empty.");
   if (clean.length > 12_000) throw new Error("MCP task is too large.");
-  return runNode(MCP_CHAT, [clean], 240_000);
+  return clean;
+}
+
+export async function mcpTask(task: string) {
+  return runNode(MCP_CHAT, [cleanTask(task)], 240_000);
+}
+
+export async function mcpActionTask(task: string) {
+  return runNode(MCP_ACTION, [cleanTask(task)], 300_000);
 }
 
 export function formatMcpStatus(value: unknown) {
@@ -76,7 +85,7 @@ export function formatMcpStatus(value: unknown) {
     const extras = [
       typeof item.tools === "number" ? `tools=${item.tools}` : "",
       typeof item.blockedWriteTools === "number" && item.blockedWriteTools > 0 ? `blocked-write-tools=${item.blockedWriteTools}` : "",
-      item.readOnly === true ? "read-only" : "",
+      item.readOnly === true ? "read-only default" : "",
       item.missing?.length ? `missing=${item.missing.join(",")}` : "",
       item.error ? `error=${item.error}` : "",
     ].filter(Boolean).join("; ");
@@ -114,6 +123,7 @@ export function formatAudit(runtime: Record<string, unknown>, mcp: unknown) {
     formatMcpStatus(states),
     "",
     `MCP SYSTEM = ${mcpVerified ? "VERIFIED" : "NEEDS WORK"}`,
+    "Audit mode is read-only. Controlled Apper writes are available only through explicit /mcp action tasks.",
     "No production writes, deploys, merges, payments, or destructive database actions were performed by this audit.",
   ].join("\n");
 }
