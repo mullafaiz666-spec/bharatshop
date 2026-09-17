@@ -6,7 +6,11 @@ on:
       - 'src/lib/creative/**'
       - 'src/app/api/creative/**'
       - 'scripts/bharatshop-creative.mjs'
+      - 'scripts/mcp-router.mjs'
+      - 'scripts/machine-ai-mcp-chat.mjs'
+      - 'config/mcp-connectors.json'
       - 'tests/creative-engine.test.mjs'
+      - 'tests/mcp-router.test.mjs'
       - 'package.json'
       - '.github/workflows/creative-engine-ci.yml'
   workflow_dispatch:
@@ -29,3 +33,5 @@ jobs:
         run: npm run typecheck
       - name: Creative engine regression tests
         run: node --test tests/creative-engine.test.mjs
+      - name: Machine AI MCP safety tests
+        run: node --test tests/mcp-router.test.mjs
