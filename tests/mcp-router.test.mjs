@@ -13,6 +13,7 @@ import {
 const configText = await readFile(new URL('../config/mcp-connectors.json', import.meta.url), 'utf8');
 const routerText = await readFile(new URL('../scripts/mcp-router.mjs', import.meta.url), 'utf8');
 const authText = await readFile(new URL('../scripts/mcp-auth-bridge.mjs', import.meta.url), 'utf8');
+const apperText = await readFile(new URL('../scripts/apper-mcp-client.mjs', import.meta.url), 'utf8');
 const chatText = await readFile(new URL('../scripts/machine-ai-mcp-chat.mjs', import.meta.url), 'utf8');
 const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 
@@ -23,6 +24,8 @@ test('all configured Machine AI connectors are read-only', async () => {
   }
   assert.match(configText, /githubcopilot\.com\/mcp\/x\/all\/readonly/);
   assert.match(configText, /read_only=true/);
+  assert.match(configText, /mcp\.apper\.io\/v1\/connect/);
+  assert.match(configText, /apper-oauth/);
 });
 
 test('connector config references environment variables instead of storing credentials', () => {
@@ -38,11 +41,14 @@ test('local file tool cannot escape the BharatShop project sandbox', () => {
   assert.throws(() => assertInsideRoot(PROJECT_ROOT, '../outside.txt'), /escapes BharatShop project sandbox/i);
 });
 
-test('write-like remote MCP operations are rejected by policy', () => {
-  for (const name of ['create_issue', 'update_file', 'delete_branch', 'merge_pull_request', 'deploy_edge_function', 'reset_database']) {
+test('write-like remote MCP operations are rejected by policy, including Apper mutations', () => {
+  for (const name of [
+    'create_issue', 'update_file', 'delete_branch', 'merge_pull_request', 'deploy_edge_function', 'reset_database',
+    'connect_database', 'patch_files', 'set_env_key', 'write_files', 'update_database',
+  ]) {
     assert.equal(isWriteLikeTool(name), true, name);
   }
-  for (const name of ['get_file_contents', 'list_projects', 'search_docs', 'execute_sql']) {
+  for (const name of ['get_file_contents', 'list_projects', 'search_docs', 'execute_sql', 'search_apps', 'read_files', 'preview_app', 'get_build_status']) {
     assert.equal(isWriteLikeTool(name), false, name);
   }
 });
@@ -82,6 +88,18 @@ test('MCP auth bridge reuses safe existing GitHub auth sources without printing 
   assert.doesNotMatch(authText, /console\.error\([^\n]*token/);
 });
 
+test('Apper OAuth bridge is pinned, local, and never stores a credential in BharatShop', () => {
+  assert.match(apperText, /https:\/\/mcp\.apper\.io\/v1\/connect/);
+  assert.match(apperText, /MCP_REMOTE_VERSION = '0\.1\.38'/);
+  assert.match(apperText, /mcp-remote-client/);
+  assert.match(apperText, /mcp-remote local OAuth cache/);
+  assert.match(apperText, /containsSecret:\s*false/);
+  assert.doesNotMatch(apperText, /APPER_(?:TOKEN|SECRET|PASSWORD)\s*=/i);
+  assert.doesNotMatch(apperText, /shell:\s*true/);
+  assert.match(routerText, /AUTH_REQUIRED:apper/);
+  assert.match(routerText, /filter\(tool => !isWriteLikeTool\(tool\?\.name\)\)/);
+});
+
 test('MCP chat hydrates auth and has a bounded prompt-injection-safe tool loop', () => {
   assert.match(chatText, /hydrateMcpAuth/);
   assert.match(chatText, /await hydrateMcpAuth\(\)/);
@@ -97,9 +115,10 @@ test('MCP chat does not equate detached HEAD with missing source files', () => {
   assert.match(chatText, /project_status or list_project_files/);
 });
 
-test('package routes MCP status, tools, and tests through the auth bridge', () => {
+test('package routes MCP status, tools, tests and Apper OAuth through fixed scripts', () => {
   assert.equal(pkg.scripts['mcp:status'], 'node scripts/mcp-auth-bridge.mjs status');
   assert.equal(pkg.scripts['mcp:tools'], 'node scripts/mcp-auth-bridge.mjs tools');
   assert.equal(pkg.scripts['mcp:test'], 'node scripts/mcp-auth-bridge.mjs test');
+  assert.equal(pkg.scripts['mcp:apper:connect'], 'node scripts/apper-mcp-client.mjs connect');
   assert.equal(pkg.scripts['machine:mcp'], 'node scripts/machine-ai-mcp-chat.mjs');
 });
