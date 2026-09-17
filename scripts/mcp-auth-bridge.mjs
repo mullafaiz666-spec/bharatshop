@@ -8,19 +8,33 @@ const execFileAsync = promisify(execFile);
 
 async function hydrateGitHubAuth() {
   if (process.env.GITHUB_MCP_TOKEN) return { state: 'existing-env' };
-  try {
-    const { stdout } = await execFileAsync('gh', ['auth', 'token'], {
-      timeout: 10_000,
-      windowsHide: true,
-      maxBuffer: 64 * 1024,
-    });
-    const token = String(stdout || '').trim();
-    if (!token) return { state: 'not-available' };
-    process.env.GITHUB_MCP_TOKEN = token;
-    return { state: 'loaded-from-gh' };
-  } catch {
-    return { state: 'not-available' };
+
+  for (const key of ['GH_TOKEN', 'GITHUB_TOKEN']) {
+    const token = String(process.env[key] || '').trim();
+    if (token) {
+      process.env.GITHUB_MCP_TOKEN = token;
+      return { state: `loaded-from-${key.toLowerCase()}` };
+    }
   }
+
+  const commands = process.platform === 'win32' ? ['gh.exe', 'gh'] : ['gh'];
+  for (const command of commands) {
+    try {
+      const { stdout } = await execFileAsync(command, ['auth', 'token', '--hostname', 'github.com'], {
+        timeout: 10_000,
+        windowsHide: true,
+        maxBuffer: 64 * 1024,
+      });
+      const token = String(stdout || '').trim();
+      if (!token) continue;
+      process.env.GITHUB_MCP_TOKEN = token;
+      return { state: 'loaded-from-gh' };
+    } catch {
+      // Try the next executable spelling. Never print credential command output.
+    }
+  }
+
+  return { state: 'not-available' };
 }
 
 function hydrateSupabaseProjectRef() {
