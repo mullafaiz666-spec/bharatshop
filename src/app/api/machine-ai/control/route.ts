@@ -11,7 +11,6 @@ import {
 } from "@/lib/machine-ai/local-runtime";
 import {
   authorizeMachineControl,
-  controlTokenPathLabel,
   machineControlHeaders,
   machineControlOptions,
 } from "@/lib/machine-ai/control-auth";
@@ -59,11 +58,8 @@ export async function POST(request: Request) {
   const headers = machineControlHeaders(request);
   if (!authorizeMachineControl(request)) {
     return Response.json(
-      {
-        error: "Machine AI control is not paired. Enter the laptop pairing token in the Control Center.",
-        tokenPath: controlTokenPathLabel(),
-      },
-      { status: 401, headers },
+      { error: "Machine AI control is only authorized for localhost and the owned BharatShop Apper Control Center." },
+      { status: 403, headers },
     );
   }
 
@@ -89,11 +85,6 @@ export async function POST(request: Request) {
     }
 
     if (action === "agency") {
-      // Agency work can take several minutes on a local model. Running all
-      // specialists and the synthesis inside one browser request caused the
-      // control endpoint to time out. Queue the real agency job instead and
-      // return the selected team immediately; the existing supervisor executes
-      // it and the Tasks endpoint exposes the final result.
       const selectedAgents = selectAgents(task, 3).map(({ slug, name, division }) => ({ slug, name, division }));
       const queued = queueTask(task, "agency");
       return Response.json(
