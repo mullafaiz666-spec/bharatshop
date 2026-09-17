@@ -21,6 +21,13 @@
       "authEnv": "SUPABASE_ACCESS_TOKEN",
       "requiredEnv": ["SUPABASE_PROJECT_REF", "SUPABASE_ACCESS_TOKEN"]
     },
+    "apper": {
+      "enabled": true,
+      "type": "bridge",
+      "provider": "apper-oauth",
+      "url": "https://mcp.apper.io/v1/connect",
+      "readOnly": true
+    },
     "local": {
       "enabled": true,
       "type": "builtin",
