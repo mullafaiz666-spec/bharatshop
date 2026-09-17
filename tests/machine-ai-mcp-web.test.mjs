@@ -35,7 +35,7 @@ test('web MCP bridge uses execFile with fixed scripts and connector allowlist', 
   assert.match(mcpCommand, /execFileAsync\(process\.execPath/);
   assert.match(mcpCommand, /mcp-auth-bridge\.mjs/);
   assert.match(mcpCommand, /machine-ai-mcp-chat\.mjs/);
-  assert.match(mcpCommand, /\["all", "github", "supabase", "local"\]/);
+  assert.match(mcpCommand, /\["all", "github", "supabase", "apper", "local"\]/);
   assert.doesNotMatch(mcpCommand, /shell:\s*true/);
 });
 
@@ -44,10 +44,11 @@ test('audit reports measured MCP state and never claims production writes', () =
   assert.match(mcpCommand, /No production writes, deploys, merges, payments, or destructive database actions/);
 });
 
-test('MCP dashboard visibly exposes GitHub, Supabase and Local Tools', () => {
+test('MCP dashboard visibly exposes GitHub, Supabase, Apper and Local Tools', () => {
   assert.match(mcpPanel, /MCP Connectors/);
-  assert.match(mcpPanel, /\["github", "supabase", "local"\]/);
-  assert.match(mcpPanel, /Discovered tools/);
+  assert.match(mcpPanel, /\["github", "supabase", "apper", "local"\]/);
+  assert.match(mcpPanel, /Discovered read-only tools/);
+  assert.match(mcpPanel, /Blocked write tools/);
   assert.match(mcpPanel, /Run read-only test/);
   assert.match(machinePage, /\/machine-ai\/mcp/);
 });
