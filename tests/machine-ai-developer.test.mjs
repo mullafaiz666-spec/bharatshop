@@ -37,11 +37,11 @@ test('operational control endpoint supports chat agency queue developer and appe
     assert.match(control, new RegExp(`action === \\"${action}\\"`));
   }
   assert.match(control, /authorizeMachineControl/);
-  assert.match(control, /x-bharatshop-control-token/i);
 });
 
-test('control bridge is paired to the exact Apper preview origin', () => {
+test('control bridge is paired to the exact Apper preview origin and token header', () => {
   assert.match(auth, /preview--nimble-bharatshop-control\.apper\.so/);
+  assert.match(auth, /x-bharatshop-control-token/i);
   assert.match(auth, /timingSafeEqual/);
   assert.match(auth, /control-token\.txt/);
   assert.match(auth, /access-control-allow-private-network/);
