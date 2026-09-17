@@ -6,6 +6,7 @@ import { discoverAgents } from './local-agency.mjs';
 import { hydrateMcpAuth } from './mcp-auth-bridge.mjs';
 import { createMcpRouter } from './mcp-router.mjs';
 import { runMcpChat } from './machine-ai-mcp-chat.mjs';
+import { runMcpAction } from './machine-ai-mcp-action.mjs';
 
 const MODEL = process.env.PERSONAL_AI_MODEL || process.env.AGENCY_MODEL || process.env.AI_TEXT_MODEL || 'qwen3.5:4b';
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434';
@@ -133,13 +134,14 @@ async function printAudit() {
   for (const item of mcp) {
     const extras = [
       Number.isFinite(item.tools) ? `tools=${item.tools}` : '',
-      item.readOnly ? 'read-only' : '',
+      item.readOnly ? 'read-only default' : '',
       Array.isArray(item.missing) && item.missing.length ? `missing=${item.missing.join(',')}` : '',
       item.error ? `error=${item.error}` : '',
     ].filter(Boolean).join('; ');
     console.log(`${String(item.name || '').toUpperCase()}: ${item.state}${extras ? ` (${extras})` : ''}`);
   }
   console.log(`\nMCP SYSTEM = ${allMcpVerified ? 'VERIFIED' : 'NEEDS WORK'}`);
+  console.log('Controlled Apper writes require an explicit /mcp action task.');
   console.log('No production writes, deploys, merges, payments, or destructive database actions were performed.');
 }
 
@@ -152,7 +154,7 @@ async function printStatus() {
   console.log(`MODEL INSTALLED: ${installed.includes(MODEL) ? 'YES' : 'NO'}`);
   console.log(`INSTALLED MODELS: ${installed.join(', ') || 'none'}`);
   console.log(`AGENCY AGENTS: ${agents.length}`);
-  console.log('MCP: explicit /mcp commands only');
+  console.log('MCP: /mcp is read-only; /mcp action explicitly enables safe Apper development writes');
   console.log('CLOUD TOKEN BILLING: NO for this local Ollama console');
 }
 
@@ -165,7 +167,7 @@ async function printAbout() {
   console.log(`INFERENCE: LOCAL via ${OLLAMA_BASE_URL}`);
   console.log(`INSTALLED MODELS: ${installed.join(', ') || 'none'}`);
   console.log(`LOCAL SPECIALIST AGENTS: ${agents.length}`);
-  console.log('THIS CONSOLE: direct local chat + explicit /agency specialist teamwork + explicit /mcp read-only tool mode');
+  console.log('THIS CONSOLE: direct local chat + explicit /agency teamwork + /mcp read-only mode + /mcp action controlled Apper writes');
   console.log('BROADER LAPTOP STACK: 24x7 local task queue, local memory, Browser Use and coding/company tools through separate approval-gated commands');
   console.log('PRIVACY: direct Qwen inference stays on the loopback Ollama endpoint; explicitly invoked MCP/external connectors may send data to their provider');
   console.log('COST: no per-token cloud billing for the active local Qwen model');
@@ -178,7 +180,7 @@ function asksRuntimeIdentity(input) {
 }
 
 function help() {
-  console.log(`\nCommands:\n  /status                    show actual local runtime status\n  /audit                     deterministic read-only runtime + MCP audit\n  /about                     authoritative model/local/cloud/capability info\n  /models                    list actual Ollama models\n  /agency <task>             explicitly use up to 3 local specialist agents\n  /mcp                       probe MCP connector status\n  /mcp status               probe MCP connector status\n  /mcp tools [connector]     list real discovered MCP tools\n  /mcp test <connector>      probe github, supabase, or local connector\n  /mcp <task>                explicit read-only MCP-assisted Qwen task\n  /chat <task>               direct local chat\n  /help                      show commands\n  /exit                      exit\n\nBare text always stays in direct chat. It will never silently switch to agency/MCP/browser/company mode.`);
+  console.log(`\nCommands:\n  /status                    show actual local runtime status\n  /audit                     deterministic read-only runtime + MCP audit\n  /about                     authoritative model/local/cloud/capability info\n  /models                    list actual Ollama models\n  /agency <task>             explicitly use up to 3 local specialist agents\n  /mcp                       probe MCP connector status\n  /mcp status                probe MCP connector status\n  /mcp tools [connector]      list real discovered read-only MCP tools\n  /mcp test <connector>       probe github, supabase, apper, local, or all\n  /mcp action <task>          explicit controlled Apper writes; commit-only, no deploy/db/secrets/delete\n  /mcp <task>                 explicit read-only MCP-assisted Qwen task\n  /chat <task>                direct local chat\n  /help                       show commands\n  /exit                       exit\n\nBare text always stays in direct chat. It will never silently switch to agency/MCP/browser/company mode.`);
 }
 
 async function main() {
@@ -207,14 +209,20 @@ async function main() {
         await printMcpStatus();
         continue;
       }
-      const mcpTools = input.match(/^\/mcp\s+tools(?:\s+(github|supabase|local|all))?$/i);
+      const mcpTools = input.match(/^\/mcp\s+tools(?:\s+(github|supabase|apper|local|all))?$/i);
       if (mcpTools) {
         await printMcpTools((mcpTools[1] || 'all').toLowerCase());
         continue;
       }
-      const mcpTest = input.match(/^\/mcp\s+test\s+(github|supabase|local|all)$/i);
+      const mcpTest = input.match(/^\/mcp\s+test\s+(github|supabase|apper|local|all)$/i);
       if (mcpTest) {
         await printMcpStatus(mcpTest[1].toLowerCase());
+        continue;
+      }
+      const mcpAction = input.match(/^\/mcp\s+action\s+(.+)$/i);
+      if (mcpAction) {
+        const answer = await runMcpAction(mcpAction[1].trim());
+        console.log(`\nAI> ${answer}`);
         continue;
       }
       const mcpTask = input.match(/^\/mcp\s+(.+)$/i);
@@ -234,7 +242,7 @@ async function main() {
       const explicitChat = input.match(/^\/chat\s+(.+)$/i);
       const task = explicitChat ? explicitChat[1].trim() : input;
       const installedNow = await models();
-      const system = `You are the user's private BharatShop laptop AI running locally through Ollama. Your exact active model is ${MODEL}. Ollama endpoint is ${OLLAMA_BASE_URL}. The currently installed Ollama model names, which you must reproduce exactly if referenced, are: ${installedNow.join(', ') || MODEL}. The active local model is ${MODEL}; a model name ending in :cloud is only listed by Ollama and is not active unless explicitly selected. This console provides direct chat plus explicit /agency and /mcp modes. Never silently invoke external tools from bare chat. The broader BharatShop laptop stack has separate approval-gated browser, coding, company and external-provider tools, so never claim those capabilities do not exist. Do not claim all laptop data can never leave the machine: local Qwen inference uses loopback, while explicitly invoked external connectors may transmit data. Never say the model is unspecified and never invent model names. Be practical and concise.`;
+      const system = `You are the user's private BharatShop laptop AI running locally through Ollama. Your exact active model is ${MODEL}. Ollama endpoint is ${OLLAMA_BASE_URL}. The currently installed Ollama model names, which you must reproduce exactly if referenced, are: ${installedNow.join(', ') || MODEL}. The active local model is ${MODEL}; a model name ending in :cloud is only listed by Ollama and is not active unless explicitly selected. This console provides direct chat plus explicit /agency, /mcp read-only, and /mcp action controlled-write modes. Never silently invoke external tools from bare chat. The broader BharatShop laptop stack has separate approval-gated browser, coding, company and external-provider tools, so never claim those capabilities do not exist. Do not claim all laptop data can never leave the machine: local Qwen inference uses loopback, while explicitly invoked external connectors may transmit data. Never say the model is unspecified and never invent model names. Be practical and concise.`;
       history.push({ role: 'user', content: task });
       const answer = await localChat(system, history.slice(-12));
       console.log(`\nAI> ${answer}`);
