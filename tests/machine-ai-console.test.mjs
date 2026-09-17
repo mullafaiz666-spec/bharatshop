@@ -28,6 +28,22 @@ test('machine console exposes explicit MCP status, tools, connector tests and to
   assert.match(consoleScript, /runMcpChat/);
 });
 
+test('machine console audit is deterministic and includes measured MCP state', () => {
+  assert.match(consoleScript, /\/audit/);
+  assert.match(consoleScript, /async function printAudit/);
+  assert.match(consoleScript, /router\.status\(\{ probe: true \}\)/);
+  assert.match(consoleScript, /queue_status/);
+  assert.match(consoleScript, /MCP SYSTEM =/);
+  assert.match(consoleScript, /No production writes, deploys, merges, payments, or destructive database actions/);
+});
+
+test('transient local Ollama resets get one bounded retry', () => {
+  assert.match(consoleScript, /ECONNRESET/);
+  assert.match(consoleScript, /transientOllamaError/);
+  assert.match(consoleScript, /await delay\(500\)/);
+  assert.doesNotMatch(consoleScript, /while\s*\(true\).*fetchJson/s);
+});
+
 test('runtime identity is reported from actual Ollama state rather than model guesses', () => {
   assert.match(consoleScript, /Authoritative Runtime Info/);
   assert.match(consoleScript, /INSTALLED MODELS/);
