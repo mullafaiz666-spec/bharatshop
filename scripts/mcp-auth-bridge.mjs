@@ -135,7 +135,28 @@ async function main() {
     console.log(JSON.stringify(connector === 'all' ? status : status.filter(item => item.name === connector), null, 2));
     return;
   }
-  throw new Error('Usage: node scripts/mcp-auth-bridge.mjs status | tools [connector] | test [connector]');
+
+  if (command === 'call') {
+    const toolName = args[2];
+    if (!connector || connector === 'all' || !toolName) {
+      throw new Error('Usage: node scripts/mcp-auth-bridge.mjs call <connector> <tool> [jsonArgs]');
+    }
+
+    let toolArgs = {};
+    if (args[3]) {
+      try { toolArgs = JSON.parse(args[3]); }
+      catch { throw new Error('call jsonArgs must be valid JSON.'); }
+    }
+
+    console.log(JSON.stringify(
+      await router.call(connector, toolName, toolArgs),
+      null,
+      2
+    ));
+    return;
+  }
+
+  throw new Error('Usage: node scripts/mcp-auth-bridge.mjs status | tools [connector] | test [connector] | call <connector> <tool> [jsonArgs]');
 }
 
 if (process.argv[1]?.endsWith('mcp-auth-bridge.mjs')) {

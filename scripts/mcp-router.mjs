@@ -249,16 +249,31 @@ async function callLocalTool(root, name, args = {}) {
     return { ok: response.ok, models: (data?.models || []).map(item => item.name || item.model).filter(Boolean) };
   }
   if (name === 'machine_ai_health') {
-    const response = await fetch('http://127.0.0.1:3001/api/project', { signal: AbortSignal.timeout(8_000) });
-    return { ok: response.ok, status: response.status, project: response.ok ? await response.json() : null };
+    const response = await fetch('http://127.0.0.1:3001/api/machine-ai/status', { signal: AbortSignal.timeout(8_000) });
+    let runtime = null;
+    try { runtime = await response.json(); } catch {}
+    return { ok: response.ok, status: response.status, runtime, project: runtime };
   }
   if (name === 'queue_status') {
-    const base = join(homedir(), '.bharatshop-ai');
+    const base = process.env.BHARATSHOP_MACHINE_AI_HOME
+      || join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'BharatShop', 'MachineAI');
+
     const counts = {};
     for (const folder of ['pending', 'running', 'results']) {
-      try { counts[folder] = (await readdir(join(base, folder))).length; } catch { counts[folder] = 0; }
+      try {
+        counts[folder] = (await readdir(join(base, folder)))
+          .filter(name => name.endsWith('.json')).length;
+      } catch {
+        counts[folder] = 0;
+      }
     }
-    return counts;
+
+    return {
+      pending: counts.pending,
+      running: counts.running,
+      results: counts.results,
+      completed: counts.results,
+    };
   }
   throw new Error(`Unknown local tool: ${name}`);
 }
