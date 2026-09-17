@@ -106,7 +106,7 @@ async function deterministicCommand(input: string, route: MachineRoute) {
     return textStream(formatMcpStatus(result), route, "mcp-test");
   }
 
-  const task = trimmed.match(/^\/mcp\s+(.+)$/is);
+  const task = trimmed.match(/^\/mcp\s+([\s\S]+)$/i);
   if (task) {
     const result = await retryTransient(() => mcpTask(task[1].trim()));
     return textStream(result, route, "mcp-task");
