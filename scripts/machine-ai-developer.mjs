@@ -12,7 +12,7 @@ const PROJECT_ROOT = resolve(HERE, '..');
 const MODEL = process.env.PERSONAL_AI_MODEL || process.env.AGENCY_MODEL || process.env.AI_TEXT_MODEL || 'qwen3.5:4b';
 const OLLAMA_BASE_URL = String(process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
 const CONTEXT = Number(process.env.PERSONAL_AI_CONTEXT || '8192');
-const DEV_BRANCH = process.env.MACHINE_AI_DEV_BRANCH || 'feature/machine-ai-mcp-host-v1';
+const DEV_BRANCH = process.env.MACHINE_AI_DEV_BRANCH || 'feature/machine-ai-operational-control';
 
 function redact(value) {
   return String(value || '')
