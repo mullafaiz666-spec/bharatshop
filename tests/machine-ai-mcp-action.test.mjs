@@ -55,6 +55,15 @@ test('Apper app discovery is grounded by a deterministic live search_apps call',
   assert.match(action, /The live Apper tools exposed for this session are/);
 });
 
+test('Apper app creation is preflighted with live create instructions and design directives', () => {
+  assert.match(action, /asksForApperAppCreation/);
+  assert.match(action, /get_create_app_instructions/);
+  assert.match(action, /get_design_directives/);
+  assert.match(action, /DETERMINISTIC APP-CREATION PREFLIGHT/);
+  assert.match(action, /Create only the app explicitly requested by the user/);
+  assert.match(action, /honor the exact requested app name and visibility/);
+});
+
 test('console and web require an explicit /mcp action command', () => {
   assert.match(consoleText, /\/mcp\\s\+action/);
   assert.match(consoleText, /runMcpAction/);
