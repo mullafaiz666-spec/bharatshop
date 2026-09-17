@@ -12,6 +12,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 export const PROJECT_ROOT = resolve(HERE, '..');
 const DEFAULT_CONFIG = join(PROJECT_ROOT, 'config', 'mcp-connectors.json');
 const AUDIT_FILE = join(homedir(), '.bharatshop-ai', 'mcp-audit.jsonl');
+const APPER_BRIDGE = join(PROJECT_ROOT, 'scripts', 'apper-mcp-client.mjs');
 const DEFAULT_TIMEOUT_MS = 20_000;
 
 function envExpand(value) {
@@ -34,7 +35,7 @@ export function assertInsideRoot(root, candidate) {
 }
 
 export function isWriteLikeTool(name) {
-  return /(^|_)(create|update|delete|remove|merge|deploy|push|commit|apply|reset|pause|restore|upload|publish|write|insert|upsert|drop|truncate|reseed|migrate|cancel|close|lock|unlock|rerun|dismiss|resolve|unresolve|approve|assign|label)(_|$)/i.test(String(name));
+  return /(^|_)(create|update|delete|remove|merge|deploy|push|commit|apply|reset|pause|restore|upload|publish|write|patch|set|connect|insert|upsert|drop|truncate|reseed|migrate|cancel|close|lock|unlock|rerun|dismiss|resolve|unresolve|approve|assign|label)(_|$)/i.test(String(name));
 }
 
 function missingEnv(config) {
@@ -55,7 +56,8 @@ export async function loadMcpConfig(configPath = process.env.MACHINE_AI_MCP_CONF
     };
     const cfg = connectors[name];
     if (cfg.enabled !== false && cfg.readOnly !== true) throw new Error(`Connector ${name} must be readOnly=true in Machine AI.`);
-    if (cfg.type === 'http' && !/^https:\/\//i.test(cfg.url || '')) throw new Error(`Connector ${name} must use HTTPS.`);
+    if ((cfg.type === 'http' || cfg.type === 'bridge') && !/^https:\/\//i.test(cfg.url || '')) throw new Error(`Connector ${name} must use HTTPS.`);
+    if (cfg.type === 'bridge' && cfg.provider !== 'apper-oauth') throw new Error(`Unsupported MCP bridge provider: ${cfg.provider || 'missing'}`);
   }
   return { ...parsed, connectors, configPath };
 }
@@ -146,6 +148,36 @@ async function runFixed(command, args, cwd, timeout = 120_000) {
     cwd, timeout, windowsHide: true, maxBuffer: 2 * 1024 * 1024,
   });
   return { stdout: redactText(stdout).trim(), stderr: redactText(stderr).trim() };
+}
+
+class BridgeMcpClient {
+  constructor(name, config, root) {
+    this.name = name;
+    this.config = config;
+    this.root = root;
+  }
+
+  async invoke(command, args = [], timeout = 180_000) {
+    if (this.config.provider !== 'apper-oauth') throw new Error(`Unsupported MCP bridge provider: ${this.config.provider}`);
+    try {
+      const result = await runFixed(process.execPath, [APPER_BRIDGE, command, ...args], this.root, timeout);
+      if (!result.stdout) throw new Error(result.stderr || `Empty ${this.name} MCP bridge response.`);
+      return JSON.parse(result.stdout);
+    } catch (error) {
+      const message = redactText(error?.stderr || error?.message || error);
+      if (/AUTH_REQUIRED:apper/i.test(message)) throw new Error('AUTH_REQUIRED:apper:run npm.cmd run mcp:apper:connect');
+      throw new Error(message);
+    }
+  }
+
+  async listTools() {
+    const result = await this.invoke('tools');
+    return Array.isArray(result?.tools) ? result.tools : [];
+  }
+
+  async callTool(name, args = {}) {
+    return this.invoke('call', [name, JSON.stringify(args || {})], 240_000);
+  }
 }
 
 async function walk(root, dir = root, depth = 0, output = []) {
@@ -255,8 +287,11 @@ export class McpRouter {
 
   client(name) {
     const cfg = this.connector(name);
-    if (cfg.type !== 'http') throw new Error(`Connector ${name} is not an HTTP MCP connector.`);
-    if (!this.clients.has(name)) this.clients.set(name, new HttpMcpClient(name, cfg));
+    if (!this.clients.has(name)) {
+      if (cfg.type === 'http') this.clients.set(name, new HttpMcpClient(name, cfg));
+      else if (cfg.type === 'bridge') this.clients.set(name, new BridgeMcpClient(name, cfg, this.root));
+      else throw new Error(`Connector ${name} does not use a remote MCP client.`);
+    }
     return this.clients.get(name);
   }
 
@@ -270,9 +305,12 @@ export class McpRouter {
       if (!probe) { output.push({ name, state: 'CONFIGURED', readOnly: true }); continue; }
       try {
         const tools = await this.client(name).listTools();
-        output.push({ name, state: 'VERIFIED', readOnly: true, tools: tools.length });
+        const safeTools = tools.filter(tool => !isWriteLikeTool(tool?.name));
+        output.push({ name, state: 'VERIFIED', readOnly: true, tools: safeTools.length, blockedWriteTools: tools.length - safeTools.length });
       } catch (error) {
-        output.push({ name, state: 'FAILED', readOnly: true, error: redactText(error.message) });
+        const message = redactText(error?.message || error);
+        if (/^AUTH_REQUIRED:/i.test(message)) output.push({ name, state: 'AUTH_REQUIRED', readOnly: true, error: message });
+        else output.push({ name, state: 'FAILED', readOnly: true, error: message });
       }
     }
     return output;
@@ -295,7 +333,7 @@ export class McpRouter {
       if (!probe) continue;
       try {
         const tools = await this.client(connectorName).listTools();
-        result.push(...tools.map(tool => ({ connector: connectorName, ...tool })));
+        result.push(...tools.filter(tool => !isWriteLikeTool(tool?.name)).map(tool => ({ connector: connectorName, ...tool })));
       } catch (error) {
         if (!skipUnavailable) throw error;
       }
@@ -335,7 +373,7 @@ export class McpRouter {
       await audit({ connector: connectorName, tool: toolName, ok: true, durationMs: Date.now() - startedAt });
       return result;
     } catch (error) {
-      await audit({ connector: connectorName, tool: toolName, ok: false, durationMs: Date.now() - startedAt, error: redactText(error.message) });
+      await audit({ connector: connectorName, tool: toolName, ok: false, durationMs: Date.now() - startedAt, error: redactText(error?.message || error) });
       throw error;
     }
   }
