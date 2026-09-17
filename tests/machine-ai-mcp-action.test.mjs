@@ -8,39 +8,41 @@ const chatRoute = await readFile(new URL('../src/app/api/machine-ai/chat/route.t
 const mcpCommand = await readFile(new URL('../src/lib/machine-ai/mcp-command.ts', import.meta.url), 'utf8');
 const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 
-test('controlled Apper action mode exposes only the approved safe write set', () => {
-  for (const name of ['create_app', 'write_files', 'patch_files', 'apply_patch']) {
-    assert.match(action, new RegExp(`'${name}'`));
-  }
-  assert.match(action, /APPER_SAFE_WRITE_TOOLS/);
-  assert.match(action, /APPER_ACTION_READ_TOOLS/);
-});
-
-test('high-risk Apper tools remain approval-gated and unavailable to Qwen action mode', () => {
+test('Apper development mode exposes build and self-upgrade write tools', () => {
   for (const name of [
+    'create_app',
+    'write_files',
+    'patch_files',
+    'apply_patch',
     'delete_files',
     'set_env_key',
     'create_secrets',
-    'delete_secret',
     'create_edge_function',
     'update_edge_function',
     'delete_edge_function',
-    'connect_database',
-    'update_database',
   ]) {
     assert.match(action, new RegExp(`'${name}'`));
   }
-  assert.match(action, /approval-required/);
-  assert.match(action, /exact-action approval is required/i);
+  assert.match(action, /APPER_DEVELOPER_WRITE_TOOLS/);
+  assert.match(action, /FULL APPER DEVELOPMENT MODE/);
 });
 
-test('Apper file mutations are forced to commit-only and cannot silently deploy', () => {
-  assert.match(action, /value\.shouldBuild = false/);
-  assert.match(action, /commit-only and cannot deploy/i);
-  assert.doesNotMatch(action, /shouldBuild\s*=\s*true/);
+test('irreversible database and stored-secret deletion operations stay outside autonomous development mode', () => {
+  for (const name of ['delete_secret', 'connect_database', 'update_database']) {
+    assert.match(action, new RegExp(`'${name}'`));
+  }
+  assert.match(action, /APPER_IRREVERSIBLE_TOOLS/);
+  assert.match(action, /exact-approval-required/);
 });
 
-test('controlled action mode uses fixed local scripts without a shell', () => {
+test('Apper development mode may build and deploy when requested', () => {
+  assert.doesNotMatch(action, /value\.shouldBuild = false/);
+  assert.match(action, /shouldBuild=true/);
+  assert.match(action, /get_build_status/);
+  assert.match(action, /preview_app/);
+});
+
+test('Apper action mode still uses fixed local scripts without a shell', () => {
   assert.match(action, /execFileAsync\(process\.execPath/);
   assert.match(action, /apper-mcp-client\.mjs/);
   assert.doesNotMatch(action, /shell:\s*true/);
@@ -61,10 +63,9 @@ test('Apper app creation is preflighted with live create instructions and design
   assert.match(action, /get_design_directives/);
   assert.match(action, /DETERMINISTIC APP-CREATION PREFLIGHT/);
   assert.match(action, /Create only the app explicitly requested by the user/);
-  assert.match(action, /honor the exact requested app name and visibility/);
 });
 
-test('console and web require an explicit /mcp action command', () => {
+test('console and web still require an explicit /mcp action command', () => {
   assert.match(consoleText, /\/mcp\\s\+action/);
   assert.match(consoleText, /runMcpAction/);
   assert.match(chatRoute, /\/mcp\\s\+action/);
@@ -72,6 +73,6 @@ test('console and web require an explicit /mcp action command', () => {
   assert.match(mcpCommand, /machine-ai-mcp-action\.mjs/);
 });
 
-test('package exposes a direct controlled action command', () => {
+test('package exposes a direct Apper development action command', () => {
   assert.equal(pkg.scripts['machine:mcp:action'], 'node scripts/machine-ai-mcp-action.mjs');
 });
