@@ -7,6 +7,7 @@ type ConnectorState = {
   state: string;
   readOnly?: boolean;
   tools?: number;
+  blockedWriteTools?: number;
   missing?: string[];
   error?: string;
 };
@@ -58,7 +59,7 @@ export default function McpPanel() {
 
   return (
     <main style={{ minHeight: "100vh", background: "#020617", color: "#e2e8f0", padding: "32px 20px", fontFamily: "Inter, ui-sans-serif, system-ui" }}>
-      <div style={{ maxWidth: 980, margin: "0 auto" }}>
+      <div style={{ maxWidth: 1120, margin: "0 auto" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, marginBottom: 24, flexWrap: "wrap" }}>
           <div>
             <div style={{ fontSize: 13, color: "#94a3b8", textTransform: "uppercase", letterSpacing: ".12em" }}>BharatShop Machine AI</div>
@@ -74,7 +75,7 @@ export default function McpPanel() {
         {error ? <div style={{ ...card, borderColor: "rgba(239,68,68,.5)", color: "#fecaca", marginBottom: 18 }}>{error}</div> : null}
 
         <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))", gap: 16 }}>
-          {["github", "supabase", "local"].map((name) => {
+          {["github", "supabase", "apper", "local"].map((name) => {
             const item: ConnectorState = states.find((entry) => entry.name === name) || { name, state: "NOT VERIFIED" };
             return (
               <article key={name} style={card}>
@@ -84,7 +85,8 @@ export default function McpPanel() {
                 </div>
                 <div style={{ marginTop: 14, fontWeight: 700, color: stateColor(item.state) }}>{item.state}</div>
                 <div style={{ marginTop: 8, color: "#94a3b8", fontSize: 14 }}>Mode: {item.readOnly === false ? "write-capable" : "read-only"}</div>
-                <div style={{ marginTop: 4, color: "#94a3b8", fontSize: 14 }}>Discovered tools: {typeof item.tools === "number" ? item.tools : "not verified"}</div>
+                <div style={{ marginTop: 4, color: "#94a3b8", fontSize: 14 }}>Discovered read-only tools: {typeof item.tools === "number" ? item.tools : "not verified"}</div>
+                {typeof item.blockedWriteTools === "number" && item.blockedWriteTools > 0 ? <div style={{ marginTop: 4, color: "#94a3b8", fontSize: 14 }}>Blocked write tools: {item.blockedWriteTools}</div> : null}
                 {item.missing?.length ? <div style={{ marginTop: 8, color: "#fbbf24", fontSize: 13 }}>Missing local auth/config: {item.missing.join(", ")}</div> : null}
                 {item.error ? <div style={{ marginTop: 8, color: "#fca5a5", fontSize: 13, wordBreak: "break-word" }}>{item.error}</div> : null}
                 <button type="button" onClick={() => void load("test", name)} disabled={busy} style={{ marginTop: 16, padding: "8px 11px", borderRadius: 9, border: "1px solid #334155", background: "#0f172a", color: "#e2e8f0", cursor: "pointer" }}>Run read-only test</button>
@@ -94,13 +96,13 @@ export default function McpPanel() {
         </section>
 
         <div style={{ display: "flex", gap: 10, marginTop: 18, flexWrap: "wrap" }}>
-          <button type="button" onClick={() => void load("tools", "all")} disabled={busy} style={{ padding: "9px 12px", borderRadius: 9, border: "1px solid #334155", background: "#0f172a", color: "#e2e8f0", cursor: "pointer" }}>List verified tools</button>
+          <button type="button" onClick={() => void load("tools", "all")} disabled={busy} style={{ padding: "9px 12px", borderRadius: 9, border: "1px solid #334155", background: "#0f172a", color: "#e2e8f0", cursor: "pointer" }}>List verified read-only tools</button>
         </div>
 
         {detail ? <pre style={{ ...card, marginTop: 18, overflowX: "auto", whiteSpace: "pre-wrap", fontSize: 12, lineHeight: 1.55 }}>{detail}</pre> : null}
 
         <p style={{ marginTop: 22, color: "#64748b", fontSize: 13 }}>
-          A connector is only shown as VERIFIED after a real live MCP tool-discovery call succeeds. Configuration files alone do not count as verification.
+          A connector is only shown as VERIFIED after a real live MCP tool-discovery call succeeds. Apper OAuth is completed locally with npm.cmd run mcp:apper:connect; write-capable Apper tools stay blocked from this Machine AI path.
         </p>
       </div>
     </main>
