@@ -69,6 +69,16 @@ export function useMachineControl() {
 }
 `;
 
+const homePage = home
+  .replace(
+    'route: action === "queue" ? "agency" : "chat"',
+    'route: action === "queue" || action === "agency" ? "agency" : "chat"',
+  )
+  .replace(
+    'routeMode === "developer" || routeMode === "apper" || routeMode === "queue"',
+    'routeMode === "developer" || routeMode === "apper" || routeMode === "queue" || routeMode === "agency"',
+  );
+
 async function main() {
   await run('get_edit_app_instructions', { metadata });
   await run('get_design_directives', { metadata });
@@ -94,7 +104,7 @@ async function main() {
       { path: 'src/components/control-center/ControlCenterShell.jsx', content: shell },
       { path: 'src/hooks/useMachineControl.js', content: controlHook },
       { path: 'src/hooks/useMcpConnectors.js', content: mcpHook },
-      { path: 'src/pages/Home.jsx', content: home },
+      { path: 'src/pages/Home.jsx', content: homePage },
       { path: 'src/pages/Integrations.jsx', content: integrations },
       { path: 'src/pages/Tasks.jsx', content: tasks },
     ],
