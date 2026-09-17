@@ -16,6 +16,7 @@ import {
   formatAudit,
   formatMcpStatus,
   formatMcpTools,
+  mcpActionTask,
   mcpControl,
   mcpTask,
 } from "@/lib/machine-ai/mcp-command";
@@ -94,16 +95,22 @@ async function deterministicCommand(input: string, route: MachineRoute) {
     return textStream(formatMcpStatus(result), route, "mcp-status");
   }
 
-  const tools = trimmed.match(/^\/mcp\s+tools(?:\s+(all|github|supabase|local))?$/i);
+  const tools = trimmed.match(/^\/mcp\s+tools(?:\s+(all|github|supabase|apper|local))?$/i);
   if (tools) {
     const result = await mcpControl("tools", tools[1] || "all");
     return textStream(formatMcpTools(result), route, "mcp-tools");
   }
 
-  const test = trimmed.match(/^\/mcp\s+test\s+(all|github|supabase|local)$/i);
+  const test = trimmed.match(/^\/mcp\s+test\s+(all|github|supabase|apper|local)$/i);
   if (test) {
     const result = await mcpControl("test", test[1]);
     return textStream(formatMcpStatus(result), route, "mcp-test");
+  }
+
+  const action = trimmed.match(/^\/mcp\s+action\s+([\s\S]+)$/i);
+  if (action) {
+    const result = await retryTransient(() => mcpActionTask(action[1].trim()));
+    return textStream(result, route, "mcp-action");
   }
 
   const task = trimmed.match(/^\/mcp\s+([\s\S]+)$/i);
