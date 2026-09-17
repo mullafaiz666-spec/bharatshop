@@ -2,6 +2,7 @@
 
 import { spawn } from 'node:child_process';
 import { access, mkdir, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:net';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -32,6 +33,23 @@ function spawnNpx(args, options) {
   });
 }
 
+async function reserveFreeLoopbackPort() {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.unref();
+    server.once('error', reject);
+    server.listen({ host: '127.0.0.1', port: 0, exclusive: true }, () => {
+      const address = server.address();
+      const port = typeof address === 'object' && address ? address.port : 0;
+      server.close(error => {
+        if (error) reject(error);
+        else if (!port) reject(new Error('Could not allocate a free localhost OAuth callback port.'));
+        else resolve(port);
+      });
+    });
+  });
+}
+
 async function hasMarker() {
   try {
     await access(MARKER_FILE);
@@ -52,9 +70,10 @@ async function markAuthorized() {
   }, null, 2)}\n`, 'utf8');
 }
 
-function spawnRemoteProxy() {
+async function spawnRemoteProxy() {
+  const callbackPort = await reserveFreeLoopbackPort();
   const child = spawnNpx(
-    ['-y', `mcp-remote@${MCP_REMOTE_VERSION}`, APPER_MCP_URL, '--transport', 'http-only'],
+    ['-y', `mcp-remote@${MCP_REMOTE_VERSION}`, APPER_MCP_URL, String(callbackPort), '--host', '127.0.0.1', '--transport', 'http-only'],
     {
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -131,7 +150,7 @@ async function withApperProxy(operation) {
   if (!(await hasMarker())) {
     throw new Error('AUTH_REQUIRED:apper:run npm.cmd run mcp:apper:connect');
   }
-  const proxy = spawnRemoteProxy();
+  const proxy = await spawnRemoteProxy();
   try {
     await proxy.request('initialize', {
       protocolVersion: '2025-11-25',
@@ -146,9 +165,11 @@ async function withApperProxy(operation) {
 }
 
 async function connectInteractive() {
+  const callbackPort = await reserveFreeLoopbackPort();
+  console.error(`Apper OAuth callback port: ${callbackPort}`);
   const exitCode = await new Promise((resolve, reject) => {
     const child = spawnNpx(
-      ['-y', '-p', `mcp-remote@${MCP_REMOTE_VERSION}`, 'mcp-remote-client', APPER_MCP_URL],
+      ['-y', '-p', `mcp-remote@${MCP_REMOTE_VERSION}`, 'mcp-remote-client', APPER_MCP_URL, String(callbackPort), '--host', '127.0.0.1'],
       {
         windowsHide: false,
         stdio: 'inherit',
