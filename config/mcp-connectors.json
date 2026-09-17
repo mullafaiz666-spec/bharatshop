@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "connectors": {
+    "github": {
+      "enabled": true,
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/x/all/readonly",
+      "readOnly": true,
+      "authEnv": "GITHUB_MCP_TOKEN",
+      "headers": {
+        "X-MCP-Readonly": "true",
+        "X-MCP-Toolsets": "repos,issues,pull_requests,actions,users"
+      }
+    },
+    "supabase": {
+      "enabled": true,
+      "type": "http",
+      "url": "https://mcp.supabase.com/mcp?project_ref=${SUPABASE_PROJECT_REF}&read_only=true&features=database,docs,debugging",
+      "readOnly": true,
+      "authEnv": "SUPABASE_ACCESS_TOKEN"
+    },
+    "local": {
+      "enabled": true,
+      "type": "builtin",
+      "provider": "bharatshop-local",
+      "readOnly": true
+    }
+  }
+}
