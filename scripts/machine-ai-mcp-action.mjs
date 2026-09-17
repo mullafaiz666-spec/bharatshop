@@ -172,6 +172,12 @@ function compact(value) {
   return text.length > 24_000 ? `${text.slice(0, 24_000)}…[truncated]` : text;
 }
 
+export function asksForApperAppDiscovery(task) {
+  const text = String(task || '').toLowerCase();
+  return /\bsearch_apps\b/.test(text)
+    || (/\b(list|find|show|discover)\b/.test(text) && /\bapper\b/.test(text) && /\bapps?\b/.test(text));
+}
+
 export async function runMcpAction(task) {
   const cleanTask = String(task || '').trim();
   if (!cleanTask) throw new Error('MCP action task is empty.');
@@ -187,12 +193,27 @@ export async function runMcpAction(task) {
     tools.map(tool => String(tool?.function?.name || '').replace(/^apper__/, '')),
   );
 
+  let deterministicContext = '';
+  if (asksForApperAppDiscovery(cleanTask)) {
+    if (!exposedNames.has('search_apps')) {
+      throw new Error('Apper search_apps was not returned by live MCP tool discovery for this session.');
+    }
+    const apps = await callApper('search_apps', {});
+    deterministicContext = [
+      'DETERMINISTIC LIVE TOOL RESULT',
+      'The runner already called the verified Apper search_apps tool for this request.',
+      compact(apps),
+      'Answer from this real result. Do not claim search_apps is unavailable.',
+    ].join('\n');
+  }
+
   const messages = [
     {
       role: 'system',
       content: [
         `You are the BharatShop laptop Machine AI running locally through Ollama model ${MODEL}.`,
         'This turn is EXPLICIT CONTROLLED ACTION MODE for Apper.',
+        `The live Apper tools exposed for this session are: ${[...exposedNames].join(', ')}.`,
         'You may use exposed read tools and only these safe write tools: create_app, write_files, patch_files, apply_patch.',
         'File writes are forced by the router to shouldBuild=false, so they are commit-only and cannot deploy.',
         'Never call or attempt database changes, connect_database, update_database, secrets, env changes, edge-function create/update/delete, delete_files, deploy, publish, payments, production data mutation, or destructive operations.',
@@ -202,7 +223,7 @@ export async function runMcpAction(task) {
         'Never request, reveal, echo, or infer secrets, tokens, service-role keys, passwords, or private credentials.',
       ].join(' '),
     },
-    { role: 'user', content: cleanTask },
+    { role: 'user', content: deterministicContext ? `${cleanTask}\n\n${deterministicContext}` : cleanTask },
   ];
 
   for (let round = 0; round < 5; round += 1) {
