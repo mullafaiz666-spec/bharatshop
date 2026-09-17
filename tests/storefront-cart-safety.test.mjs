@@ -15,7 +15,7 @@ test("legacy static storefront cannot run its old client-side cart or checkout",
 test("canonical storefront uses the backend order gateway and verified payment flow", () => {
   assert.match(canonicalStore, /fetch\(["']\/api\/storefront\/orders["']/);
   assert.match(canonicalStore, /\/api\/payments\/razorpay\/verify/);
-  assert.match(canonicalStore, /if\(!r\.ok\|\|!vd\.verified\)throw new Error/);
+  assert.match(canonicalStore, /if\(!vr\.ok\|\|!vd\.verified\)throw new Error/);
   assert.match(canonicalStore, /availability\.anyConfigured/);
 });
 
