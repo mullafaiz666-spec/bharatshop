@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { hydrateMcpAuth } from './mcp-auth-bridge.mjs';
 import { createMcpRouter, redactText } from './mcp-router.mjs';
 
 const MODEL = process.env.PERSONAL_AI_MODEL || process.env.AGENCY_MODEL || process.env.AI_TEXT_MODEL || 'qwen3.5:4b';
@@ -31,9 +32,10 @@ function compactToolResult(value) {
 }
 
 export async function runMcpChat(task) {
+  await hydrateMcpAuth();
   const router = await createMcpRouter();
   const tools = await router.modelTools();
-  if (!tools.length) throw new Error('No verified MCP/local tools are available. Run MCP status first.');
+  if (!tools.length) throw new Error('No verified MCP/local tools are available. Run npm run mcp:status first.');
 
   const messages = [
     {
