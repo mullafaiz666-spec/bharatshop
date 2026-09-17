@@ -7,7 +7,15 @@ const MODEL = process.env.PERSONAL_AI_MODEL || process.env.AGENCY_MODEL || proce
 const OLLAMA_BASE_URL = String(process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
 const CONTEXT = Number(process.env.PERSONAL_AI_CONTEXT || '4096');
 
-async function ollamaChat(messages, tools) {
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function transientOllamaError(error) {
+  return /(ECONNRESET|ECONNREFUSED|socket hang up|fetch failed|UND_ERR_SOCKET)/i.test(String(error?.message || error));
+}
+
+async function ollamaChatOnce(messages, tools) {
   const response = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -24,6 +32,16 @@ async function ollamaChat(messages, tools) {
   const text = await response.text();
   if (!response.ok) throw new Error(`Ollama HTTP ${response.status}: ${text.slice(0, 300)}`);
   return JSON.parse(text);
+}
+
+async function ollamaChat(messages, tools) {
+  try {
+    return await ollamaChatOnce(messages, tools);
+  } catch (error) {
+    if (!transientOllamaError(error)) throw error;
+    await delay(500);
+    return ollamaChatOnce(messages, tools);
+  }
 }
 
 function compactToolResult(value) {
