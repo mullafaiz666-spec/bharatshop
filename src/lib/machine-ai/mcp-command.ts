@@ -12,6 +12,7 @@ export type McpConnectorState = {
   state: string;
   readOnly?: boolean;
   tools?: number;
+  blockedWriteTools?: number;
   authEnv?: string;
   missing?: string[];
   error?: string;
@@ -45,7 +46,7 @@ async function runNode(script: string, args: string[], timeout: number) {
 
 function allowedConnector(connector: string) {
   const value = String(connector || "all").toLowerCase();
-  if (!["all", "github", "supabase", "local"].includes(value)) {
+  if (!["all", "github", "supabase", "apper", "local"].includes(value)) {
     throw new Error(`Unsupported MCP connector: ${value}`);
   }
   return value;
@@ -74,6 +75,7 @@ export function formatMcpStatus(value: unknown) {
   const lines = states.map((item) => {
     const extras = [
       typeof item.tools === "number" ? `tools=${item.tools}` : "",
+      typeof item.blockedWriteTools === "number" && item.blockedWriteTools > 0 ? `blocked-write-tools=${item.blockedWriteTools}` : "",
       item.readOnly === true ? "read-only" : "",
       item.missing?.length ? `missing=${item.missing.join(",")}` : "",
       item.error ? `error=${item.error}` : "",
