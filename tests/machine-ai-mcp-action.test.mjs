@@ -47,6 +47,14 @@ test('controlled action mode uses fixed local scripts without a shell', () => {
   assert.doesNotMatch(action, /spawn\(/);
 });
 
+test('Apper app discovery is grounded by a deterministic live search_apps call', () => {
+  assert.match(action, /asksForApperAppDiscovery/);
+  assert.match(action, /await callApper\('search_apps', \{\}\)/);
+  assert.match(action, /DETERMINISTIC LIVE TOOL RESULT/);
+  assert.match(action, /Do not claim search_apps is unavailable/);
+  assert.match(action, /The live Apper tools exposed for this session are/);
+});
+
 test('console and web require an explicit /mcp action command', () => {
   assert.match(consoleText, /\/mcp\\s\+action/);
   assert.match(consoleText, /runMcpAction/);
