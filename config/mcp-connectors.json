@@ -7,6 +7,7 @@
       "url": "https://api.githubcopilot.com/mcp/x/all/readonly",
       "readOnly": true,
       "authEnv": "GITHUB_MCP_TOKEN",
+      "requiredEnv": ["GITHUB_MCP_TOKEN"],
       "headers": {
         "X-MCP-Readonly": "true",
         "X-MCP-Toolsets": "repos,issues,pull_requests,actions,users"
@@ -17,7 +18,8 @@
       "type": "http",
       "url": "https://mcp.supabase.com/mcp?project_ref=${SUPABASE_PROJECT_REF}&read_only=true&features=database,docs,debugging",
       "readOnly": true,
-      "authEnv": "SUPABASE_ACCESS_TOKEN"
+      "authEnv": "SUPABASE_ACCESS_TOKEN",
+      "requiredEnv": ["SUPABASE_PROJECT_REF", "SUPABASE_ACCESS_TOKEN"]
     },
     "local": {
       "enabled": true,
