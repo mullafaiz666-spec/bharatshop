@@ -28,27 +28,15 @@ async function run(tool, args = {}, timeout = 420_000) {
   try { return JSON.parse(text); } catch { return text; }
 }
 
-const controlHook = String.raw`import { useCallback, useEffect, useState } from "react";
+const controlHook = String.raw`import { useCallback, useState } from "react";
 
 const BASE = "http://127.0.0.1:3001";
-const TOKEN_KEY = "bharatshop-control-token";
 
 export function useMachineControl() {
-  const [token, setTokenState] = useState(() => localStorage.getItem(TOKEN_KEY) || "");
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    if (token) localStorage.setItem(TOKEN_KEY, token);
-    else localStorage.removeItem(TOKEN_KEY);
-  }, [token]);
-
-  const setToken = useCallback(value => {
-    setTokenState(String(value || "").trim());
-  }, []);
-
   const run = useCallback(async ({ action, task, route }) => {
-    if (!token) throw new Error("Pair this cockpit with the laptop first.");
     setRunning(true);
     setError("");
     try {
@@ -60,7 +48,6 @@ export function useMachineControl() {
         headers: {
           "content-type": "application/json",
           "accept": "application/json",
-          "x-bharatshop-control-token": token,
         },
         body: JSON.stringify({ action, task, route }),
       });
@@ -74,9 +61,9 @@ export function useMachineControl() {
     } finally {
       setRunning(false);
     }
-  }, [token]);
+  }, []);
 
-  return { token, setToken, running, error, run };
+  return { running, error, run };
 }
 `;
 
@@ -90,7 +77,7 @@ export const nav = { label: "Operate", order: 10 };
 
 const MODES = [
   { value: "chat", label: "Qwen Chat", description: "Ask the local Qwen model directly." },
-  { value: "agency", label: "Run Agent Team", description: "Select specialist agents and synthesize their work." },
+  { value: "agency", label: "Run Agent Team", description: "Select specialist agents and queue their real work." },
   { value: "queue", label: "Queue Background Task", description: "Send an agency task to the 24×7 local queue." },
   { value: "developer", label: "Developer / Self-Upgrade", description: "Edit, test, build, commit and push BharatShop source on the development branch." },
   { value: "apper", label: "Apper Builder", description: "Create/edit/build/deploy the private Apper development app." },
@@ -112,7 +99,11 @@ export default function Home() {
     try {
       const result = await control.run({ action: mode, task, route: "agency" });
       if (Array.isArray(result.selectedAgents)) setAgents(result.selectedAgents);
-      setOutput(result.answer || (result.queued ? JSON.stringify(result.queued, null, 2) : JSON.stringify(result, null, 2)));
+      if (result.execution === "queued" && result.queued?.id) {
+        setOutput(`Task queued successfully.\nTask ID: ${result.queued.id}\nTrack it on the Tasks page.`);
+      } else {
+        setOutput(result.answer || (result.queued ? JSON.stringify(result.queued, null, 2) : JSON.stringify(result, null, 2)));
+      }
     } catch (err) {
       setOutput(err instanceof Error ? err.message : String(err));
     }
@@ -124,23 +115,13 @@ export default function Home() {
     <ControlCenterShell
       eyebrow="Operational command center"
       title="BharatShop Machine AI"
-      subtitle="This page sends real commands to the paired laptop runtime. Developer mode can modify, test, build, commit and push the development branch."
+      subtitle="Real commands execute on the local BharatShop runtime. The owned Control Center origin is authorized automatically when this laptop runtime is online."
     >
       <div className="grid gap-4 lg:grid-cols-[1.45fr_.75fr]">
         <Panel title="Command">
           <div className="space-y-4">
-            <div>
-              <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-400">Pairing token</label>
-              <input
-                type="password"
-                value={control.token}
-                onChange={event => control.setToken(event.target.value)}
-                placeholder="Paste token from your laptop — it stays only in this browser"
-                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none"
-              />
-              <p className="mt-2 text-xs leading-5 text-slate-500">
-                On the laptop: Get-Content "$env:LOCALAPPDATA\BharatShop\MachineAI\control-token.txt". Do not send this token in chat.
-              </p>
+            <div className="rounded-xl border border-emerald-800/60 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-300">
+              Direct local control is enabled for this Control Center. No pairing token is required.
             </div>
 
             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
@@ -178,7 +159,7 @@ export default function Home() {
             <div className="flex flex-wrap items-center gap-3">
               <button
                 onClick={execute}
-                disabled={control.running || !task.trim() || !control.token}
+                disabled={control.running || !task.trim() || !machineReady}
                 className="rounded-xl bg-indigo-500 px-5 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {control.running ? "Working…" : mode === "developer" ? "Run Developer" : mode === "apper" ? "Run Builder" : "Execute"}
@@ -188,10 +169,14 @@ export default function Home() {
                 {machineReady ? "Laptop online · " + runtime.data.model : "Laptop runtime unavailable"}
               </Status>
 
-              <Status tone={control.token ? "good" : "warn"}>
-                {control.token ? "Paired token saved" : "Pairing required"}
+              <Status tone={machineReady ? "good" : "warn"}>
+                {machineReady ? "Control authorized" : "Control waiting"}
               </Status>
             </div>
+
+            {control.error ? (
+              <div className="rounded-xl border border-red-900 bg-red-950/30 p-3 text-sm text-red-300">{control.error}</div>
+            ) : null}
           </div>
         </Panel>
 
@@ -214,7 +199,7 @@ export default function Home() {
               <div>✓ Tests / typecheck / build</div>
               <div>✓ Commit + non-force dev push</div>
               <div>✓ Apper build + preview deploy</div>
-              <div className="pt-2 text-amber-300">Exact approval remains required for production DB mutation, stored-secret deletion, payments and merging to main.</div>
+              <div className="pt-2 text-amber-300">Production database mutation, payments, destructive secret deletion and merging to main remain separate high-impact operations.</div>
             </div>
           </Panel>
         </div>
@@ -255,7 +240,7 @@ async function main() {
 
   const write = await run('write_files', {
     projectId: PROJECT_ID,
-    commitMessage: 'Make the BharatShop Control Center operational: add paired POST control hook and real chat, agency, queue, developer/self-upgrade and Apper builder execution controls on the home page.',
+    commitMessage: 'Make BharatShop Control Center immediately operational: remove manual pairing token UI, authorize the owned Control Center origin, and keep real Qwen, agency queue, developer/self-upgrade and Apper builder controls.',
     shouldBuild: true,
     files: [
       { path: 'src/hooks/useMachineControl.js', content: controlHook },
