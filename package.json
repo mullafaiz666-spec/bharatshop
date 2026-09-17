@@ -40,6 +40,7 @@
     "machine:mcp": "node scripts/machine-ai-mcp-chat.mjs",
     "machine:mcp:action": "node scripts/machine-ai-mcp-action.mjs",
     "machine:dev": "node scripts/machine-ai-developer.mjs",
+    "machine:control:deploy": "node scripts/deploy-operational-control-center.mjs",
     "mcp:status": "node scripts/mcp-auth-bridge.mjs status",
     "mcp:tools": "node scripts/mcp-auth-bridge.mjs tools",
     "mcp:test": "node scripts/mcp-auth-bridge.mjs test",
