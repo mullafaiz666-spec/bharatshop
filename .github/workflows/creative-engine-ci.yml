@@ -11,9 +11,14 @@ on:
       - 'scripts/machine-ai-mcp-chat.mjs'
       - 'scripts/machine-ai-console.mjs'
       - 'config/mcp-connectors.json'
+      - 'src/lib/machine-ai/**'
+      - 'src/app/api/machine-ai/**'
+      - 'src/app/machine-ai/**'
+      - 'src/components/machine-ai/**'
       - 'tests/creative-engine.test.mjs'
       - 'tests/mcp-router.test.mjs'
       - 'tests/machine-ai-console.test.mjs'
+      - 'tests/machine-ai-mcp-web.test.mjs'
       - 'package.json'
       - '.github/workflows/creative-engine-ci.yml'
   workflow_dispatch:
@@ -36,5 +41,5 @@ jobs:
         run: npm run typecheck
       - name: Creative engine regression tests
         run: node --test tests/creative-engine.test.mjs
-      - name: Machine AI MCP safety and console tests
-        run: node --test tests/mcp-router.test.mjs tests/machine-ai-console.test.mjs
+      - name: Machine AI MCP safety, console and web tests
+        run: node --test tests/mcp-router.test.mjs tests/machine-ai-console.test.mjs tests/machine-ai-mcp-web.test.mjs
