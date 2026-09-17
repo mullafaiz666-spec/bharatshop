@@ -167,19 +167,53 @@ async function withApperProxy(operation) {
 async function connectInteractive() {
   const callbackPort = await reserveFreeLoopbackPort();
   console.error(`Apper OAuth callback port: ${callbackPort}`);
-  const exitCode = await new Promise((resolve, reject) => {
+
+  const authState = await new Promise((resolve, reject) => {
     const child = spawnNpx(
       ['-y', '-p', `mcp-remote@${MCP_REMOTE_VERSION}`, 'mcp-remote-client', APPER_MCP_URL, String(callbackPort), '--host', '127.0.0.1'],
       {
         windowsHide: false,
-        stdio: 'inherit',
+        stdio: ['inherit', 'pipe', 'pipe'],
         env: process.env,
       },
     );
-    child.on('error', reject);
-    child.on('close', code => resolve(code ?? 1));
+
+    let settled = false;
+    let combinedTail = '';
+
+    function observe(chunk, target) {
+      const text = redact(String(chunk || ''));
+      target.write(text);
+      combinedTail += text;
+      if (combinedTail.length > 16_000) combinedTail = combinedTail.slice(-16_000);
+
+      if (!settled && /Connected successfully!/i.test(combinedTail)) {
+        settled = true;
+        resolve('AUTHORIZED');
+        setTimeout(() => {
+          try { child.kill(); } catch {}
+        }, 500).unref();
+      }
+    }
+
+    child.stdout.on('data', chunk => observe(chunk, process.stdout));
+    child.stderr.on('data', chunk => observe(chunk, process.stderr));
+    child.on('error', error => {
+      if (!settled) {
+        settled = true;
+        reject(error);
+      }
+    });
+    child.on('close', code => {
+      if (!settled) {
+        settled = true;
+        if (code === 0) resolve('AUTHORIZED');
+        else reject(new Error(`Apper OAuth connection failed with exit code ${code ?? 'unknown'}.`));
+      }
+    });
   });
-  if (exitCode !== 0) throw new Error(`Apper OAuth connection failed with exit code ${exitCode}.`);
+
+  if (authState !== 'AUTHORIZED') throw new Error('Apper OAuth did not reach an authorized connection state.');
   await markAuthorized();
   console.log(JSON.stringify({
     connector: 'apper',
