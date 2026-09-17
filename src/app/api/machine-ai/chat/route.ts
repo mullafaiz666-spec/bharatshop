@@ -8,9 +8,18 @@ import {
   ollamaModels,
   openOllamaStream,
   remember,
+  runtimeStatus,
   type ChatMessage,
   type MachineRoute,
 } from "@/lib/machine-ai/local-runtime";
+import {
+  formatAudit,
+  formatMcpStatus,
+  formatMcpTools,
+  mcpActionTask,
+  mcpControl,
+  mcpTask,
+} from "@/lib/machine-ai/mcp-command";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,6 +40,88 @@ function eventLine(payload: Record<string, unknown>) {
   return `${JSON.stringify(payload)}\n`;
 }
 
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function transientOllamaError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /(ECONNRESET|ECONNREFUSED|socket hang up|fetch failed|UND_ERR_SOCKET)/i.test(message);
+}
+
+async function retryTransient<T>(work: () => Promise<T>) {
+  try {
+    return await work();
+  } catch (error) {
+    if (!transientOllamaError(error)) throw error;
+    await delay(500);
+    return work();
+  }
+}
+
+function textStream(text: string, route: MachineRoute, kind: string) {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(eventLine({ type: "meta", route, model: machineRuntimeInfo.model, local: true, control: kind })));
+      controller.enqueue(encoder.encode(eventLine({ type: "delta", content: text })));
+      controller.enqueue(encoder.encode(eventLine({ type: "done", content: text })));
+      controller.close();
+    },
+  });
+  return new Response(stream, {
+    headers: {
+      "content-type": "application/x-ndjson; charset=utf-8",
+      "cache-control": "no-store, no-transform",
+      "x-accel-buffering": "no",
+    },
+  });
+}
+
+async function deterministicCommand(input: string, route: MachineRoute) {
+  const trimmed = input.trim();
+  const lower = trimmed.toLowerCase();
+
+  if (lower === "/audit") {
+    const [runtimeState, mcpState] = await Promise.all([
+      runtimeStatus(),
+      mcpControl("status", "all"),
+    ]);
+    return textStream(formatAudit(runtimeState as unknown as Record<string, unknown>, mcpState), route, "audit");
+  }
+
+  if (lower === "/mcp" || lower === "/mcp status" || lower === "/mcp connectors") {
+    const result = await mcpControl("status", "all");
+    return textStream(formatMcpStatus(result), route, "mcp-status");
+  }
+
+  const tools = trimmed.match(/^\/mcp\s+tools(?:\s+(all|github|supabase|apper|local))?$/i);
+  if (tools) {
+    const result = await mcpControl("tools", tools[1] || "all");
+    return textStream(formatMcpTools(result), route, "mcp-tools");
+  }
+
+  const test = trimmed.match(/^\/mcp\s+test\s+(all|github|supabase|apper|local)$/i);
+  if (test) {
+    const result = await mcpControl("test", test[1]);
+    return textStream(formatMcpStatus(result), route, "mcp-test");
+  }
+
+  const action = trimmed.match(/^\/mcp\s+action\s+([\s\S]+)$/i);
+  if (action) {
+    const result = await retryTransient(() => mcpActionTask(action[1].trim()));
+    return textStream(result, route, "mcp-action");
+  }
+
+  const task = trimmed.match(/^\/mcp\s+([\s\S]+)$/i);
+  if (task) {
+    const result = await retryTransient(() => mcpTask(task[1].trim()));
+    return textStream(result, route, "mcp-task");
+  }
+
+  return null;
+}
+
 export async function POST(request: Request) {
   if (!isLoopbackRequest(request)) return localOnlyError();
 
@@ -49,8 +140,16 @@ export async function POST(request: Request) {
   const attachmentIds = Array.isArray(body.attachmentIds)
     ? body.attachmentIds.map((id) => String(id)).filter(Boolean).slice(0, 5)
     : [];
-  const encoder = new TextEncoder();
 
+  try {
+    const commandResponse = await deterministicCommand(lastUser, route);
+    if (commandResponse) return commandResponse;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return textStream(`CONTROL COMMAND FAILED\n${message}`, route, "control-error");
+  }
+
+  const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       void (async () => {
@@ -63,21 +162,25 @@ export async function POST(request: Request) {
             local: true,
           })));
 
-          const installedModels = await ollamaModels();
+          let installedModels = await ollamaModels();
+          if (!installedModels.length) {
+            await delay(400);
+            installedModels = await ollamaModels();
+          }
           if (!installedModels.length) throw new Error("Ollama is not responding on 127.0.0.1:11434. Start the local Machine AI supervisor or Ollama first.");
           if (!installedModels.includes(machineRuntimeInfo.model)) throw new Error(`Required local model ${machineRuntimeInfo.model} is not installed in Ollama.`);
 
           let upstream: Response;
           if (route === "agency") {
-            const agency = await buildAgencyContext(lastUser);
+            const agency = await retryTransient(() => buildAgencyContext(lastUser));
             controller.enqueue(encoder.encode(eventLine({ type: "agents", agents: agency.selected })));
-            upstream = await openOllamaStream(
+            upstream = await retryTransient(() => openOllamaStream(
               agency.synthesisPrompt,
               [{ role: "user", content: "Synthesize the specialist reports into the final answer now." }],
-            );
+            ));
           } else {
             const systemPrompt = buildSystemPrompt(installedModels, attachmentContext(attachmentIds));
-            upstream = await openOllamaStream(systemPrompt, messages);
+            upstream = await retryTransient(() => openOllamaStream(systemPrompt, messages));
           }
 
           const reader = upstream.body?.getReader();
@@ -124,7 +227,10 @@ export async function POST(request: Request) {
           if (answer.trim()) remember("assistant", answer, route);
           controller.enqueue(encoder.encode(eventLine({ type: "done", content: answer })));
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
+          const raw = error instanceof Error ? error.message : String(error);
+          const message = transientOllamaError(error)
+            ? `Ollama connection reset while processing the request. The local runtime may be restarting. Retry once after checking /audit. Details: ${raw}`
+            : raw;
           controller.enqueue(encoder.encode(eventLine({ type: "error", error: message })));
         } finally {
           controller.close();

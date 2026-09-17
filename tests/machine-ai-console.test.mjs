@@ -13,10 +13,35 @@ test('machine console pins the verified local model and disables hidden thinking
   assert.doesNotMatch(consoleScript, /deepseek-v4\.1-flash:cloud/);
 });
 
-test('bare machine-console text stays chat and agency requires explicit command', () => {
+test('bare machine-console text stays chat and privileged modes require explicit commands', () => {
   assert.match(consoleScript, /Bare text always stays in direct chat/);
   assert.match(consoleScript, /\^\\\/agency\\s\+\(\.\+\)\$/);
-  assert.match(consoleScript, /never silently switch to agency\/browser\/company mode/);
+  assert.match(consoleScript, /\^\\\/mcp\\s\+\(\.\+\)\$/);
+  assert.match(consoleScript, /never silently switch to agency\/MCP\/browser\/company mode/i);
+});
+
+test('machine console exposes explicit MCP status, tools, connector tests and tool tasks', () => {
+  assert.match(consoleScript, /\/mcp status/);
+  assert.match(consoleScript, /\/mcp tools \[connector\]/);
+  assert.match(consoleScript, /\/mcp test <connector>/);
+  assert.match(consoleScript, /explicit read-only MCP-assisted Qwen task/);
+  assert.match(consoleScript, /runMcpChat/);
+});
+
+test('machine console audit is deterministic and includes measured MCP state', () => {
+  assert.match(consoleScript, /\/audit/);
+  assert.match(consoleScript, /async function printAudit/);
+  assert.match(consoleScript, /router\.status\(\{ probe: true \}\)/);
+  assert.match(consoleScript, /queue_status/);
+  assert.match(consoleScript, /MCP SYSTEM =/);
+  assert.match(consoleScript, /No production writes, deploys, merges, payments, or destructive database actions/);
+});
+
+test('transient local Ollama resets get one bounded retry', () => {
+  assert.match(consoleScript, /ECONNRESET/);
+  assert.match(consoleScript, /transientOllamaError/);
+  assert.match(consoleScript, /await delay\(500\)/);
+  assert.doesNotMatch(consoleScript, /while\s*\(true\).*fetchJson/s);
 });
 
 test('runtime identity is reported from actual Ollama state rather than model guesses', () => {
@@ -27,7 +52,7 @@ test('runtime identity is reported from actual Ollama state rather than model gu
   assert.match(consoleScript, /never invent model names/i);
 });
 
-test('privacy statement distinguishes local inference from external connectors', () => {
+test('privacy statement distinguishes local inference from explicit external connectors', () => {
   assert.match(consoleScript, /loopback Ollama endpoint/);
   assert.match(consoleScript, /external connectors may send data to their provider/);
   assert.doesNotMatch(consoleScript, /No data is sent to external servers/);
@@ -38,6 +63,7 @@ test('background machine tasks default to chat and allow only chat or agency', (
   assert.match(taskScript, /\['chat', 'agency'\]\.includes\(route\)/);
 });
 
-test('package exposes dedicated machine chat command', () => {
+test('package exposes dedicated machine chat and explicit MCP command', () => {
   assert.equal(pkg.scripts['machine:chat'], 'node scripts/machine-ai-console.mjs');
+  assert.equal(pkg.scripts['machine:mcp'], 'node scripts/machine-ai-mcp-chat.mjs');
 });
