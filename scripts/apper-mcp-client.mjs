@@ -2,19 +2,24 @@
 
 import { spawn } from 'node:child_process';
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
-import { createServer } from 'node:net';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 const APPER_MCP_URL = 'https://mcp.apper.io/v1/connect';
 const MCP_REMOTE_VERSION = '0.1.38';
 const MARKER_FILE = join(homedir(), '.bharatshop-ai', 'apper-mcp-authorized.json');
+const DEFAULT_CALLBACK_PORT = Number(process.env.BHARATSHOP_APPER_MCP_CALLBACK_PORT || 52774);
 const DEFAULT_TIMEOUT_MS = 90_000;
 
 function redact(value) {
   return String(value || '')
     .replace(/Bearer\s+[A-Za-z0-9._~+\/-]+/gi, 'Bearer [REDACTED]')
     .replace(/\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|sbp_[A-Za-z0-9_]{20,}|eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,})\b/g, '[REDACTED]');
+}
+
+function validPort(value) {
+  const port = Number(value || 0);
+  return Number.isInteger(port) && port >= 1024 && port <= 65535 ? port : 0;
 }
 
 function npxInvocation(args) {
@@ -41,31 +46,14 @@ async function terminateChildTree(child) {
     return;
   }
 
-  await new Promise(resolve => {
+  await new Promise(resolvePromise => {
     const killer = spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
       windowsHide: true,
       stdio: 'ignore',
       shell: false,
     });
-    killer.once('error', () => resolve());
-    killer.once('close', () => resolve());
-  });
-}
-
-async function reserveFreeLoopbackPort() {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    server.unref();
-    server.once('error', reject);
-    server.listen({ host: '127.0.0.1', port: 0, exclusive: true }, () => {
-      const address = server.address();
-      const port = typeof address === 'object' && address ? address.port : 0;
-      server.close(error => {
-        if (error) reject(error);
-        else if (!port) reject(new Error('Could not allocate a free localhost OAuth callback port.'));
-        else resolve(port);
-      });
-    });
+    killer.once('error', () => resolvePromise());
+    killer.once('close', () => resolvePromise());
   });
 }
 
@@ -82,9 +70,9 @@ async function readAuthorizedState() {
   if (!(await hasMarker())) return null;
   try {
     const parsed = JSON.parse(await readFile(MARKER_FILE, 'utf8'));
-    const callbackPort = Number(parsed?.callbackPort || 0);
     if (parsed?.connector !== 'apper' || parsed?.endpoint !== APPER_MCP_URL) return null;
-    if (!Number.isInteger(callbackPort) || callbackPort < 1024 || callbackPort > 65535) return null;
+    const callbackPort = validPort(parsed?.callbackPort) || validPort(DEFAULT_CALLBACK_PORT);
+    if (!callbackPort) return null;
     return { ...parsed, callbackPort };
   } catch {
     return null;
@@ -100,8 +88,23 @@ async function markAuthorized(callbackPort) {
     callbackPort,
     authenticatedAt: new Date().toISOString(),
     credentialOwner: 'mcp-remote local OAuth cache',
+    authMode: 'persistent-cached-oauth',
     containsSecret: false,
   }, null, 2)}\n`, 'utf8');
+}
+
+function publicAuthState(callbackPort, extra = {}) {
+  return {
+    connector: 'apper',
+    state: 'AUTHORIZED',
+    readOnly: true,
+    endpoint: APPER_MCP_URL,
+    callbackHost: '127.0.0.1',
+    callbackPort,
+    persistent: true,
+    ...extra,
+    note: 'OAuth credentials are owned by the local mcp-remote cache and are reused until the provider revokes or invalidates them.',
+  };
 }
 
 async function spawnRemoteProxy(callbackPort) {
@@ -154,13 +157,13 @@ async function spawnRemoteProxy(callbackPort) {
 
   function request(method, params = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
     const id = ++nextId;
-    return new Promise((resolve, reject) => {
+    return new Promise((resolvePromise, reject) => {
       const timer = setTimeout(() => {
         pending.delete(id);
         reject(new Error(`Apper MCP request timed out: ${method}${stderrTail ? `; ${stderrTail.slice(-800)}` : ''}`));
       }, timeoutMs);
       pending.set(id, {
-        resolve: value => { clearTimeout(timer); resolve(value); },
+        resolve: value => { clearTimeout(timer); resolvePromise(value); },
         reject: error => { clearTimeout(timer); reject(error); },
       });
       child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
@@ -198,11 +201,26 @@ async function withApperProxy(operation) {
   }
 }
 
-async function connectInteractive() {
-  const callbackPort = await reserveFreeLoopbackPort();
+async function connectInteractive(force = false) {
+  const existing = await readAuthorizedState();
+
+  // Normal connect is intentionally idempotent. Once OAuth has been approved,
+  // keep using the exact same callback registration and mcp-remote token cache.
+  // A browser should only open again after an explicit --force or when the
+  // provider itself invalidates/revokes the cached grant during a real call.
+  if (existing && !force) {
+    console.log(JSON.stringify(publicAuthState(existing.callbackPort, {
+      reused: true,
+      authenticatedAt: existing.authenticatedAt || null,
+    }), null, 2));
+    return;
+  }
+
+  const callbackPort = existing?.callbackPort || validPort(DEFAULT_CALLBACK_PORT);
+  if (!callbackPort) throw new Error('Invalid Apper MCP callback port.');
   console.error(`Apper OAuth callback port: ${callbackPort}`);
 
-  const authState = await new Promise((resolve, reject) => {
+  const authState = await new Promise((resolvePromise, reject) => {
     const child = spawnNpx(
       ['-y', '-p', `mcp-remote@${MCP_REMOTE_VERSION}`, 'mcp-remote-client', APPER_MCP_URL, String(callbackPort), '--host', '127.0.0.1'],
       {
@@ -223,11 +241,13 @@ async function connectInteractive() {
 
       if (!settled && /Connected successfully!/i.test(combinedTail)) {
         settled = true;
+        // Give mcp-remote time to flush its durable OAuth/client registration
+        // before cleaning up the helper process tree.
         setTimeout(() => {
           terminateChildTree(child)
             .catch(() => {})
-            .finally(() => resolve('AUTHORIZED'));
-        }, 300);
+            .finally(() => resolvePromise('AUTHORIZED'));
+        }, 1500);
       }
     }
 
@@ -242,7 +262,7 @@ async function connectInteractive() {
     child.on('close', code => {
       if (!settled) {
         settled = true;
-        if (code === 0) resolve('AUTHORIZED');
+        if (code === 0) resolvePromise('AUTHORIZED');
         else reject(new Error(`Apper OAuth connection failed with exit code ${code ?? 'unknown'}.`));
       }
     });
@@ -250,15 +270,7 @@ async function connectInteractive() {
 
   if (authState !== 'AUTHORIZED') throw new Error('Apper OAuth did not reach an authorized connection state.');
   await markAuthorized(callbackPort);
-  console.log(JSON.stringify({
-    connector: 'apper',
-    state: 'AUTHORIZED',
-    readOnly: true,
-    endpoint: APPER_MCP_URL,
-    callbackHost: '127.0.0.1',
-    callbackPort,
-    note: 'OAuth credentials are owned by the local mcp-remote cache and are not stored in BharatShop.',
-  }, null, 2));
+  console.log(JSON.stringify(publicAuthState(callbackPort, { reused: false }), null, 2));
 }
 
 async function listTools() {
@@ -266,18 +278,26 @@ async function listTools() {
   return { tools: Array.isArray(result?.tools) ? result.tools : [] };
 }
 
+async function parseToolArgs(rawArgs) {
+  let text = String(rawArgs || '').trim();
+  if (!text) return {};
+  if (text.startsWith('@')) {
+    const argsPath = resolve(text.slice(1));
+    text = await readFile(argsPath, 'utf8');
+  }
+  try { return JSON.parse(text); }
+  catch { throw new Error('Apper MCP tool arguments must be valid JSON.'); }
+}
+
 async function callTool(toolName, rawArgs) {
   if (!toolName) throw new Error('Apper MCP tool name is required.');
-  let args = {};
-  if (rawArgs) {
-    try { args = JSON.parse(rawArgs); } catch { throw new Error('Apper MCP tool arguments must be valid JSON.'); }
-  }
+  const args = await parseToolArgs(rawArgs);
   return withApperProxy(proxy => proxy.request('tools/call', { name: toolName, arguments: args }, 180_000));
 }
 
 async function main() {
   const [command = 'tools', toolName, rawArgs] = process.argv.slice(2);
-  if (command === 'connect') return connectInteractive();
+  if (command === 'connect') return connectInteractive(process.argv.slice(2).includes('--force'));
   if (command === 'tools') {
     console.log(JSON.stringify(await listTools()));
     return;
@@ -286,7 +306,7 @@ async function main() {
     console.log(JSON.stringify(await callTool(toolName, rawArgs)));
     return;
   }
-  throw new Error('Usage: node scripts/apper-mcp-client.mjs connect | tools | call <tool> [args-json]');
+  throw new Error('Usage: node scripts/apper-mcp-client.mjs connect [--force] | tools | call <tool> [args-json|@args-file]');
 }
 
 main().catch(error => {
