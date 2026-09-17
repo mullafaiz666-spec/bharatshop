@@ -163,7 +163,7 @@ async function walk(root, dir = root, depth = 0, output = []) {
 export function localToolDefinitions() {
   const empty = { type: 'object', properties: {}, additionalProperties: false };
   return [
-    { name: 'project_status', description: 'Read project root and current Git branch/status.', inputSchema: empty },
+    { name: 'project_status', description: 'Read BharatShop project root, Git branch/detached commit, status, and file-presence evidence.', inputSchema: empty },
     { name: 'git_status', description: 'Read git status for the BharatShop project.', inputSchema: empty },
     { name: 'git_diff', description: 'Read the current git diff without modifying files.', inputSchema: empty },
     { name: 'git_log', description: 'Read recent git commits.', inputSchema: { type: 'object', properties: { count: { type: 'integer', minimum: 1, maximum: 20 } }, additionalProperties: false } },
@@ -180,9 +180,23 @@ export function localToolDefinitions() {
 async function callLocalTool(root, name, args = {}) {
   const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
   if (name === 'project_status') {
-    const branch = await runFixed('git', ['branch', '--show-current'], root);
-    const status = await runFixed('git', ['status', '--short', '--branch'], root);
-    return { root, branch: branch.stdout, status: status.stdout };
+    const [branch, status, commit, files] = await Promise.all([
+      runFixed('git', ['branch', '--show-current'], root),
+      runFixed('git', ['status', '--short', '--branch'], root),
+      runFixed('git', ['rev-parse', '--short=12', 'HEAD'], root),
+      walk(root),
+    ]);
+    const currentBranch = branch.stdout || 'DETACHED_HEAD';
+    return {
+      root,
+      branch: currentBranch,
+      detached: !branch.stdout,
+      commit: commit.stdout,
+      status: status.stdout,
+      fileCount: files.length,
+      hasPackageJson: files.includes('package.json'),
+      hasSrcDirectory: files.some(file => /^src[\\/]/.test(file)),
+    };
   }
   if (name === 'git_status') return runFixed('git', ['status', '--short', '--branch'], root);
   if (name === 'git_diff') return runFixed('git', ['diff', '--'], root);
@@ -301,62 +315,33 @@ export class McpRouter {
     }));
   }
 
-  async callModelTool(modelName, args = {}) {
-    const split = String(modelName).indexOf('__');
-    if (split < 1) throw new Error('Invalid MCP model tool name.');
-    return this.callTool(modelName.slice(0, split), modelName.slice(split + 2), args);
+  async callModelTool(compositeName, args = {}) {
+    const marker = String(compositeName).indexOf('__');
+    if (marker < 1) throw new Error(`Invalid MCP tool name: ${compositeName}`);
+    const connectorName = String(compositeName).slice(0, marker);
+    const toolName = String(compositeName).slice(marker + 2);
+    return this.call(connectorName, toolName, args);
   }
 
-  async callTool(connectorName, toolName, args = {}) {
+  async call(connectorName, toolName, args = {}) {
     const cfg = this.connector(connectorName);
-    const started = Date.now();
-    let ok = false;
+    if (cfg.readOnly !== true) throw new Error(`Connector ${connectorName} is not read-only.`);
+    if (isWriteLikeTool(toolName)) throw new Error(`Write-like MCP tool blocked by Machine AI policy: ${connectorName}.${toolName}`);
+    const startedAt = Date.now();
     try {
-      if (cfg.readOnly !== true) throw new Error('Connector is not locked read-only.');
-      if (cfg.type === 'builtin') {
-        if (!localToolDefinitions().some(tool => tool.name === toolName)) throw new Error(`Unknown local tool: ${toolName}`);
-        const value = await callLocalTool(this.root, toolName, args);
-        ok = true;
-        return value;
-      }
-      const missing = missingEnv(cfg);
-      if (missing.length) throw new Error(`MISSING_ENV:${connectorName}:${missing.join(',')}`);
-      if (isWriteLikeTool(toolName)) throw new Error(`Blocked write-like MCP tool in read-only mode: ${toolName}`);
-      const value = await this.client(connectorName).callTool(toolName, args);
-      ok = true;
-      return value;
-    } finally {
-      await audit({ connector: connectorName, tool: toolName, argumentKeys: Object.keys(args || {}), ok, durationMs: Date.now() - started });
+      let result;
+      if (cfg.type === 'builtin') result = await callLocalTool(this.root, toolName, args);
+      else result = await this.client(connectorName).callTool(toolName, args);
+      await audit({ connector: connectorName, tool: toolName, ok: true, durationMs: Date.now() - startedAt });
+      return result;
+    } catch (error) {
+      await audit({ connector: connectorName, tool: toolName, ok: false, durationMs: Date.now() - startedAt, error: redactText(error.message) });
+      throw error;
     }
   }
 }
 
-export async function createMcpRouter(options = {}) {
-  return new McpRouter(await loadMcpConfig(options.configPath), options.root);
-}
-
-async function cli() {
-  const args = process.argv.slice(2);
-  const command = args[0] || 'status';
-  const connector = args.find(value => !value.startsWith('--') && value !== command) || 'all';
-  const router = await createMcpRouter();
-  if (command === 'status') {
-    console.log(JSON.stringify(await router.status({ probe: args.includes('--probe') }), null, 2));
-    return;
-  }
-  if (command === 'tools') {
-    const tools = await router.tools(connector, { probe: true, skipUnavailable: connector === 'all' });
-    console.log(JSON.stringify(tools.map(({ connector: c, name, description }) => ({ connector: c, name, description })), null, 2));
-    return;
-  }
-  if (command === 'test') {
-    const status = await router.status({ probe: true });
-    console.log(JSON.stringify(connector === 'all' ? status : status.filter(item => item.name === connector), null, 2));
-    return;
-  }
-  throw new Error('Usage: node scripts/mcp-router.mjs status [--probe] | tools [connector] | test [connector]');
-}
-
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  cli().catch(error => { console.error(redactText(error.message)); process.exitCode = 1; });
+export async function createMcpRouter(configPath) {
+  const config = await loadMcpConfig(configPath);
+  return new McpRouter(config);
 }
