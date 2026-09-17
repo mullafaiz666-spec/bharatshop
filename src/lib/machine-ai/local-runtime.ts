@@ -45,14 +45,71 @@ function envTrue(value: string | undefined) {
   return /^(1|true|yes|on)$/i.test(String(value || ""));
 }
 
+const MACHINE_AI_BROWSER_ORIGINS = new Set([
+  "https://preview--nimble-bharatshop-control.apper.so",
+]);
+
+function isLoopbackHostname(hostname: string) {
+  const value = String(hostname || "").toLowerCase();
+  return value === "localhost" ||
+    value === "127.0.0.1" ||
+    value === "::1" ||
+    value === "[::1]";
+}
+
 export function isLoopbackRequest(request: Request) {
   if (envTrue(process.env.BHARATSHOP_MACHINE_AI_ALLOW_REMOTE)) return true;
+
   try {
     const hostname = new URL(request.url).hostname.toLowerCase();
-    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
+    if (!isLoopbackHostname(hostname)) return false;
+
+    const origin = request.headers.get("origin");
+
+    // Local CLI/server calls commonly have no browser Origin header.
+    if (!origin) return true;
+
+    const originHostname = new URL(origin).hostname.toLowerCase();
+
+    // Existing localhost UI remains fully functional.
+    if (isLoopbackHostname(originHostname)) return true;
+
+    // The deployed Apper cockpit is READ-ONLY against the laptop.
+    const method = request.method.toUpperCase();
+    const readOnly =
+      method === "GET" ||
+      method === "HEAD" ||
+      method === "OPTIONS";
+
+    return readOnly && MACHINE_AI_BROWSER_ORIGINS.has(origin);
   } catch {
     return false;
   }
+}
+
+export function machineAiBrowserHeaders(request: Request) {
+  const headers: Record<string, string> = {
+    "cache-control": "no-store",
+  };
+
+  const origin = request.headers.get("origin") || "";
+
+  if (MACHINE_AI_BROWSER_ORIGINS.has(origin)) {
+    headers["access-control-allow-origin"] = origin;
+    headers["access-control-allow-methods"] = "GET, HEAD, OPTIONS";
+    headers["access-control-allow-headers"] = "content-type, accept";
+    headers["access-control-allow-private-network"] = "true";
+    headers["vary"] = "Origin, Access-Control-Request-Private-Network";
+  }
+
+  return headers;
+}
+
+export function machineAiBrowserOptions(request: Request) {
+  return new Response(null, {
+    status: 204,
+    headers: machineAiBrowserHeaders(request),
+  });
 }
 
 export function localOnlyError() {
