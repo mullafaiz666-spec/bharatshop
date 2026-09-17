@@ -88,25 +88,32 @@ test('MCP auth bridge reuses safe existing GitHub auth sources without printing 
   assert.doesNotMatch(authText, /console\.error\([^\n]*token/);
 });
 
-test('Apper OAuth bridge is pinned, local, Windows-safe, persists its callback registration, and kills its helper process tree', () => {
+test('Apper OAuth bridge is pinned, local, Windows-safe, one-time by default, and reuses its durable registration', () => {
   assert.match(apperText, /https:\/\/mcp\.apper\.io\/v1\/connect/);
   assert.match(apperText, /MCP_REMOTE_VERSION = '0\.1\.38'/);
   assert.match(apperText, /mcp-remote-client/);
   assert.match(apperText, /mcp-remote local OAuth cache/);
+  assert.match(apperText, /authMode:\s*'persistent-cached-oauth'/);
+  assert.match(apperText, /persistent:\s*true/);
   assert.match(apperText, /containsSecret:\s*false/);
   assert.match(apperText, /npx-cli\.js/);
   assert.match(apperText, /command:\s*process\.execPath/);
-  assert.match(apperText, /createServer/);
-  assert.match(apperText, /reserveFreeLoopbackPort/);
-  assert.match(apperText, /port:\s*0/);
+  assert.match(apperText, /BHARATSHOP_APPER_MCP_CALLBACK_PORT/);
+  assert.match(apperText, /DEFAULT_CALLBACK_PORT/);
   assert.match(apperText, /readAuthorizedState/);
-  assert.match(apperText, /callbackPort/);
+  assert.match(apperText, /if \(existing && !force\)/);
+  assert.match(apperText, /reused:\s*true/);
+  assert.match(apperText, /existing\?\.callbackPort \|\| validPort\(DEFAULT_CALLBACK_PORT\)/);
   assert.match(apperText, /await spawnRemoteProxy\(authorized\.callbackPort\)/);
   assert.match(apperText, /await markAuthorized\(callbackPort\)/);
   assert.match(apperText, /terminateChildTree/);
   assert.match(apperText, /spawn\('taskkill', \['\/PID', String\(child\.pid\), '\/T', '\/F'\]/);
   assert.match(apperText, /await terminateChildTree\(child\)/);
   assert.match(apperText, /'--host',\s*'127\.0\.0\.1'/);
+  assert.match(apperText, /text\.startsWith\('@'\)/);
+  assert.match(apperText, /readFile\(argsPath, 'utf8'\)/);
+  assert.doesNotMatch(apperText, /reserveFreeLoopbackPort/);
+  assert.doesNotMatch(apperText, /port:\s*0/);
   assert.doesNotMatch(apperText, /spawn\(\s*npxCommand/);
   assert.doesNotMatch(apperText, /APPER_(?:TOKEN|SECRET|PASSWORD)\s*=/i);
   assert.doesNotMatch(apperText, /shell:\s*true/);
