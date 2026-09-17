@@ -41,6 +41,7 @@
     "mcp:status": "node scripts/mcp-auth-bridge.mjs status",
     "mcp:tools": "node scripts/mcp-auth-bridge.mjs tools",
     "mcp:test": "node scripts/mcp-auth-bridge.mjs test",
+    "mcp:apper:connect": "node scripts/apper-mcp-client.mjs connect",
     "agentmemory:start": "npx -y @agentmemory/agentmemory@latest",
     "agentmemory:status": "npx -y @agentmemory/agentmemory@latest status",
     "memory:status": "node scripts/personal-ai-memory.mjs status",
