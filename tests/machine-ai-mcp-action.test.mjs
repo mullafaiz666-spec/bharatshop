@@ -30,7 +30,7 @@ test('high-risk Apper tools remain approval-gated and unavailable to Qwen action
   ]) {
     assert.match(action, new RegExp(`'${name}'`));
   }
-  assert.match(action, /APPROVAL-REQUIRED/);
+  assert.match(action, /approval-required/);
   assert.match(action, /exact-action approval is required/i);
 });
 
