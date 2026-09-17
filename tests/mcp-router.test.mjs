@@ -73,6 +73,10 @@ test('MCP auth bridge reuses safe existing GitHub auth sources without printing 
   assert.match(authText, /\['GH_TOKEN', 'GITHUB_TOKEN'\]/);
   assert.match(authText, /gh\.exe/);
   assert.match(authText, /\['auth', 'token', '--hostname', 'github\.com'\]/);
+  assert.match(authText, /git', \['credential', 'fill'\]/);
+  assert.match(authText, /GCM_INTERACTIVE:\s*'Never'/);
+  assert.match(authText, /GIT_TERMINAL_PROMPT:\s*'0'/);
+  assert.match(authText, /loaded-from-git-credential-manager/);
   assert.match(authText, /process\.env\.GITHUB_MCP_TOKEN = token/);
   assert.doesNotMatch(authText, /console\.log\([^\n]*token/);
   assert.doesNotMatch(authText, /console\.error\([^\n]*token/);
