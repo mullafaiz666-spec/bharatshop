@@ -16,8 +16,20 @@ function redact(value) {
     .replace(/\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|sbp_[A-Za-z0-9_]{20,}|eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,})\b/g, '[REDACTED]');
 }
 
-function npxCommand() {
-  return process.platform === 'win32' ? 'npx.cmd' : 'npx';
+function npxInvocation(args) {
+  if (process.platform === 'win32') {
+    const npxCli = join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npx-cli.js');
+    return { command: process.execPath, args: [npxCli, ...args] };
+  }
+  return { command: 'npx', args };
+}
+
+function spawnNpx(args, options) {
+  const invocation = npxInvocation(args);
+  return spawn(invocation.command, invocation.args, {
+    ...options,
+    shell: false,
+  });
 }
 
 async function hasMarker() {
@@ -41,12 +53,10 @@ async function markAuthorized() {
 }
 
 function spawnRemoteProxy() {
-  const child = spawn(
-    npxCommand(),
+  const child = spawnNpx(
     ['-y', `mcp-remote@${MCP_REMOTE_VERSION}`, APPER_MCP_URL, '--transport', 'http-only'],
     {
       windowsHide: true,
-      shell: false,
       stdio: ['pipe', 'pipe', 'pipe'],
       env: process.env,
     },
@@ -137,12 +147,10 @@ async function withApperProxy(operation) {
 
 async function connectInteractive() {
   const exitCode = await new Promise((resolve, reject) => {
-    const child = spawn(
-      npxCommand(),
+    const child = spawnNpx(
       ['-y', '-p', `mcp-remote@${MCP_REMOTE_VERSION}`, 'mcp-remote-client', APPER_MCP_URL],
       {
         windowsHide: false,
-        shell: false,
         stdio: 'inherit',
         env: process.env,
       },
