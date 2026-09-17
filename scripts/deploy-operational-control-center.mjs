@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 import { execFile } from 'node:child_process';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -19,18 +21,36 @@ const MODEL = process.env.PERSONAL_AI_MODEL || 'qwen3.5:4b';
 const metadata = { provider: 'ChatGPT', model: MODEL, modelThinkingLevel: 'high' };
 
 async function run(tool, args = {}, timeout = 420_000) {
-  const { stdout, stderr } = await execFileAsync(process.execPath, [BRIDGE, 'call', tool, JSON.stringify(args)], {
-    cwd: ROOT,
-    env: process.env,
-    timeout,
-    windowsHide: true,
-    maxBuffer: 16 * 1024 * 1024,
-  });
-  if (!String(stdout || '').trim()) throw new Error(String(stderr || ('Empty Apper response for ' + tool)).trim());
-  const outer = JSON.parse(stdout);
-  const text = outer?.content?.find?.(item => item.type === 'text')?.text;
-  if (!text) return outer;
-  try { return JSON.parse(text); } catch { return text; }
+  const rawArgs = JSON.stringify(args);
+  let bridgeArg = rawArgs;
+  let tempRoot = '';
+
+  // Windows has a small process command-line limit. Large Apper write_files
+  // payloads (the Copilot UI source) must travel through a temporary JSON file
+  // rather than argv or execFile fails with ENAMETOOLONG.
+  if (rawArgs.length > 6_000) {
+    tempRoot = await mkdtemp(join(tmpdir(), 'bharatshop-apper-args-'));
+    const argsFile = join(tempRoot, 'args.json');
+    await writeFile(argsFile, rawArgs, 'utf8');
+    bridgeArg = `@${argsFile}`;
+  }
+
+  try {
+    const { stdout, stderr } = await execFileAsync(process.execPath, [BRIDGE, 'call', tool, bridgeArg], {
+      cwd: ROOT,
+      env: process.env,
+      timeout,
+      windowsHide: true,
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    if (!String(stdout || '').trim()) throw new Error(String(stderr || ('Empty Apper response for ' + tool)).trim());
+    const outer = JSON.parse(stdout);
+    const text = outer?.content?.find?.(item => item.type === 'text')?.text;
+    if (!text) return outer;
+    try { return JSON.parse(text); } catch { return text; }
+  } finally {
+    if (tempRoot) await rm(tempRoot, { recursive: true, force: true });
+  }
 }
 
 const controlHook = String.raw`import { useCallback, useState } from "react";
