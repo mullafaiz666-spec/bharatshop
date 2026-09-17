@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type CSSProperties } from "react";
 
 type ConnectorState = {
   name: string;
@@ -12,11 +12,11 @@ type ConnectorState = {
 };
 
 type ApiPayload = {
-  result?: ConnectorState[];
+  result?: unknown;
   error?: string;
 };
 
-const card: React.CSSProperties = {
+const card: CSSProperties = {
   border: "1px solid rgba(148,163,184,.22)",
   borderRadius: 16,
   padding: 18,
@@ -41,7 +41,7 @@ export default function McpPanel() {
     setError("");
     try {
       const response = await fetch(`/api/machine-ai/mcp?command=${encodeURIComponent(command)}&connector=${encodeURIComponent(connector)}`, { cache: "no-store" });
-      const payload = await response.json() as ApiPayload & { result?: unknown };
+      const payload = await response.json() as ApiPayload;
       if (!response.ok) throw new Error(payload.error || "MCP status unavailable");
       if (command === "status") setStates(Array.isArray(payload.result) ? payload.result as ConnectorState[] : []);
       setDetail(command === "status" ? "" : JSON.stringify(payload.result, null, 2));
@@ -75,7 +75,7 @@ export default function McpPanel() {
 
         <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))", gap: 16 }}>
           {["github", "supabase", "local"].map((name) => {
-            const item = states.find((entry) => entry.name === name) || { name, state: "NOT VERIFIED" };
+            const item: ConnectorState = states.find((entry) => entry.name === name) || { name, state: "NOT VERIFIED" };
             return (
               <article key={name} style={card}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
