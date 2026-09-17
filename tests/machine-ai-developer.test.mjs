@@ -21,7 +21,8 @@ test('developer runner has project write, validation, build, commit and push too
   ]) {
     assert.match(developer, new RegExp(tool));
   }
-  assert.match(developer, /feature\/machine-ai-mcp-host-v1/);
+  assert.match(developer, /feature\/machine-ai-operational-control/);
+  assert.doesNotMatch(developer, /feature\/machine-ai-mcp-host-v1/);
   assert.match(developer, /git', \['push', 'origin'/);
   assert.doesNotMatch(developer, /--force/);
 });
