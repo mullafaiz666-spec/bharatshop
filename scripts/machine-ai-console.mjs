@@ -11,13 +11,31 @@ const MODEL = process.env.PERSONAL_AI_MODEL || process.env.AGENCY_MODEL || proce
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434';
 const CONTEXT = Number(process.env.PERSONAL_AI_CONTEXT || '4096');
 
-async function fetchJson(url, options = {}, timeoutMs = 120000) {
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function transientOllamaError(error) {
+  return /(ECONNRESET|ECONNREFUSED|socket hang up|fetch failed|UND_ERR_SOCKET)/i.test(String(error?.message || error));
+}
+
+async function fetchJsonOnce(url, options = {}, timeoutMs = 120000) {
   const response = await fetch(url, { ...options, signal: AbortSignal.timeout(timeoutMs) });
   const text = await response.text();
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch {}
   if (!response.ok) throw new Error(`HTTP ${response.status}: ${text.slice(0, 300)}`);
   return data;
+}
+
+async function fetchJson(url, options = {}, timeoutMs = 120000) {
+  try {
+    return await fetchJsonOnce(url, options, timeoutMs);
+  } catch (error) {
+    if (!transientOllamaError(error)) throw error;
+    await delay(500);
+    return fetchJsonOnce(url, options, timeoutMs);
+  }
 }
 
 async function models() {
@@ -90,6 +108,41 @@ async function printMcpTools(connector = 'all') {
   console.log(`\n${JSON.stringify(tools.map(({ connector: c, name, description }) => ({ connector: c, name, description })), null, 2)}`);
 }
 
+async function printAudit() {
+  let installed = [];
+  let ollamaState = 'NOT RESPONDING';
+  try {
+    installed = await models();
+    if (installed.length) ollamaState = 'RESPONDING';
+  } catch {}
+  const agents = discoverAgents();
+  const router = await mcpRouter();
+  const mcp = await router.status({ probe: true });
+  let queue = { pending: 0, running: 0, results: 0 };
+  try {
+    queue = await router.callTool('local', 'queue_status', {});
+  } catch {}
+  const allMcpVerified = mcp.length > 0 && mcp.every(item => item.state === 'VERIFIED');
+
+  console.log(`\nLOCAL READ-ONLY AUDIT — ${new Date().toISOString()}`);
+  console.log(`Ollama model-list endpoint: ${ollamaState}`);
+  console.log(`Configured model: ${MODEL}; installed: ${installed.includes(MODEL)}`);
+  console.log(`Registered agent definitions: ${agents.length} (definition count, not running-process count).`);
+  console.log(`Queue files: pending=${queue.pending || 0}, running=${queue.running || 0}, results=${queue.results || 0}.`);
+  console.log('\nMCP CONNECTORS');
+  for (const item of mcp) {
+    const extras = [
+      Number.isFinite(item.tools) ? `tools=${item.tools}` : '',
+      item.readOnly ? 'read-only' : '',
+      Array.isArray(item.missing) && item.missing.length ? `missing=${item.missing.join(',')}` : '',
+      item.error ? `error=${item.error}` : '',
+    ].filter(Boolean).join('; ');
+    console.log(`${String(item.name || '').toUpperCase()}: ${item.state}${extras ? ` (${extras})` : ''}`);
+  }
+  console.log(`\nMCP SYSTEM = ${allMcpVerified ? 'VERIFIED' : 'NEEDS WORK'}`);
+  console.log('No production writes, deploys, merges, payments, or destructive database actions were performed.');
+}
+
 async function printStatus() {
   const installed = await models();
   const agents = discoverAgents();
@@ -125,7 +178,7 @@ function asksRuntimeIdentity(input) {
 }
 
 function help() {
-  console.log(`\nCommands:\n  /status                    show actual local runtime status\n  /about                     authoritative model/local/cloud/capability info\n  /models                    list actual Ollama models\n  /agency <task>             explicitly use up to 3 local specialist agents\n  /mcp                       probe MCP connector status\n  /mcp status               probe MCP connector status\n  /mcp tools [connector]    list real discovered MCP tools\n  /mcp test <connector>     probe github, supabase, or local connector\n  /mcp <task>               explicit read-only MCP-assisted Qwen task\n  /chat <task>              direct local chat\n  /help                      show commands\n  /exit                      exit\n\nBare text always stays in direct chat. It will never silently switch to agency/MCP/browser/company mode.`);
+  console.log(`\nCommands:\n  /status                    show actual local runtime status\n  /audit                     deterministic read-only runtime + MCP audit\n  /about                     authoritative model/local/cloud/capability info\n  /models                    list actual Ollama models\n  /agency <task>             explicitly use up to 3 local specialist agents\n  /mcp                       probe MCP connector status\n  /mcp status               probe MCP connector status\n  /mcp tools [connector]     list real discovered MCP tools\n  /mcp test <connector>      probe github, supabase, or local connector\n  /mcp <task>                explicit read-only MCP-assisted Qwen task\n  /chat <task>               direct local chat\n  /help                      show commands\n  /exit                      exit\n\nBare text always stays in direct chat. It will never silently switch to agency/MCP/browser/company mode.`);
 }
 
 async function main() {
@@ -143,13 +196,14 @@ async function main() {
       if (input === '/exit' || input === '/quit') break;
       if (input === '/help') { help(); continue; }
       if (input === '/status') { await printStatus(); continue; }
+      if (input === '/audit') { await printAudit(); continue; }
       if (input === '/about' || asksRuntimeIdentity(input)) { await printAbout(); continue; }
       if (input === '/models' || /^ollama\s+list$/i.test(input)) {
         console.log(`\nModels: ${(await models()).join(', ') || 'none'}`);
         continue;
       }
 
-      if (/^\/mcp(?:\s+status)?$/i.test(input)) {
+      if (/^\/mcp(?:\s+(?:status|connectors))?$/i.test(input)) {
         await printMcpStatus();
         continue;
       }
@@ -158,7 +212,7 @@ async function main() {
         await printMcpTools((mcpTools[1] || 'all').toLowerCase());
         continue;
       }
-      const mcpTest = input.match(/^\/mcp\s+test\s+(github|supabase|local)$/i);
+      const mcpTest = input.match(/^\/mcp\s+test\s+(github|supabase|local|all)$/i);
       if (mcpTest) {
         await printMcpStatus(mcpTest[1].toLowerCase());
         continue;
