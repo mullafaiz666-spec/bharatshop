@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export default async function HomePage() {
-  let liveProducts = [];
+  let liveProducts: Awaited<ReturnType<typeof getLiveBharatDripProducts>> = [];
   try {
     liveProducts = await getLiveBharatDripProducts();
   } catch {
