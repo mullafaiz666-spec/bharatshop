@@ -9,7 +9,7 @@ import { spawn, spawnSync } from 'node:child_process';
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..');
 const HOST = '127.0.0.1';
-const PORT = Number(process.env.BHARATSHOP_LOCAL_APP_PORT || '3000');
+const PORT = Number(process.env.BHARATSHOP_LOCAL_APP_PORT || '3001');
 const url = `http://${HOST}:${PORT}`;
 const stateHome = join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'BharatShop', 'LocalStorefront');
 const pidFile = join(stateHome, 'storefront.pid');
