@@ -9,7 +9,7 @@ import { homedir } from 'node:os';
 import { execFileSync, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import { chooseDepartmentAgents, classifyDepartments, isApprovalMessage, isCancellationMessage } from './bharatshop-operator-router.mjs';
-import { recall } from './personal-ai-memory.mjs';
+import { recall } from './personal-ai-memory.mjs';\nimport { operationsSnapshot, runCockpitOperation } from './machine-cockpit-ops.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..');
@@ -436,7 +436,7 @@ export function createServer() {
         const body = await readJson(req);
         return sendJson(res, 201, { ok: true, task: queueTask(body.task, body.route) });
       }
-      if (req.method === 'GET' && url.pathname === '/api/project') return sendJson(res, 200, projectStatus());
+      if (req.method === 'GET' && url.pathname === '/api/operations') return sendJson(res, 200, operationsSnapshot());\n      if (req.method === 'POST' && url.pathname === '/api/operations') {\n        const body = await readJson(req);\n        return sendJson(res, 200, { ok: true, result: await runCockpitOperation(body.action, body) });\n      }\n      if (req.method === 'GET' && url.pathname === '/api/project') return sendJson(res, 200, projectStatus());
       if (req.method === 'GET' && url.pathname === '/api/memory') return sendJson(res, 200, memoryStatus());
       if (req.method === 'POST' && url.pathname === '/api/memory') {
         const body = await readJson(req);
