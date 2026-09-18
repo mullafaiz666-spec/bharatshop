@@ -49,11 +49,42 @@ test('machine web chat is bounded and the UI exposes cancellation', () => {
   assert.match(server, /needsProjectGrounding/);
 });
 
+test('BharatShop checkout routes to commerce engineering rather than world-building research', () => {
+  const departments = classifyDepartments('Review the BharatShop checkout payment code locally');
+  assert.ok(departments.includes('commerce'));
+  assert.ok(departments.includes('software-engineering'));
+  assert.equal(departments.includes('general-research'), false);
+});
 
-test('BharatShop checkout routes to commerce engineering rather than world-building research',()=>{const d=classifyDepartments('Review the BharatShop checkout payment code locally');assert.ok(d.includes('commerce'));assert.ok(d.includes('software-engineering'));assert.equal(d.includes('general-research'),false);});
+test('BharatDrip checkout keeps commerce priority over fashion keyword routing', () => {
+  const departments = classifyDepartments('Review BharatDrip checkout payment flow');
+  assert.ok(departments.includes('commerce'));
+  assert.ok(departments.includes('software-engineering'));
+});
 
-test('BharatDrip checkout keeps commerce priority over fashion keyword routing',()=>{const d=classifyDepartments('Review BharatDrip checkout payment flow');assert.ok(d.includes('commerce'));assert.ok(d.includes('software-engineering'));});
+test('stale world-building agent selection cannot hijack BharatShop engineering tasks', () => {
+  const agents = [{ slug: 'anthropologist', shortSlug: 'anthropologist', name: 'Anthropologist', description: 'culture society specialist', division: 'Research', content: 'world building' }];
+  const selected = chooseDepartmentAgents(agents, 'Fix BharatShop checkout payment bug', ['anthropologist']);
+  assert.notEqual(selected[0]?.name, 'Anthropologist');
+  assert.ok(selected.some(agent => agent.operatorDomain === 'commerce' || agent.operatorDomain === 'software-engineering'));
+});
 
-test('stale world-building agent selection cannot hijack BharatShop engineering tasks',()=>{const agents=[{slug:'anthropologist',shortSlug:'anthropologist',name:'Anthropologist',description:'culture society specialist',division:'Research',content:'world building'}];const selected=chooseDepartmentAgents(agents,'Fix BharatShop checkout payment bug',['anthropologist']);assert.notEqual(selected[0]?.name,'Anthropologist');assert.ok(selected.some(agent=>agent.operatorDomain==='commerce'||agent.operatorDomain==='software-engineering'));});
+test('chat grounding wires bounded persistent memory and live read-only repository evidence', () => {
+  const memory = buildMemoryContext('Review BharatShop checkout payment code');
+  assert.match(memory, /PERSISTENT BHARATSHOP MEMORY/);
+  assert.ok(memory.length <= 8000);
 
-test('chat grounding exposes persistent memory and live read-only repository evidence',()=>{const memory=buildMemoryContext('BharatShop BharatDrip streetwear database DROP TRUNCATE owner preferences P0 backlog');assert.match(memory,/PERSISTENT BHARATSHOP MEMORY/);assert.match(memory,/BharatDrip/i);assert.match(memory,/streetwear/i);assert.match(memory,/(DROP|TRUNCATE)/i);assert.match(memory,/P0/i);const project=buildReadOnlyProjectContext('Review BharatShop checkout payment code');assert.match(project,/LIVE READ-ONLY REPOSITORY STATE/);assert.match(project,/Branch:/);});
+  // CI runners intentionally do not contain the owner's laptop memory. Verify
+  // the four-store grounding wiring from tracked source rather than requiring
+  // private persisted data to exist in the test environment.
+  const server = readFileSync(resolve('scripts/machine-ai-web.mjs'), 'utf8');
+  assert.match(server, /\['WORKING',\s*pickMemory\('working'/);
+  assert.match(server, /\['PERSONAL',\s*pickMemory\('personal'/);
+  assert.match(server, /\['SEMANTIC',\s*pickMemory\('semantic'/);
+  assert.match(server, /\['EPISODIC',\s*pickMemory\('episodic'/);
+
+  const project = buildReadOnlyProjectContext('Review BharatShop checkout payment code');
+  assert.match(project, /LIVE READ-ONLY REPOSITORY STATE/);
+  assert.match(project, /Branch:/);
+  assert.ok(project.length <= 7000);
+});
