@@ -28,7 +28,7 @@ function categoryFor(title: string, specs: Specs): Exclude<ProductCategory, "All
     specs.qikinkProductName,
     specs.printMethod,
     specs.collection,
-  ].map(cleanText).join(" ").toLowerCase();
+  ].map(value => cleanText(value)).join(" ").toLowerCase();
 
   if (/hood/.test(text)) return "Hoodies";
   if (/varsity|jacket|outerwear|shell|overshirt/.test(text)) return "Outerwear";
@@ -106,7 +106,7 @@ export async function getLiveBharatDripProducts(): Promise<Product[]> {
     if (!images.length) return [];
 
     const title = cleanText(row.title, `BharatDrip Drop ${row.id}`);
-    const sizes = Array.isArray(specs.sizes) ? specs.sizes.map(cleanText).filter(Boolean) : [];
+    const sizes = Array.isArray(specs.sizes) ? specs.sizes.map(value => cleanText(value)).filter(Boolean) : [];
     const palette = hexPalette(specs);
     const description = cleanText(detail?.description || row.aiMarketingCopy, "Original BharatDrip made-to-order streetwear.");
     const material = cleanText(detail?.material);
