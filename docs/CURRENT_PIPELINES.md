@@ -468,3 +468,25 @@ configure the downstream Autom8AI workflow nodes for:
 2. Fashion Designer creative / UGC generation;
 3. renderer handoff (Higgsfield or another configured video worker);
 4. review-only result handling before any publication.
+
+
+## 19. Autom8AI downstream result handoff implemented — 2026-09-18
+
+Implemented on the repair branch:
+- `POST /api/automation/autom8ai/result` — authenticated review-only creative result callback.
+- `GET /api/automation/autom8ai/result?productId=<id>` — authenticated readback of recent Autom8AI result audit entries.
+- callback writes only `ai_activity_logs`; it does not update `products` or `product_images`.
+- completed results require an HTTPS asset URL or workflow URL.
+- accepted workflows: `marketing-video`, `fashion-creative`.
+- accepted states: `QUEUED`, `RENDERING`, `COMPLETED`, `FAILED`, `NEEDS_REVIEW`.
+- every outgoing Autom8AI job now includes a non-secret `resultContract` describing the callback path and payload.
+- `docs/AUTOM8AI_WORKFLOW_BUILD_PROMPT.md` contains the exact downstream workflow instructions.
+
+Current Higgsfield render hints were refreshed from read-only model discovery:
+- primary: `marketing_studio_video`
+- mode: `ugc`
+- preferred vertical aspect: `9:16`
+- primary duration: 12-15 seconds
+- fallback: `seedance_2_5` for flexible 4-30 second reference-driven video.
+
+No renderer generation was executed during this change and no credits were spent.
