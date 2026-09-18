@@ -17,12 +17,19 @@ test('BharatDrip storage failures remain non-fatal', () => {
   assert.match(source, /try\s*\{[\s\S]*localStorage\.setItem\(STORAGE_KEY, JSON\.stringify\(items\)\)[\s\S]*\}\s*catch/);
 });
 
-test('BharatDrip checkout cannot invent or clear a fake order', () => {
+test('BharatDrip checkout uses the real order gateway and requires verified payment for live drops', () => {
   assert.doesNotMatch(source, /Math\.random\(/);
   assert.doesNotMatch(source, /Order confirmed/);
-  assert.doesNotMatch(source, /setView\(["']success["']\)/);
-  assert.match(source, /no order was created and no payment was attempted/i);
+  assert.match(source, /\/api\/storefront\/orders/);
+  assert.match(source, /product\.liveProductId/);
+  assert.match(source, /PARTIAL_COD_RAZORPAY/);
+  assert.match(source, /PARTIAL_COD_CASHFREE/);
+  assert.match(source, /\/api\/payments\/razorpay\/verify/);
+  assert.match(source, /verified\.verified/);
+  assert.match(source, /setView\("success"\)/);
+  assert.match(source, /No order was created and no payment was attempted/i);
   assert.match(source, /Checkout is a preview only/i);
+  assert.match(source, /will not fall back to unprotected COD/i);
 });
 
 
