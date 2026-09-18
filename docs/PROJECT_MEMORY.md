@@ -492,3 +492,15 @@ Outgoing Autom8AI jobs include a non-secret result contract.
 The current Higgsfield target discovered through the connected read-only model catalog is `marketing_studio_video` with `ugc` mode for 12-15 second vertical social/product videos. `seedance_2_5` is the fallback for longer 4-30 second reference-driven video.
 
 No media generation or credit-spend action was performed while wiring this architecture.
+
+
+## Preserved local DB service recovery — 2026-09-19
+
+The Autom8AI candidate preflight reached the existing local DB configuration but received `ECONNREFUSED 127.0.0.1:55432`.
+
+That listener belongs to the preserved local PostgreSQL Docker container `bharatshop-dev-db`.
+
+A safe helper now exists:
+- `npm run db:local:ensure`
+
+It may start only the existing container. It cannot create/reset/reseed/remove/replace the database or volume. After it succeeds, `npm run autom8ai:candidates` should be rerun.
