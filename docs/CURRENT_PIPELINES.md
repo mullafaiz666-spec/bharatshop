@@ -250,3 +250,25 @@ Observed on the user's current laptop runtime:
 - Machine AI web UI: `http://127.0.0.1:3002`
 
 The command `npm run local:storefront:start` is not available in the user's current `bharatshop-harness` working tree because the earlier branch switch/pull did not complete. The repair branch contains that script, but the user's active working tree still has local changes and must not be force-overwritten.
+
+
+## 12. BharatDrip live-catalogue integration — 2026-09-18
+
+Implemented on `repair/reconcile-20260918`:
+- Added `src/lib/bharatdrip/live-products.ts`.
+- `/bharatdrip` now merges published database products whose brand/design origin is BharatDrip ahead of the static themed fallback catalogue.
+- Live products retain the BharatDrip theme and route through `/bharatdrip/products/live-<id>-<slug>`.
+- Live product images accept verified original/editorial fashion assets and normalize local fashion-art/photo URLs to same-origin paths.
+- Dynamic category mapping derives Tops/Hoodies/Outerwear/Bottoms/Accessories from garment metadata.
+- Live AI-created drops use real price, sizes, material/print metadata and do not fabricate customer ratings or reviews.
+- Existing static BharatDrip products remain available as a fallback if the database is unavailable.
+- Added `tests/bharatdrip-live-catalog.test.mjs`.
+- Fixed BharatDrip product-card and hero links so navigation remains under `/bharatdrip/products/... `.
+
+Verification state:
+- Existing integration tests passed in GitHub Actions before the typecheck step.
+- Earlier typecheck failures were traced to `Array.map(cleanText)` callback typing and have been corrected in commit `c04315e3645939cc7d8bd71bce6f627c08cf151f`.
+- Latest CI is running against the corrected branch head; do not call this production-verified until those checks and the user's local build/runtime check pass.
+
+Remaining commerce gap:
+- BharatDrip's themed cart must still be verified against the real backend order/checkout path for live database products before production deployment.
