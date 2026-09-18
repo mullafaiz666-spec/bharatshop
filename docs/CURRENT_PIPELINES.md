@@ -388,3 +388,11 @@ Read-only verification checks:
 - whether Autom8AI URL/token are configured, without displaying the token.
 
 The verifier never triggers the Autom8AI webhook, creates orders/payments/approvals, mutates the database, or deploys.
+
+Verification on activation-helper code head `e755819524e6e541217492b54ee195dc7a09169d`:
+- Creative Engine CI: success.
+- Agent Suite Build: success.
+- Integration tests: success.
+- TypeScript: success.
+- Production build: success.
+- Lint: success.
