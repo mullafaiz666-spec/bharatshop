@@ -173,3 +173,24 @@ BharatShop
 ```
 
 Keep paid ad activation and product publication outside the Autom8AI workflow unless a future explicitly approved architecture changes that policy.
+
+
+## Result callback contract
+
+Every creative webhook payload now includes a non-secret `resultContract` describing how a downstream Autom8AI workflow should return renderer results.
+
+Callback route:
+
+```
+POST /api/automation/autom8ai/result
+GET  /api/automation/autom8ai/result?productId=<id>
+```
+
+Autom8AI must authenticate the callback with the existing BharatShop automation token stored in Autom8AI credentials/secrets. The token value is never included in the outgoing webhook payload.
+
+The callback accepts:
+- workflow: `marketing-video` or `fashion-creative`
+- status: `QUEUED`, `RENDERING`, `COMPLETED`, `FAILED`, or `NEEDS_REVIEW`
+- HTTPS asset/workflow URLs only
+
+A completed result is recorded in `ai_activity_logs` as review-only evidence. The callback does not update `products`, does not add `product_images`, does not publish, and does not spend ad budget.
