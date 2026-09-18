@@ -288,6 +288,40 @@ async function openMemory() {
   } catch (e) { els.drawerContent.innerHTML = `<div class="panel-card"><p>${escapeHtml(e.message)}</p></div>`; }
 }
 
+async function openOperations() {
+  openDrawerShell('Operations cockpit', 'Run safe local controls and verification without arbitrary shell or production actions.');
+  try {
+    const data = await (await fetch('/api/operations', { cache:'no-store' })).json();
+    const jobs = data.jobs || [];
+    const latest = jobs.slice(0, 8);
+    els.drawerContent.innerHTML = `<div class="panel-card"><h3>Local runtimes</h3><p>Machine AI and Agency controls stay on this laptop.</p><div class="button-row"><button id="machineStatus" class="panel-button">Machine status</button><button id="machineStart" class="panel-button primary-action">Start Machine AI</button><button id="machineStop" class="panel-button danger">Stop Machine AI</button></div><div class="button-row"><button id="agencyStatus" class="panel-button">Agency status</button><button id="agencyStart" class="panel-button primary-action">Start Agency</button><button id="agencyStop" class="panel-button danger">Stop Agency</button></div></div><div class="panel-card"><h3>Verification</h3><p>Runs git diff check, TypeScript, integration tests, lint and production build with secret-bearing environment variables stripped.</p><div class="button-row"><button id="verifyLocal" class="panel-button primary-action">Run full verification</button><button id="engineerStatus" class="panel-button">Engineer status</button><button id="refreshOps" class="panel-button">Refresh</button></div></div><div class="panel-card"><h3>Machine Engineer</h3><p>Runs only on an isolated repair/fix/feature branch, refuses dirty starts and secrets, and cannot commit, push, merge or deploy.</p><textarea id="engineerTask" class="memory-input" rows="5" placeholder="Describe the BharatShop code task…"></textarea><div class="button-row"><button id="runEngineer" class="panel-button primary-action">Run engineering task</button></div></div><div class="panel-card"><h3>Recent jobs</h3>${latest.length ? latest.map(job => `<div class="task-output"><strong>${escapeHtml(job.kind || 'job')} · ${escapeHtml(job.status || 'unknown')}</strong>\n${escapeHtml(job.currentStep || job.task || job.finishedAt || job.createdAt || '')}</div>`).join('') : '<p>No cockpit jobs yet.</p>'}</div><div class="panel-card"><h3>Safety boundary</h3><p>No arbitrary shell, production database writes, payments, publishing or deployment are exposed here. Those remain separately approval-gated.</p></div>`;
+
+    async function run(action, payload = {}, needsApproval = false) {
+      if (needsApproval && !confirm('Run this local cockpit operation?')) return;
+      const response = await fetch('/api/operations', { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ action, approved: needsApproval, ...payload }) });
+      const result = await response.json();
+      if (!response.ok) { alert(result.error || 'Operation failed'); return; }
+      if (result.result?.output) alert(result.result.output);
+      await openOperations();
+    }
+
+    $('machineStatus').onclick = () => run('machine-status');
+    $('machineStart').onclick = () => run('machine-start', {}, true);
+    $('machineStop').onclick = () => run('machine-stop', {}, true);
+    $('agencyStatus').onclick = () => run('agency-status');
+    $('agencyStart').onclick = () => run('agency-start', {}, true);
+    $('agencyStop').onclick = () => run('agency-stop', {}, true);
+    $('verifyLocal').onclick = () => run('verify-local');
+    $('engineerStatus').onclick = () => run('engineer-status');
+    $('refreshOps').onclick = openOperations;
+    $('runEngineer').onclick = () => {
+      const task = $('engineerTask').value.trim();
+      if (!task) return alert('Enter an engineering task first.');
+      run('engineer-task', { task }, true);
+    };
+  } catch (e) { els.drawerContent.innerHTML = `<div class="panel-card"><p>${escapeHtml(e.message)}</p></div>`; }
+}
+
 async function openProject() {
   openDrawerShell('BharatShop project', 'Read-only project and runtime controls.');
   try {
@@ -301,7 +335,7 @@ async function openProject() {
 
 function closeMobileSidebar() { els.sidebar.classList.remove('open'); }
 
-document.querySelectorAll('[data-drawer]').forEach(btn => btn.onclick = () => ({ agents:openAgents, tasks:openTasks, memory:openMemory, project:openProject })[btn.dataset.drawer]?.());
+document.querySelectorAll('[data-drawer]').forEach(btn => btn.onclick = () => ({ agents:openAgents, tasks:openTasks, memory:openMemory, operations:openOperations, project:openProject })[btn.dataset.drawer]?.());
 els.closeDrawer.onclick = closeDrawer; els.drawerBackdrop.onclick = closeDrawer;
 els.mobileSidebar.onclick = () => els.sidebar.classList.toggle('open');
 els.newChat.onclick = createChat;
