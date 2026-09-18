@@ -20,6 +20,9 @@ test("Autom8AI adapter is explicit webhook orchestration with fail-closed config
   assert.ok(adapter.includes('path: "/api/automation/autom8ai/result"'));
   assert.ok(adapter.includes('auth: "Bearer BHARATSHOP_AUTOMATION_TOKEN"'));
   assert.ok(adapter.includes('mode: "review-only-callback"'));
+  assert.ok(adapter.includes('preferredModel: "marketing_studio_video"'));
+  assert.ok(adapter.includes('preferredMode: "ugc"'));
+  assert.ok(adapter.includes('fallbackModel: "seedance_2_5"'));
   assert.ok(adapter.includes('...(token ? { Authorization: `Bearer ${token}` } : {})'));
 });
 
