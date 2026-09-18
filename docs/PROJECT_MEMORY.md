@@ -477,3 +477,18 @@ Safe dry-run result:
 Autom8AI connectivity is therefore no longer a blocker.
 
 Next milestone is downstream workflow execution: take the received BharatShop event and route marketing/fashion requests to the configured creative/video renderer, with human review before publication.
+
+
+## Autom8AI downstream result handoff implemented — 2026-09-18
+
+The repair branch now has a review-only result channel from Autom8AI back into BharatShop:
+- `POST /api/automation/autom8ai/result`
+- `GET /api/automation/autom8ai/result?productId=<id>`
+
+The callback requires existing BharatShop automation authentication and records result evidence only in `ai_activity_logs`. It cannot mutate products, replace product images, auto-publish, spend ads, create orders, or create payments.
+
+Outgoing Autom8AI jobs include a non-secret result contract.
+
+The current Higgsfield target discovered through the connected read-only model catalog is `marketing_studio_video` with `ugc` mode for 12-15 second vertical social/product videos. `seedance_2_5` is the fallback for longer 4-30 second reference-driven video.
+
+No media generation or credit-spend action was performed while wiring this architecture.
