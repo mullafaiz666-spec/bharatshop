@@ -511,3 +511,10 @@ It may start only the existing container. It cannot create/reset/reseed/remove/r
 The preserved `bharatshop-dev-db` container is now reachable on `127.0.0.1:55432`. The remaining failure was password authentication for user `bharatshop`.
 
 The candidate preflight now performs a secret-safe local-only retry using the existing container's own `POSTGRES_*` environment values in memory. It does not print/persist those values and does not alter the database password, container, volume, or records.
+
+
+## Autom8AI eligibility diagnostics — 2026-09-19
+
+The Autom8AI preflight successfully connected to the preserved local database and returned zero eligible marketing/fashion candidates. This is now treated as an eligibility-data issue rather than a connectivity issue.
+
+The preflight now reports exact failed gates and near matches, read-only, so the next step can identify which existing products are closest to eligibility before any product mutation is considered.
