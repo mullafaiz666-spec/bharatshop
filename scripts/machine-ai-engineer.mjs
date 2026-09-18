@@ -118,7 +118,7 @@ function invokeHarness(prompt) {
   const result = spawnSync(process.execPath, [harnessScript, 'task', prompt], {
     cwd: root,
     stdio: 'inherit',
-    windowsHide: false,
+    windowsHide: true,
     env: safeChildEnv(),
     timeout: 45 * 60_000,
   });
