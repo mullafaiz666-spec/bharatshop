@@ -100,7 +100,8 @@
     "local:workstation:stop": "node scripts/local-workstation-manager.mjs stop",
     "autom8ai:configure:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/configure-autom8ai.ps1",
     "local:verify:readonly": "node scripts/local-readonly-verify.mjs",
-    "autom8ai:test:connection": "node scripts/autom8ai-connection-test.mjs"
+    "autom8ai:test:connection": "node scripts/autom8ai-connection-test.mjs",
+    "autom8ai:candidates": "node scripts/autom8ai-candidates.mjs"
   },
   "dependencies": {
     "@types/node": "22.19.15",
