@@ -30,11 +30,11 @@ export function autom8AiStatus() {
   const url = configuredUrl();
   const token = configuredToken();
   return {
-    configured: Boolean(url && token),
+    configured: Boolean(url),
     missing: [
       ...(!url ? ["AUTOM8AI_WEBHOOK_URL"] : []),
-      ...(!token ? ["AUTOM8AI_WEBHOOK_TOKEN"] : []),
     ],
+    tokenConfigured: Boolean(token),
     mode: "webhook-orchestration",
     renderer: "external-worker-selected-by-workflow",
     policy: {
@@ -80,11 +80,12 @@ export async function dispatchAutom8AiJob(input: Autom8AiJobInput) {
     creative: input.creative,
   };
 
+  const token = configuredToken();
   const response = await fetch(webhookUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${configuredToken()}`,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       "User-Agent": "BharatShop-Autom8AI/1.0",
     },
     body: JSON.stringify(payload),
