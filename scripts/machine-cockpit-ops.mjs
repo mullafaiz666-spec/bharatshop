@@ -15,6 +15,7 @@ const machineManager = join(root, 'scripts', 'machine-ai-manager.mjs');
 const agencyManager = join(root, 'scripts', 'agency-24x7-manager.mjs');
 const engineerScript = join(root, 'scripts', 'machine-ai-engineer.mjs');
 const localDbHealth = join(root, 'scripts', 'local-db-health.mjs');
+const storefrontManager = join(root, 'scripts', 'local-storefront-manager.mjs');
 const baseState = process.env.BHARATSHOP_MACHINE_AI_HOME || join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'BharatShop', 'MachineAI');
 const opsHome = join(baseState, 'CockpitOps');
 const jobsDir = join(opsHome, 'jobs');
@@ -31,6 +32,10 @@ const ACTIONS = Object.freeze({
   'agency-stop': { label: 'Stop Agency', kind: 'sync', approval: true, command: process.execPath, args: [agencyManager, 'stop'] },
   'engineer-status': { label: 'Machine Engineer status', kind: 'sync', approval: false, command: process.execPath, args: [engineerScript, '--status'] },
   'db-local-status': { label: 'Local database status', kind: 'sync', approval: false, command: process.execPath, args: [localDbHealth] },
+  'storefront-status': { label: 'Local storefront status', kind: 'sync', approval: false, command: process.execPath, args: [storefrontManager, 'status'] },
+  'storefront-start': { label: 'Start local storefront', kind: 'sync', approval: true, command: process.execPath, args: [storefrontManager, 'start'] },
+  'storefront-stop': { label: 'Stop local storefront', kind: 'sync', approval: true, command: process.execPath, args: [storefrontManager, 'stop'] },
+  'storefront-smoke': { label: 'Smoke-check local storefront', kind: 'sync', approval: false, command: process.execPath, args: [storefrontManager, 'smoke'] },
   'verify-local': { label: 'Run local verification', kind: 'verify', approval: false },
   'engineer-task': { label: 'Run Machine Engineer task', kind: 'engineer', approval: true },
 });
