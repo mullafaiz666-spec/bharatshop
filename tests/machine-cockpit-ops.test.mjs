@@ -10,6 +10,7 @@ test('cockpit exposes only the fixed local operation allowlist', () => {
     'agency-start',
     'agency-status',
     'agency-stop',
+    'db-local-status',
     'engineer-status',
     'engineer-task',
     'machine-start',
@@ -38,11 +39,22 @@ test('web server and UI wire the operations cockpit', () => {
   assert.match(ui, /openOperations/);
   assert.match(ui, /engineer-task/);
   assert.match(ui, /verify-local/);
+  assert.match(ui, /db-local-status/);
   assert.match(html, /data-drawer="operations"/);
 });
 
 test('cockpit source keeps production-risk operations out of its action map', () => {
   const source = readFileSync(resolve('scripts/machine-cockpit-ops.mjs'), 'utf8');
   const actionBlock = source.slice(source.indexOf('const ACTIONS'), source.indexOf('function safeChildEnv'));
-  assert.doesNotMatch(actionBlock, /deploy|publish|razorpay|cashfree|shopify|database/i);
+  assert.doesNotMatch(actionBlock, /deploy|publish|razorpay|cashfree|shopify|payment/i);
+});
+
+
+test('local database health is loopback-only and read-only', () => {
+  const source = readFileSync(resolve('scripts/local-db-health.mjs'), 'utf8');
+  assert.match(source, /127\.0\.0\.1/);
+  assert.match(source, /localhost/);
+  assert.match(source, /Refusing database health check for non-local host/);
+  assert.match(source, /select 1 as ok/i);
+  assert.doesNotMatch(source, /\b(?:insert|update|delete|drop|truncate|alter)\b/i);
 });
