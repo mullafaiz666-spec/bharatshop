@@ -38,7 +38,7 @@ function Upsert-DotEnvValue {
 
 Write-Host "BharatShop Autom8AI activation" -ForegroundColor Cyan
 Write-Host "This writes only to .env.local, which is ignored by Git."
-Write-Host "Your webhook token will not be printed."
+Write-Host "A webhook token is optional. If your Autom8AI webhook has no token, press Enter when asked."
 
 $url = (Read-Host "Autom8AI webhook URL").Trim()
 if (-not $url) { throw "Webhook URL is required." }
@@ -54,14 +54,13 @@ if ($uri.Scheme -ne "https" -and -not $localHost) {
   throw "Webhook URL must use HTTPS unless it targets localhost."
 }
 
-$secure = Read-Host "Autom8AI webhook token" -AsSecureString
+$secure = Read-Host "Autom8AI webhook token (optional; press Enter if none)" -AsSecureString
 $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
 try {
   $token = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
 } finally {
   [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
 }
-if ([string]::IsNullOrWhiteSpace($token)) { throw "Webhook token is required." }
 
 $lines = @()
 if (Test-Path -LiteralPath $EnvFile) {
@@ -72,7 +71,11 @@ if (Test-Path -LiteralPath $EnvFile) {
 }
 
 $lines = @(Upsert-DotEnvValue -Lines $lines -Name "AUTOM8AI_WEBHOOK_URL" -Value $url)
-$lines = @(Upsert-DotEnvValue -Lines $lines -Name "AUTOM8AI_WEBHOOK_TOKEN" -Value $token)
+if (-not [string]::IsNullOrWhiteSpace($token)) {
+  $lines = @(Upsert-DotEnvValue -Lines $lines -Name "AUTOM8AI_WEBHOOK_TOKEN" -Value $token)
+} else {
+  $lines = @($lines | Where-Object { $_ -notmatch "^[ ]*AUTOM8AI_WEBHOOK_TOKEN[ ]*=" })
+}
 
 $encoding = New-Object System.Text.UTF8Encoding($false)
 [IO.File]::WriteAllLines($EnvFile, $lines, $encoding)
@@ -84,6 +87,6 @@ Write-Host ""
 Write-Host "Autom8AI configuration saved safely." -ForegroundColor Green
 Write-Host "File: $EnvFile"
 Write-Host "Webhook host: $($uri.Host)"
-Write-Host "Token: configured (hidden)"
+Write-Host ("Token: " + ($(if ([string]::IsNullOrWhiteSpace($token)) { "not used" } else { "configured (hidden)" })))
 Write-Host ""
 Write-Host "Next: restart the BharatShop storefront so .env.local is reloaded."
