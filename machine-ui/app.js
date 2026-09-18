@@ -311,7 +311,8 @@ async function openOperations() {
     $('agencyStatus').onclick = () => run('agency-status');
     $('agencyStart').onclick = () => run('agency-start', {}, true);
     $('agencyStop').onclick = () => run('agency-stop', {}, true);
-    $('verifyLocal').onclick = () => run('verify-local');\n    $('dbLocalStatus').onclick = () => run('db-local-status');
+    $('verifyLocal').onclick = () => run('verify-local');
+    $('dbLocalStatus').onclick = () => run('db-local-status');
     $('engineerStatus').onclick = () => run('engineer-status');
     $('refreshOps').onclick = openOperations;
     $('runEngineer').onclick = () => {
