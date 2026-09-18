@@ -324,9 +324,9 @@ Marketing Cockpit / Fashion Designer
   -> existing BharatShop publication/ad connectors
 ```
 
-Required environment variables:
-- `AUTOM8AI_WEBHOOK_URL`
-- `AUTOM8AI_WEBHOOK_TOKEN`
+Environment:
+- `AUTOM8AI_WEBHOOK_URL` — required.
+- `AUTOM8AI_WEBHOOK_TOKEN` — optional; the current Autom8AI Generic Webhook Trigger can use URL-only configuration.
 
 Marketing:
 - Marketing cockpit now exposes **Autom8AI video**.
@@ -396,3 +396,19 @@ Verification on activation-helper code head `e755819524e6e541217492b54ee195dc7a0
 - TypeScript: success.
 - Production build: success.
 - Lint: success.
+
+
+## 16. Autom8AI Generic Webhook credential correction — 2026-09-18
+
+Observed directly in the Autom8AI workflow UI:
+- Generic Webhook Trigger exposes an HTTPS webhook URL.
+- No separate webhook token field is shown.
+- "Wait for a completion event" is optional and should remain OFF for the current BharatShop fire-and-review workflow.
+
+BharatShop was corrected accordingly:
+- webhook URL is sufficient for Autom8AI configured status;
+- bearer token is optional;
+- Authorization header is sent only when an optional token is configured;
+- Windows configurator accepts Enter for no token;
+- read-only verifier accepts URL-only configuration;
+- Marketing connection health requires only `AUTOM8AI_WEBHOOK_URL`.
