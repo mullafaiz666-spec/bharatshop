@@ -97,7 +97,9 @@
     "machine:engineer:status": "node scripts/machine-ai-engineer.mjs --status",
     "local:workstation:start": "node scripts/local-workstation-manager.mjs start",
     "local:workstation:status": "node scripts/local-workstation-manager.mjs status",
-    "local:workstation:stop": "node scripts/local-workstation-manager.mjs stop"
+    "local:workstation:stop": "node scripts/local-workstation-manager.mjs stop",
+    "autom8ai:configure:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/configure-autom8ai.ps1",
+    "local:verify:readonly": "node scripts/local-readonly-verify.mjs"
   },
   "dependencies": {
     "@types/node": "22.19.15",
