@@ -412,3 +412,26 @@ BharatShop was corrected accordingly:
 - Windows configurator accepts Enter for no token;
 - read-only verifier accepts URL-only configuration;
 - Marketing connection health requires only `AUTOM8AI_WEBHOOK_URL`.
+
+
+## 17. Local workstation + Autom8AI verified — 2026-09-18
+
+Observed on the user's laptop after restart from the repair worktree:
+- BharatShop storefront: READY on `http://127.0.0.1:3001`
+- BharatDrip: HTTP 200
+- Fashion Studio: reachable and correctly redirects unauthenticated access to `/admin-login`
+- Machine AI: READY on `http://127.0.0.1:3002`
+- Ollama: HTTP 200
+- Qwen shim: HTTP 200
+- Machine AI supervisor: `LOCAL_READY`
+- 264 agents discovered
+- Autom8AI: configured=true
+- Autom8AI webhook URL present and valid
+- Autom8AI token: not used for the current generic webhook configuration
+
+The read-only verifier reported `runtimeOk: true`.
+
+No webhook URL or other secret value is stored in this document.
+
+Next verification target:
+send one explicit non-production test event through the configured Autom8AI generic webhook and confirm the workflow receives the payload, without enabling ad spend or auto-publishing.
