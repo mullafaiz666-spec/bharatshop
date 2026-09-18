@@ -137,6 +137,74 @@ function summary(row) {
   };
 }
 
+function normalized(value) {
+  return String(value || "").trim();
+}
+
+function evaluateMarketing(row) {
+  const failures = [];
+  if (normalized(row.status) !== "Published") failures.push("NOT_PUBLISHED");
+  if (!(safeNumber(row.net_profit_inr) > 0)) failures.push("NON_POSITIVE_PROFIT");
+  return failures;
+}
+
+function evaluateFashion(row) {
+  const failures = [];
+  const brand = normalized(row.brand).toLowerCase();
+  const supplier = normalized(row.supplier_name).toLowerCase();
+  const productionSupplier = normalized(row.production_supplier).toLowerCase();
+  const inventoryMode = normalized(row.inventory_mode).toUpperCase();
+  const ipPolicy = normalized(row.ip_policy).toUpperCase();
+
+  if (!["bharatdrip", "bharatshop studio"].includes(brand)) failures.push("WRONG_BRAND");
+  if (supplier !== "qikink") failures.push("WRONG_SUPPLIER");
+  if (!(safeNumber(row.net_profit_inr) > 0)) failures.push("NON_POSITIVE_PROFIT");
+  if (!(safeNumber(row.custom_margin_pct) >= 18)) failures.push("MARGIN_BELOW_18");
+  if (productionSupplier !== "qikink") failures.push("PRODUCTION_SUPPLIER_NOT_QIKINK");
+  if (inventoryMode !== "MADE_TO_ORDER") failures.push("NOT_MADE_TO_ORDER");
+  if (!ipPolicy.includes("ORIGINAL")) failures.push("ORIGINAL_ART_POLICY_MISSING");
+  return failures;
+}
+
+function buildDiagnostics(rows) {
+  const unique = [...new Map(rows.map((row) => [Number(row.id), row])).values()];
+  const marketingReasons = {};
+  const fashionReasons = {};
+
+  const marketingNearMatches = unique
+    .map((row) => {
+      const failures = evaluateMarketing(row);
+      for (const reason of failures) marketingReasons[reason] = (marketingReasons[reason] || 0) + 1;
+      return { ...summary(row), failedGates: failures };
+    })
+    .filter((row) => row.failedGates.length > 0)
+    .sort((a, b) => a.failedGates.length - b.failedGates.length || (b.netProfitInr || 0) - (a.netProfitInr || 0))
+    .slice(0, 10);
+
+  const fashionNearMatches = unique
+    .map((row) => {
+      const failures = evaluateFashion(row);
+      for (const reason of failures) fashionReasons[reason] = (fashionReasons[reason] || 0) + 1;
+      return { ...summary(row), failedGates: failures };
+    })
+    .filter((row) => row.failedGates.length > 0)
+    .sort((a, b) => a.failedGates.length - b.failedGates.length || (b.netProfitInr || 0) - (a.netProfitInr || 0))
+    .slice(0, 10);
+
+  return {
+    totalProducts: unique.length,
+    publishedProducts: unique.filter((row) => normalized(row.status) === "Published").length,
+    positiveProfitProducts: unique.filter((row) => safeNumber(row.net_profit_inr) > 0).length,
+    publishedPositiveProfitProducts: unique.filter((row) =>
+      normalized(row.status) === "Published" && safeNumber(row.net_profit_inr) > 0
+    ).length,
+    marketingFailureCounts: marketingReasons,
+    fashionFailureCounts: fashionReasons,
+    marketingNearMatches,
+    fashionNearMatches,
+  };
+}
+
 async function queryCandidates(connectionString, local) {
   const pool = createPool(connectionString, local);
   try {
@@ -171,8 +239,19 @@ async function queryCandidates(connectionString, local) {
        LIMIT 10
     `);
 
+    const diagnostics = await pool.query(`
+      SELECT p.id, p.title, p.brand, p.supplier_name, p.status, p.selling_price_inr,
+             p.net_profit_inr, p.custom_margin_pct, p.image_url,
+             COALESCE(pd.specifications_json ->> 'productionSupplier', '') AS production_supplier,
+             COALESCE(pd.specifications_json ->> 'inventoryMode', '') AS inventory_mode,
+             COALESCE(pd.specifications_json ->> 'ipPolicy', '') AS ip_policy
+        FROM products p
+        LEFT JOIN product_details pd ON pd.product_id = p.id
+       ORDER BY p.id DESC
+    `);
+
     await pool.query("ROLLBACK");
-    return { marketing, fashion };
+    return { marketing, fashion, diagnostics };
   } catch (error) {
     try { await pool.query("ROLLBACK"); } catch {}
     throw error;
@@ -200,7 +279,8 @@ async function run() {
     result = await queryCandidates(selectedDatabase.value, true);
   }
 
-  const { marketing, fashion } = result;
+  const { marketing, fashion, diagnostics } = result;
+  const eligibilityDiagnostics = buildDiagnostics(diagnostics.rows);
   console.log(JSON.stringify({
     ok: true,
     mode: "AUTOM8AI_READ_ONLY_CANDIDATE_PREFLIGHT",
@@ -214,6 +294,7 @@ async function run() {
     changedDatabasePassword: false,
     marketingVideoCandidates: marketing.rows.map(summary),
     fashionCreativeCandidates: fashion.rows.map(summary),
+    eligibilityDiagnostics,
     next: fashion.rowCount
       ? `Use productId ${fashion.rows[0].id} for the first fashion-creative workflow test.`
       : marketing.rowCount
