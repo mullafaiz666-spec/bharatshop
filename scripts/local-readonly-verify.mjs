@@ -54,7 +54,7 @@ function autom8Configuration() {
     } catch {}
   }
   return {
-    configured: Boolean(rawUrl && tokenPresent && urlValid),
+    configured: Boolean(rawUrl && urlValid),
     webhookUrlPresent: Boolean(rawUrl),
     webhookUrlValid: urlValid,
     webhookHost,
