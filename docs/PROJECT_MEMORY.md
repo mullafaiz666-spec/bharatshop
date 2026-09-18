@@ -378,3 +378,35 @@ Latest repair-branch changes for BharatDrip live products, protected checkout, l
 - Agent Suite Build
 
 This is branch-level verification, not yet local-laptop or production verification.
+
+
+## Autom8AI creative orchestration — 2026-09-18
+
+Autom8AI has been added as a review-only orchestration layer for both BharatShop Marketing and the Fashion Designer.
+
+Files:
+- `src/lib/autom8ai.ts`
+- `src/app/api/automation/autom8ai/route.ts`
+- `tests/autom8ai-integration.test.mjs`
+- `docs/AUTOM8AI_CREATIVE_ORCHESTRATION.md`
+- Marketing and Fashion cockpit UI integrations
+- `.env.example` Autom8AI configuration placeholders
+
+Live execution requires:
+- `AUTOM8AI_WEBHOOK_URL`
+- `AUTOM8AI_WEBHOOK_TOKEN`
+
+Autom8AI does not replace Higgsfield or another renderer. It orchestrates the job and can call the configured renderer.
+
+Safety boundaries:
+- no automatic product publication
+- no ad spend
+- no pricing/supplier mutation
+- no bypass of Fashion IP/profitability/Qikink gates
+- no read-only connection probe that triggers a workflow
+- webhook secret remains server-side
+
+The Autom8AI code head passed integration tests, TypeScript, production build, lint, Creative Engine CI and Agent Suite Build.
+
+Next activation step:
+configure the Autom8AI webhook URL/token locally (without committing them), then send one explicit test marketing-video or fashion-creative job and verify the remote job ID/output.
