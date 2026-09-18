@@ -94,7 +94,10 @@
     "openmontage:plan": "node scripts/openmontage-creative.mjs plan",
     "openmontage:backlot": "node scripts/openmontage-creative.mjs backlot",
     "machine:engineer": "node scripts/machine-ai-engineer.mjs",
-    "machine:engineer:status": "node scripts/machine-ai-engineer.mjs --status"
+    "machine:engineer:status": "node scripts/machine-ai-engineer.mjs --status",
+    "local:workstation:start": "node scripts/local-workstation-manager.mjs start",
+    "local:workstation:status": "node scripts/local-workstation-manager.mjs status",
+    "local:workstation:stop": "node scripts/local-workstation-manager.mjs stop"
   },
   "dependencies": {
     "@types/node": "22.19.15",
