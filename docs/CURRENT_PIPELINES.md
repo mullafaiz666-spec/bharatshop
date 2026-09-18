@@ -435,3 +435,36 @@ No webhook URL or other secret value is stored in this document.
 
 Next verification target:
 send one explicit non-production test event through the configured Autom8AI generic webhook and confirm the workflow receives the payload, without enabling ad spend or auto-publishing.
+
+
+## 18. Autom8AI live webhook handshake verified — 2026-09-18
+
+The user's local BharatShop repair worktree successfully triggered the active Autom8AI Generic Webhook workflow.
+
+Observed dry-run result:
+- HTTP status: 200
+- response.received: true
+- response.fired: 1
+- tokenUsed: false
+- webhook host: www.autom8ai.io
+
+The connection test carried explicit safety flags:
+- autoPublish=false
+- adSpend=false
+- productMutation=false
+- createsOrders=false
+- createsPayments=false
+- createsApprovals=false
+- mutatesDatabase=false
+- deploys=false
+- requiresHumanReview=true
+
+This verifies:
+BharatShop local runtime -> configured Autom8AI webhook -> active Autom8AI workflow trigger.
+
+Next work:
+configure the downstream Autom8AI workflow nodes for:
+1. marketing short-video generation;
+2. Fashion Designer creative / UGC generation;
+3. renderer handoff (Higgsfield or another configured video worker);
+4. review-only result handling before any publication.
