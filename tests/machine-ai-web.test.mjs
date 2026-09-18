@@ -14,11 +14,11 @@ test('machine web UI defaults background/chat routing safely', () => {
 });
 
 test('machine web UI accepts only loopback host/origin on default port', () => {
-  assert.equal(isLoopbackHost('127.0.0.1:3001'), true);
-  assert.equal(isLoopbackHost('localhost:3001'), true);
-  assert.equal(isLoopbackHost('192.168.1.20:3001'), false);
-  assert.equal(isAllowedOrigin('http://127.0.0.1:3001'), true);
-  assert.equal(isAllowedOrigin('http://localhost:3001'), true);
+  assert.equal(isLoopbackHost('127.0.0.1:3002'), true);
+  assert.equal(isLoopbackHost('localhost:3002'), true);
+  assert.equal(isLoopbackHost('192.168.1.20:3002'), false);
+  assert.equal(isAllowedOrigin('http://127.0.0.1:3002'), true);
+  assert.equal(isAllowedOrigin('http://localhost:3002'), true);
   assert.equal(isAllowedOrigin('https://example.com'), false);
 });
 
