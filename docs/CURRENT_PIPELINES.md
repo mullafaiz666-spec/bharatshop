@@ -530,3 +530,22 @@ Safety behavior:
 - does not mutate application records.
 
 After the service is available, rerun `npm run autom8ai:candidates`.
+
+
+## 22. Local DB credential alignment fallback — 2026-09-19
+
+Observed after Docker Desktop recovery:
+- `bharatshop-dev-db` became reachable on `127.0.0.1:55432`.
+- No container/database reset, removal, reseed, or application-data mutation occurred.
+- The existing harness DB URL then failed with PostgreSQL password authentication for user `bharatshop`.
+
+The Autom8AI candidate preflight was updated to resolve this without changing the database password:
+- first tries the configured repair/harness DB URL;
+- only when the target is exactly local `127.0.0.1|localhost:55432` and PostgreSQL reports an auth failure, it reads the preserved `bharatshop-dev-db` container's `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB` values in memory via `docker inspect`;
+- retries the same read-only candidate queries using those values;
+- never prints or persists the password;
+- never changes the database password;
+- remains `BEGIN READ ONLY` + `ROLLBACK`;
+- does not trigger Autom8AI or a renderer.
+
+This keeps the preserved database authoritative and avoids secret copying or credential mutation.
