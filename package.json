@@ -87,7 +87,9 @@
     "openmontage:status": "node scripts/openmontage-creative.mjs status",
     "openmontage:bootstrap": "node scripts/openmontage-creative.mjs bootstrap",
     "openmontage:plan": "node scripts/openmontage-creative.mjs plan",
-    "openmontage:backlot": "node scripts/openmontage-creative.mjs backlot"
+    "openmontage:backlot": "node scripts/openmontage-creative.mjs backlot",
+    "machine:engineer": "node scripts/machine-ai-engineer.mjs",
+    "machine:engineer:status": "node scripts/machine-ai-engineer.mjs --status"
   },
   "dependencies": {
     "@types/node": "22.19.15",
@@ -112,4 +114,4 @@
     "tailwindcss": "4.1.17",
     "typescript": "5.9.3"
   }
-}
+}\n
