@@ -549,3 +549,37 @@ The Autom8AI candidate preflight was updated to resolve this without changing th
 - does not trigger Autom8AI or a renderer.
 
 This keeps the preserved database authoritative and avoids secret copying or credential mutation.
+
+
+## 23. Autom8AI eligibility diagnostics — 2026-09-19
+
+The local candidate preflight is now verified to connect safely to the preserved `bharatshop-dev-db` using the existing container credentials in memory:
+- no secret values printed;
+- no secret values persisted;
+- no password changes;
+- no DB mutation;
+- no Autom8AI webhook call;
+- no renderer execution or credit use.
+
+Latest observed candidate result:
+- marketing video candidates: 0
+- fashion creative candidates: 0
+
+The preflight now emits read-only eligibility diagnostics when products do not pass:
+- total products
+- Published count
+- positive-profit count
+- Published + positive-profit count
+- marketing failure counts and near matches
+- fashion failure counts and near matches
+
+Fashion diagnostic gates mirror the live workflow:
+- BharatDrip/BharatShop Studio brand
+- Qikink supplier
+- positive profit
+- margin >= 18%
+- productionSupplier=qikink
+- inventoryMode=MADE_TO_ORDER
+- ipPolicy contains ORIGINAL
+
+No product fields are altered by this diagnostic.
