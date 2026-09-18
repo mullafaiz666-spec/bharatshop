@@ -12,9 +12,13 @@ test("Autom8AI candidate preflight is read-only and credit-free", () => {
   assert.ok(source.includes('startsRenderer: false'));
   assert.ok(source.includes('consumesCredits: false'));
   assert.ok(source.includes('mutatesDatabase: false'));
+  assert.ok(source.includes('existing-bharatshop-harness-env'));
+  assert.ok(source.includes('secretValuesPrinted: false'));
+  assert.ok(source.includes('parseDotEnv(readFileSync(file))'));
   assert.doesNotMatch(source, /\bINSERT\b/i);
   assert.doesNotMatch(source, /\bUPDATE\b/i);
   assert.doesNotMatch(source, /\bDELETE\b/i);
+  assert.doesNotMatch(source, /console\.(log|error).*rawDatabaseUrl/);
 });
 
 test("Autom8AI candidate preflight mirrors key marketing and fashion gates", () => {
