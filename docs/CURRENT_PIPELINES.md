@@ -11,7 +11,7 @@ Status: **LOCAL_READY verified**
 Pipeline:
 
 ```
-Machine AI UI :3001
+Machine AI UI :3002
   -> machine-ai-web-manager.mjs
   -> machine-ai-web.mjs
   -> Machine AI supervisor
@@ -48,16 +48,16 @@ Pipeline:
 ```
 local-storefront-manager.mjs
   -> Next.js production build
-  -> 127.0.0.1:3000
+  -> 127.0.0.1:3001
   -> BharatShop routes
   -> admin/dashboard routes
   -> BharatDrip storefront
 ```
 
 Local URL:
-- BharatShop root: `http://127.0.0.1:3000`
-- BharatDrip: `http://127.0.0.1:3000/bharatdrip`
-- Fashion Designer cockpit: `http://127.0.0.1:3000/dashboard/fashion`
+- BharatShop root: `http://127.0.0.1:3001`
+- BharatDrip: `http://127.0.0.1:3001/bharatdrip`
+- Fashion Designer cockpit: `http://127.0.0.1:3001/dashboard/fashion`
 
 The storefront manager launches its Windows process with `windowsHide: true`.
 
@@ -184,8 +184,8 @@ Current direction:
 - Ollama loaded only as needed by the local runtime.
 - Avoid duplicate 24x7 supervisors and duplicate startup launchers.
 - Machine AI and BharatShop storefront are separate local processes:
-  - AI UI: port 3001
-  - BharatShop app: port 3000
+  - AI UI: port 3002
+  - BharatShop app: port 3001
 
 ## 8. Git / reconciliation state
 
@@ -241,3 +241,12 @@ Whenever a major BharatShop change is made, update this file with:
 - unresolved gap,
 - next action,
 - date.
+
+
+## 11. Local live-port correction — 2026-09-18
+
+Observed on the user's current laptop runtime:
+- BharatShop / BharatDrip storefront: `http://127.0.0.1:3001`
+- Machine AI web UI: `http://127.0.0.1:3002`
+
+The command `npm run local:storefront:start` is not available in the user's current `bharatshop-harness` working tree because the earlier branch switch/pull did not complete. The repair branch contains that script, but the user's active working tree still has local changes and must not be force-overwritten.
