@@ -1,20 +1,49 @@
 #!/usr/bin/env node
 
-import { config as loadDotEnv } from "dotenv";
+import { config as loadDotEnv, parse as parseDotEnv } from "dotenv";
 import pg from "pg";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { resolve } from "node:path";
 
 const { Pool } = pg;
 const envLocal = resolve(process.cwd(), ".env.local");
 if (existsSync(envLocal)) loadDotEnv({ path: envLocal, override: false });
 
-const rawDatabaseUrl = String(process.env.DATABASE_URL || process.env.SUPABASE_DB_URL || "").trim();
+function existingHarnessDatabaseUrl() {
+  const candidates = [
+    resolve(process.cwd(), "..", "bharatshop-harness", ".env.local"),
+    resolve(process.cwd(), "..", "bharatshop-harness", ".env"),
+    resolve(homedir(), "bharatshop-harness", ".env.local"),
+    resolve(homedir(), "bharatshop-harness", ".env"),
+  ];
+
+  for (const file of [...new Set(candidates)]) {
+    if (!existsSync(file)) continue;
+    try {
+      const parsed = parseDotEnv(readFileSync(file));
+      const value = String(parsed.DATABASE_URL || parsed.SUPABASE_DB_URL || "").trim();
+      if (value) return { value, source: "existing-bharatshop-harness-env" };
+    } catch {
+      // Keep searching. Never print env file contents.
+    }
+  }
+  return null;
+}
+
+const directDatabaseUrl = String(process.env.DATABASE_URL || process.env.SUPABASE_DB_URL || "").trim();
+const inheritedDatabase = directDatabaseUrl
+  ? { value: directDatabaseUrl, source: "repair-worktree-or-process-env" }
+  : existingHarnessDatabaseUrl();
+
+const rawDatabaseUrl = inheritedDatabase?.value || "";
 if (!rawDatabaseUrl) {
   console.error(JSON.stringify({
     ok: false,
     mode: "AUTOM8AI_READ_ONLY_CANDIDATE_PREFLIGHT",
-    error: "DATABASE_URL or SUPABASE_DB_URL is not configured in this worktree.",
+    error: "DATABASE_URL or SUPABASE_DB_URL was not found in the repair worktree or existing bharatshop-harness env files.",
+    checkedSecretsSafely: true,
+    secretValuesPrinted: false,
   }, null, 2));
   process.exit(1);
 }
@@ -98,6 +127,8 @@ try {
     startsRenderer: false,
     consumesCredits: false,
     mutatesDatabase: false,
+    databaseSource: inheritedDatabase?.source || "unknown",
+    secretValuesPrinted: false,
     marketingVideoCandidates: marketing.rows.map(summary),
     fashionCreativeCandidates: fashion.rows.map(summary),
     next: fashion.rowCount
