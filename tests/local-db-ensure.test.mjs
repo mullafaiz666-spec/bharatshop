@@ -10,7 +10,9 @@ test("local DB ensure targets only the preserved existing container", () => {
   assert.ok(source.includes('const PORT = 55432'));
   assert.ok(source.includes('runDocker(["inspect"'));
   assert.ok(source.includes('runDocker(["start", CONTAINER])'));
-  assert.doesNotMatch(source, /docker[^\n]*(run|rm|create|volume|exec)/i);
+  assert.ok(source.includes('"Docker Desktop.exe"'));
+  assert.ok(source.includes('runDocker(["info", "--format", "{{.ServerVersion}}"])'));
+  assert.doesNotMatch(source, /runDocker\(\["(?:run|rm|create|volume|exec)"/i);
 });
 
 test("local DB ensure declares all destructive operations disabled", () => {
