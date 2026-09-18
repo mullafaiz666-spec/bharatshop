@@ -71,7 +71,8 @@ if (Test-Path -LiteralPath $EnvFile) {
 }
 
 $lines = @(Upsert-DotEnvValue -Lines $lines -Name "AUTOM8AI_WEBHOOK_URL" -Value $url)
-if (-not [string]::IsNullOrWhiteSpace($token)) {
+$tokenUsed = -not [string]::IsNullOrWhiteSpace($token)
+if ($tokenUsed) {
   $lines = @(Upsert-DotEnvValue -Lines $lines -Name "AUTOM8AI_WEBHOOK_TOKEN" -Value $token)
 } else {
   $lines = @($lines | Where-Object { $_ -notmatch "^[ ]*AUTOM8AI_WEBHOOK_TOKEN[ ]*=" })
@@ -87,6 +88,6 @@ Write-Host ""
 Write-Host "Autom8AI configuration saved safely." -ForegroundColor Green
 Write-Host "File: $EnvFile"
 Write-Host "Webhook host: $($uri.Host)"
-Write-Host ("Token: " + ($(if ([string]::IsNullOrWhiteSpace($token)) { "not used" } else { "configured (hidden)" })))
+Write-Host ("Token: " + ($(if ($tokenUsed) { "configured (hidden)" } else { "not used" })))
 Write-Host ""
 Write-Host "Next: restart the BharatShop storefront so .env.local is reloaded."
