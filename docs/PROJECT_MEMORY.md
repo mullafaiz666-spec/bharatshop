@@ -423,3 +423,5 @@ Commands:
 The token is never printed by the helper. Existing `.env.local` is backed up before the two Autom8AI keys are updated.
 
 Live Autom8AI execution still requires the real webhook URL and token from the user's Autom8AI workflow.
+
+The activation-helper code head `e755819524e6e541217492b54ee195dc7a09169d` passed Creative Engine CI and the full Agent Suite Build, including integration tests, TypeScript, production build, and lint.
