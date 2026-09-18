@@ -7,7 +7,7 @@
     "build": "next build",
     "creative": "node scripts/bharatshop-creative.mjs",
     "db:push": "node scripts/safe-db-push.mjs",
-    "db:check": "drizzle-kit check",
+    "db:check": "drizzle-kit check",\n    "db:local:health": "node scripts/local-db-health.mjs",
     "db:migration-preflight": "node scripts/database-migration-preflight.mjs",
     "db:verify-supabase": "node scripts/verify-supabase-copy.mjs",
     "launch:check": "node scripts/native-launch-readiness.mjs",
