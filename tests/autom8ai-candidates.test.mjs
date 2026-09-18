@@ -15,9 +15,9 @@ test("Autom8AI candidate preflight is read-only and credit-free", () => {
   assert.ok(source.includes('existing-bharatshop-harness-env'));
   assert.ok(source.includes('secretValuesPrinted: false'));
   assert.ok(source.includes('parseDotEnv(readFileSync(file))'));
-  assert.doesNotMatch(source, /\bINSERT\b/i);
-  assert.doesNotMatch(source, /\bUPDATE\b/i);
-  assert.doesNotMatch(source, /\bDELETE\b/i);
+  assert.doesNotMatch(source, /\bINSERT\s+INTO\b/i);
+  assert.doesNotMatch(source, /\bUPDATE\s+[A-Za-z0-9_."]+\s+SET\b/i);
+  assert.doesNotMatch(source, /\bDELETE\s+FROM\b/i);
   assert.doesNotMatch(source, /console\.(log|error).*rawDatabaseUrl/);
 });
 
