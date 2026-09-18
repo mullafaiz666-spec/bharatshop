@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, ArrowUpRight, ChevronDown, Search, Shield, Sparkle, Star, Truck, X } from "@/components/bharatdrip/icons";
+import { ArrowRight, ArrowUpRight, ChevronDown, Search, Shield, Sparkle, Truck, X } from "@/components/bharatdrip/icons";
 import { ProductCard } from "@/components/bharatdrip/product-card";
 import { SiteHeader } from "@/components/bharatdrip/site-header";
 import { products as staticProducts, type Product, type ProductCategory } from "@/lib/bharatdrip/products";
@@ -56,7 +56,7 @@ export function Storefront({ initialProducts = staticProducts }: { initialProduc
           <div className="hero-footnote"><span>01 — 04</span><span className="hero-footnote-line" /><span>New season / chapter one</span></div>
         </div>
         <div className="hero-visual">
-          <div className="hero-image-frame"><img src={staticProducts[0].images[0]} alt="Model wearing the Midnight Club Varsity" /><div className="hero-image-shade" /><div className="hero-stamp">BD<br /><span>01</span></div><div className="hero-caption"><span>Featured piece</span><strong>Midnight Club<br />Varsity</strong><Link href={`/products/${staticProducts[0].slug}`} aria-label="View Midnight Club Varsity"><ArrowUpRight size={18} /></Link></div></div>
+          <div className="hero-image-frame"><img src={staticProducts[0].images[0]} alt="Model wearing the Midnight Club Varsity" /><div className="hero-image-shade" /><div className="hero-stamp">BD<br /><span>01</span></div><div className="hero-caption"><span>Featured piece</span><strong>Midnight Club<br />Varsity</strong><Link href={`/bharatdrip/products/${staticProducts[0].slug}`} aria-label="View Midnight Club Varsity"><ArrowUpRight size={18} /></Link></div></div>
           <div className="hero-orbit orbit-one" /><div className="hero-orbit orbit-two" />
         </div>
       </section>
