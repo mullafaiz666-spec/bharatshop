@@ -27,12 +27,16 @@ It cannot directly:
 
 Returned assets remain subject to BharatShop review and existing approval gates.
 
-## Required environment variables
+## Environment variables
 
 ```
 AUTOM8AI_WEBHOOK_URL=
 AUTOM8AI_WEBHOOK_TOKEN=
 ```
+
+`AUTOM8AI_WEBHOOK_URL` is required.
+
+`AUTOM8AI_WEBHOOK_TOKEN` is optional. The current Autom8AI Generic Webhook Trigger exposes a URL directly and does not require a separate token in the configuration screen. If a future workflow/provider adds bearer-token protection, set the optional token and BharatShop will send it.
 
 Do not commit real secret values.
 
@@ -110,12 +114,19 @@ Fashion jobs use event:
 bharatshop.fashion.creative.requested
 ```
 
-The request includes:
+The request always includes:
+
+```
+Content-Type: application/json
+```
+
+If `AUTOM8AI_WEBHOOK_TOKEN` is configured, BharatShop also sends:
 
 ```
 Authorization: Bearer <AUTOM8AI_WEBHOOK_TOKEN>
-Content-Type: application/json
 ```
+
+For the current Autom8AI Generic Webhook Trigger, URL-only configuration is supported.
 
 ## Optional webhook response fields
 
