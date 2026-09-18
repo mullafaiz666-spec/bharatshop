@@ -126,12 +126,11 @@ Primary code:
 Product detail route:
 `/bharatdrip/products/[slug]`
 
-Current important gap:
-The dedicated BharatDrip storefront still reads static product data from `src/lib/bharatdrip/products.ts`.
-AI Fashion Designer products are written into the database/general store pipeline but are not yet automatically surfaced in the dedicated BharatDrip themed storefront.
+Current state:
+The dedicated BharatDrip storefront now loads Published database products for brand/design origin BharatDrip through `src/lib/bharatdrip/live-products.ts`, while retaining the original static themed catalogue as a fallback.
 
-Target:
-Fashion Designer -> DB -> approval/listing gate -> live BharatDrip catalogue.
+Implemented flow:
+Fashion Designer -> DB -> approval/listing gate -> Published -> live BharatDrip themed catalogue -> protected live-product checkout.
 
 ## Fashion Designer AI / Fashion Studio
 
@@ -160,7 +159,7 @@ Trend intelligence
 -> products/product_details/product_images
 -> CEO_PENDING or Published
 -> general BharatShop listing
--> future dynamic BharatDrip listing
+-> Published BharatDrip products -> dedicated /bharatdrip themed catalogue
 
 ## Qikink
 
@@ -276,16 +275,15 @@ local reconciliation
 
 ## Known current priorities
 
-1. Reconcile the dirty local worktree safely.
-2. Preserve the Machine AI hidden-window fix.
-3. Stabilize the local port/runtime mapping.
-4. Verify BharatShop app on :3001 and Machine AI on :3002 together.
-5. Connect Fashion Designer DB products into the dedicated `/bharatdrip` storefront.
-6. Verify product -> cart -> checkout -> order -> database -> admin.
-7. Verify authentication and authorization paths.
-8. Verify payment readiness without unsafe production actions.
-9. Verify external integrations and required environment variables.
-10. Run full production acceptance before deploying.
+1. Reconcile the dirty local `bharatshop-harness` worktree safely.
+2. Preserve all verified Machine AI and local-port fixes during reconciliation.
+3. Pull/verify the repair branch in `C:/Users/faizm/bharatshop-repair-20260918`.
+4. Run the full workstation locally: BharatShop 3001 + Machine AI 3002.
+5. Verify Fashion Designer -> database -> Published -> BharatDrip live display against the real local database.
+6. Verify live BharatDrip protected checkout using test/sandbox payment configuration only.
+7. Verify auth, admin, order persistence, payments and remaining integrations.
+8. Run full production acceptance.
+9. Only then decide DEPLOY or KEEP MODIFYING LOCALLY.
 
 ## User workflow preference
 
@@ -333,7 +331,50 @@ Fashion Designer AI
 
 Static BharatDrip catalogue entries remain as safe fallback content. New live database drops do not receive invented ratings/reviews.
 
+Verification completed on the repair branch:
+- integration tests passed
+- TypeScript passed
+- production build passed
+- lint passed
+- Creative Engine CI passed
+- Agent Suite Build passed
+- live BharatDrip cart uses canonical catalogue data
+- BharatDrip is recognized as Qikink made-to-order by the real storefront order gateway
+- live BharatDrip checkout uses the protected partial-COD payment flow
+
 Still to verify before production:
-- branch CI after latest type fix
-- local laptop build/runtime on the reconciled worktree
-- BharatDrip live-product cart/checkout/order persistence
+- local laptop runtime after safe worktree reconciliation
+- actual local database Fashion Designer -> publish -> BharatDrip display
+- payment provider flow with test/sandbox credentials
+- auth/admin/order persistence and remaining external integrations
+- final production acceptance
+
+
+## One-command local workstation — 2026-09-18
+
+Canonical local mapping is now encoded in the repair branch:
+- BharatShop / BharatDrip / Fashion Studio: port 3001
+- Machine AI: port 3002
+- Ollama: port 11434
+- Qwen shim: port 11555
+
+Added:
+- `scripts/local-workstation-manager.mjs`
+- `npm run local:workstation:start`
+- `npm run local:workstation:status`
+- `npm run local:workstation:stop`
+
+The manager uses the existing hidden-window process managers and does not restore the old competing Startup-folder CMD launchers.
+
+## CI milestone — 2026-09-18
+
+Latest repair-branch changes for BharatDrip live products, protected checkout, local port corrections and the one-command workstation passed:
+- dependency vulnerability gate
+- integration test suite
+- TypeScript
+- Next.js production build
+- lint
+- Creative Engine CI
+- Agent Suite Build
+
+This is branch-level verification, not yet local-laptop or production verification.
