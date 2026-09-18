@@ -14,7 +14,7 @@ export function marketingConnections(): Channel[] {
     { key:"facebook", label:"Facebook Page", missing:["META_ACCESS_TOKEN","META_PAGE_ID"].filter(n=>!present(n)) },
     { key:"instagram", label:"Instagram Business", missing:["META_ACCESS_TOKEN","META_INSTAGRAM_ACCOUNT_ID","META_PAGE_ID"].filter(n=>!present(n)) },
     { key:"meta-capi", label:"Meta Pixel/Dataset + Conversions API", missing:[...(datasetId()?[]:["META_DATASET_ID or META_PIXEL_ID or NEXT_PUBLIC_META_PIXEL_ID"]),...(capiToken()?[]:["META_CONVERSIONS_API_TOKEN or META_CAPI_TOKEN or META_ACCESS_TOKEN"])] },
-    { key:"autom8ai", label:"Autom8AI Creative Orchestration", missing:["AUTOM8AI_WEBHOOK_URL","AUTOM8AI_WEBHOOK_TOKEN"].filter(n=>!present(n)) },
+    { key:"autom8ai", label:"Autom8AI Creative Orchestration", missing:["AUTOM8AI_WEBHOOK_URL"].filter(n=>!present(n)) },
   ];
   return configs.map(c=>({key:c.key,label:c.label,configured:!c.missing.length,connected:false,status:c.missing.length?"NOT_CONFIGURED":"NOT_TESTED",missing:c.missing}));
 }
