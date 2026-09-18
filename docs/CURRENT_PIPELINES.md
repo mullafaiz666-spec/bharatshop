@@ -359,3 +359,32 @@ Verification on code head `fc9071019f23e79c462c5f89516f55e621c141de`:
 
 Documentation:
 - `docs/AUTOM8AI_CREATIVE_ORCHESTRATION.md`
+
+
+## 15. Autom8AI local activation helper — 2026-09-18
+
+Added:
+- `scripts/configure-autom8ai.ps1`
+- `scripts/local-readonly-verify.mjs`
+- `npm run autom8ai:configure:windows`
+- `npm run local:verify:readonly`
+
+Activation behavior:
+- prompts interactively for the Autom8AI webhook URL;
+- prompts for the webhook token with `Read-Host -AsSecureString`;
+- never prints the token;
+- validates HTTPS except for localhost;
+- writes only to ignored `.env.local`;
+- backs up an existing `.env.local` before editing;
+- preserves unrelated local environment variables.
+
+Read-only verification checks:
+- BharatShop storefront on port 3001;
+- BharatDrip;
+- Fashion Studio route reachability;
+- Machine AI on port 3002;
+- Ollama on port 11434;
+- Qwen shim on port 11555;
+- whether Autom8AI URL/token are configured, without displaying the token.
+
+The verifier never triggers the Autom8AI webhook, creates orders/payments/approvals, mutates the database, or deploys.
