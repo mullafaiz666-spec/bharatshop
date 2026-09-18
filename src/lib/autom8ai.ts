@@ -74,8 +74,30 @@ export async function dispatchAutom8AiJob(input: Autom8AiJobInput) {
     source: input.source,
     safety: status.policy,
     renderHints: input.workflow === "marketing-video"
-      ? { format: "short-form-product-video", aspectRatios: ["9:16", "1:1"], durationSeconds: [8, 15, 30], preferredRenderer: "Higgsfield-or-configured-video-worker" }
-      : { format: "fashion-concept-and-ugc", aspectRatios: ["4:5", "9:16"], preferredRenderer: "Higgsfield-or-configured-creative-worker" },
+      ? {
+          format: "short-form-product-video",
+          aspectRatios: ["9:16", "3:4"],
+          durationSeconds: [12, 15],
+          preferredRenderer: "higgsfield",
+          preferredModel: "marketing_studio_video",
+          preferredMode: "ugc",
+          resolution: "720p",
+          generateAudio: true,
+          fallbackModel: "seedance_2_5",
+          fallbackDurationSeconds: [8, 15, 30],
+        }
+      : {
+          format: "fashion-concept-and-ugc",
+          aspectRatios: ["9:16", "3:4"],
+          durationSeconds: [12, 15],
+          preferredRenderer: "higgsfield",
+          preferredModel: "marketing_studio_video",
+          preferredMode: "ugc",
+          resolution: "720p",
+          generateAudio: true,
+          fallbackModel: "seedance_2_5",
+          fallbackDurationSeconds: [8, 15, 30],
+        },
     product: input.product || null,
     creative: input.creative,
     resultContract: {
