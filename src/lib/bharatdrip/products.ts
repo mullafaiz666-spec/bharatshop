@@ -28,6 +28,9 @@ export type Product = {
   details: string[];
   fit: string;
   reviews: Review[];
+  liveProductId?: number;
+  madeToOrder?: boolean;
+  dynamic?: boolean;
 };
 
 const image = (url: string, width = 1200, height = 1500) =>
