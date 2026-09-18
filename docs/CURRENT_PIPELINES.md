@@ -298,3 +298,64 @@ Latest CI for the port map + workstation manager:
 - Lint: success.
 - Creative Engine CI: success.
 - Agent Suite Build: success.
+
+
+## 14. Autom8AI creative orchestration — 2026-09-18
+
+Status: **implemented and CI-verified on the repair branch; external webhook credentials still required for live execution**
+
+Purpose:
+Autom8AI is the orchestration layer for:
+- Marketing short-video generation.
+- Fashion Designer creative / UGC workflow handoff.
+
+Architecture:
+
+```
+Marketing Cockpit / Fashion Designer
+  -> /api/automation/autom8ai
+  -> BharatShop eligibility + IP + profitability gates
+  -> src/lib/autom8ai.ts
+  -> configured Autom8AI webhook
+  -> Autom8AI workflow
+  -> Higgsfield or another configured image/video renderer
+  -> returned job/workflow/asset metadata
+  -> human review
+  -> existing BharatShop publication/ad connectors
+```
+
+Required environment variables:
+- `AUTOM8AI_WEBHOOK_URL`
+- `AUTOM8AI_WEBHOOK_TOKEN`
+
+Marketing:
+- Marketing cockpit now exposes **Autom8AI video**.
+- Only Published products with positive recorded profit can be sent.
+- Payload contains product, target audience, hook, CTA, verified/current imagery and short-video render hints.
+- No ad spend or publication is enabled by this handoff.
+
+Fashion:
+- Fashion Designer catalogue cards now expose **Autom8AI creative**.
+- Only BharatDrip/BharatShop Studio + Qikink + MADE_TO_ORDER products can be sent.
+- Original-art policy and profitability are rechecked server-side.
+- Payload includes garment, print method, artwork direction, trend, palette and current images.
+- Autom8AI is not permitted to change product status, pricing, supplier data or publish automatically.
+
+Safety:
+- webhook requests carry a bearer token from server-side environment only.
+- webhook URL must use HTTPS except localhost.
+- read-only connection verification never triggers Autom8AI.
+- external responses are whitelisted to job/status/HTTPS asset/workflow fields; secrets/raw provider data are not surfaced.
+- returned output is review-only.
+
+Verification on code head `fc9071019f23e79c462c5f89516f55e621c141de`:
+- dependency gate: success
+- integration tests: success
+- TypeScript: success
+- production build: success
+- lint: success
+- Creative Engine CI: success
+- Agent Suite Build: success
+
+Documentation:
+- `docs/AUTOM8AI_CREATIVE_ORCHESTRATION.md`
