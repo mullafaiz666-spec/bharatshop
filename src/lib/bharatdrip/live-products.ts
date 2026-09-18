@@ -2,7 +2,7 @@ import "server-only";
 
 import { db } from "@/db";
 import { productDetails, productImages, products as productTable } from "@/db/schema";
-import { desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import type { Product, ProductCategory } from "@/lib/bharatdrip/products";
 
 type Specs = Record<string, unknown>;
@@ -70,11 +70,10 @@ function detailLines(specs: Specs, material: string) {
 }
 
 export async function getLiveBharatDripProducts(): Promise<Product[]> {
-  const rows = await db.select().from(productTable)
-    .where(eq(productTable.status, "Published"))
+  const bharatDrip = await db.select().from(productTable)
+    .where(and(eq(productTable.status, "Published"), eq(productTable.brand, "BharatDrip")))
     .orderBy(desc(productTable.updatedAt));
 
-  const bharatDrip = rows.filter(row => String(row.brand || "").toLowerCase() === "bharatdrip");
   if (!bharatDrip.length) return [];
 
   const ids = bharatDrip.map(row => row.id);
