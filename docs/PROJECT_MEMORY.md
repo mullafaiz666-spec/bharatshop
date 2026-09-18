@@ -410,3 +410,16 @@ The Autom8AI code head passed integration tests, TypeScript, production build, l
 
 Next activation step:
 configure the Autom8AI webhook URL/token locally (without committing them), then send one explicit test marketing-video or fashion-creative job and verify the remote job ID/output.
+
+
+## Autom8AI local activation helper — 2026-09-18
+
+BharatShop now includes a PowerShell-first, secret-safe Autom8AI activation path.
+
+Commands:
+- `npm run autom8ai:configure:windows` — prompts for webhook URL/token and writes them only to ignored `.env.local`.
+- `npm run local:verify:readonly` — checks Store 3001, Machine AI 3002, Ollama, Qwen shim, BharatDrip/Fashion route reachability, and Autom8AI configuration without triggering workflows.
+
+The token is never printed by the helper. Existing `.env.local` is backed up before the two Autom8AI keys are updated.
+
+Live Autom8AI execution still requires the real webhook URL and token from the user's Autom8AI workflow.
