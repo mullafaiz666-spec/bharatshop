@@ -506,3 +506,27 @@ The preflight was corrected without copying or printing secrets:
 - does not trigger Autom8AI or any renderer.
 
 A CI safety-test false positive was also fixed: JavaScript `URLSearchParams.delete()` is no longer mistaken for SQL `DELETE FROM`.
+
+
+## 21. Preserved local DB service recovery — 2026-09-19
+
+Observed local candidate preflight failure:
+- configured DB target resolves to `127.0.0.1:55432`;
+- connection failed with `ECONNREFUSED`, meaning no local listener was active.
+
+The existing intended listener is the preserved Docker PostgreSQL container:
+- container: `bharatshop-dev-db`
+- host: `127.0.0.1`
+- port: `55432`
+
+Added:
+- `scripts/local-db-ensure.mjs`
+- `npm run db:local:ensure`
+
+Safety behavior:
+- checks whether port 55432 is already listening;
+- if needed, may start only the already-existing `bharatshop-dev-db` container;
+- never creates, removes, resets, recreates, reseeds, or replaces the database/container/volume;
+- does not mutate application records.
+
+After the service is available, rerun `npm run autom8ai:candidates`.
