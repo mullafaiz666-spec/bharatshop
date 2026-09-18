@@ -1,8 +1,8 @@
 "use client";
 
 import { createContext, useContext, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
-import { Bag, Check, ChevronRight, Lock, Minus, Plus, Truck, X } from "@/components/bharatdrip/icons";
-import { formatPrice, type Product } from "@/lib/bharatdrip/products";
+import { Bag, ChevronRight, Lock, Minus, Plus, Truck, X } from "@/components/bharatdrip/icons";
+import { formatPrice, products, type Product } from "@/lib/bharatdrip/products";
 
 type CartLine = {
   product: Product;
@@ -25,6 +25,40 @@ type CartContextValue = {
 
 const CartContext = createContext<CartContextValue | null>(null);
 const STORAGE_KEY = "bharatdrip-cart";
+const MAX_LINE_QUANTITY = 20;
+const MAX_CART_LINES = 50;
+
+function clampQuantity(value: number) {
+  if (!Number.isFinite(value)) return 1;
+  return Math.min(MAX_LINE_QUANTITY, Math.max(1, Math.trunc(value)));
+}
+
+export function restoreCart(value: unknown): CartLine[] {
+  if (!Array.isArray(value)) return [];
+
+  const restored: CartLine[] = [];
+  for (const entry of value.slice(0, MAX_CART_LINES)) {
+    if (!entry || typeof entry !== "object") continue;
+    const candidate = entry as {
+      product?: { id?: unknown };
+      size?: unknown;
+      quantity?: unknown;
+    };
+
+    const productId = typeof candidate.product?.id === "string" ? candidate.product.id : "";
+    const size = typeof candidate.size === "string" ? candidate.size : "";
+    const quantity = Number(candidate.quantity);
+    const product = products.find((item) => item.id === productId);
+
+    // Rehydrate from the canonical catalogue. Never trust persisted product
+    // pricing/details from localStorage.
+    if (!product || !product.sizes.includes(size)) continue;
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > MAX_LINE_QUANTITY) continue;
+
+    restored.push({ product, size, quantity });
+  }
+  return restored;
+}
 
 export function CartProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<CartLine[]>([]);
@@ -34,16 +68,23 @@ export function CartProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     try {
       const stored = window.localStorage.getItem(STORAGE_KEY);
-      if (stored) setItems(JSON.parse(stored) as CartLine[]);
+      if (stored) setItems(restoreCart(JSON.parse(stored)));
     } catch {
-      // A private browsing session can block local storage; the cart still works in memory.
+      // Private browsing, malformed storage, or storage access failures must
+      // not break the cart; keep the in-memory cart usable.
     } finally {
       setHasHydrated(true);
     }
   }, []);
 
   useEffect(() => {
-    if (hasHydrated) window.localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+    if (!hasHydrated) return;
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+    } catch {
+      // Storage writes can fail (quota/private mode). The in-memory cart
+      // remains authoritative for this session.
+    }
   }, [items, hasHydrated]);
 
   useEffect(() => {
@@ -59,15 +100,21 @@ export function CartProvider({ children }: { children: ReactNode }) {
     openCart: () => setIsCartOpen(true),
     closeCart: () => setIsCartOpen(false),
     addItem: (product, size, quantity = 1) => {
+      if (!product.sizes.includes(size)) return;
+      const safeQuantity = clampQuantity(quantity);
       setItems((current) => {
         const match = current.find((item) => item.product.id === product.id && item.size === size);
-        if (match) return current.map((item) => item === match ? { ...item, quantity: item.quantity + quantity } : item);
-        return [...current, { product, size, quantity }];
+        if (match) {
+          return current.map((item) => item === match
+            ? { ...item, product, quantity: clampQuantity(item.quantity + safeQuantity) }
+            : item);
+        }
+        return [...current, { product, size, quantity: safeQuantity }].slice(0, MAX_CART_LINES);
       });
       setIsCartOpen(true);
     },
     removeItem: (productId, size) => setItems((current) => current.filter((item) => !(item.product.id === productId && item.size === size))),
-    updateQuantity: (productId, size, quantity) => setItems((current) => current.map((item) => item.product.id === productId && item.size === size ? { ...item, quantity: Math.max(1, quantity) } : item)),
+    updateQuantity: (productId, size, quantity) => setItems((current) => current.map((item) => item.product.id === productId && item.size === size ? { ...item, quantity: clampQuantity(quantity) } : item)),
     clearCart: () => setItems([]),
   }), [items, isCartOpen]);
 
@@ -81,12 +128,15 @@ export function useCart() {
 }
 
 function CartDrawer() {
-  const { items, itemCount, subtotal, isCartOpen, closeCart, removeItem, updateQuantity, clearCart } = useCart();
-  const [view, setView] = useState<"cart" | "checkout" | "success">("cart");
-  const [orderNumber, setOrderNumber] = useState("");
+  const { items, itemCount, subtotal, isCartOpen, closeCart, removeItem, updateQuantity } = useCart();
+  const [view, setView] = useState<"cart" | "checkout">("cart");
+  const [checkoutMessage, setCheckoutMessage] = useState("");
 
   useEffect(() => {
-    if (!isCartOpen) setView("cart");
+    if (!isCartOpen) {
+      setView("cart");
+      setCheckoutMessage("");
+    }
   }, [isCartOpen]);
 
   if (!isCartOpen) return null;
@@ -96,9 +146,7 @@ function CartDrawer() {
 
   function submitOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setOrderNumber(`BD-${Math.floor(100000 + Math.random() * 899999)}`);
-    clearCart();
-    setView("success");
+    setCheckoutMessage("Ordering is not enabled yet. Your bag has been preserved; no order was created and no payment was attempted.");
   }
 
   return (
@@ -108,7 +156,7 @@ function CartDrawer() {
         <div className="cart-header">
           <div>
             <p className="eyebrow">bharatdrip / bag</p>
-            <h2>{view === "cart" ? "Your selection" : view === "checkout" ? "Checkout" : "You're in."}</h2>
+            <h2>{view === "cart" ? "Your selection" : "Checkout preview"}</h2>
           </div>
           <button className="icon-button" onClick={closeCart} aria-label="Close shopping bag"><X size={22} /></button>
         </div>
@@ -136,29 +184,26 @@ function CartDrawer() {
               </div>
               <div className="cart-note"><Truck size={17} /><span>Free shipping unlocked on this order.</span></div>
               <div className="cart-summary"><div><span>Subtotal <small>{itemCount} {itemCount === 1 ? "item" : "items"}</small></span><strong>{formatPrice(subtotal)}</strong></div><div><span>Shipping</span><strong>{shipping === 0 ? "Free" : formatPrice(shipping)}</strong></div><div className="cart-total"><span>Total</span><strong>{formatPrice(total)}</strong></div></div>
-              <button className="button button-dark button-wide" onClick={() => setView("checkout")}>Continue to checkout <ChevronRight size={17} /></button>
-              <p className="secure-note"><Lock size={13} /> Secure checkout · taxes calculated at payment</p>
+              <button className="button button-dark button-wide" onClick={() => setView("checkout")}>Review checkout <ChevronRight size={17} /></button>
+              <p className="secure-note"><Lock size={13} /> Ordering remains disabled until the real order/payment backend is connected.</p>
             </>
           )
         )}
 
         {view === "checkout" && (
           <form className="checkout-form" onSubmit={submitOrder}>
-            <div className="checkout-progress"><span className="active">1&nbsp; Contact</span><span>2&nbsp; Delivery</span><span>3&nbsp; Payment</span></div>
+            <div className="checkout-progress"><span className="active">Preview</span><span>Order creation unavailable</span></div>
             <label>Email address<input type="email" required placeholder="you@example.com" /></label>
             <div className="form-two"><label>First name<input required placeholder="Aarav" /></label><label>Last name<input required placeholder="Sharma" /></label></div>
             <label>Address<input required placeholder="Street address" /></label>
             <div className="form-two"><label>City<input required placeholder="Mumbai" /></label><label>PIN code<input required pattern="[0-9]{6}" placeholder="400001" /></label></div>
             <label>Country<select defaultValue="India"><option>India</option><option>United States</option><option>United Kingdom</option><option>Singapore</option></select></label>
-            <div className="checkout-total"><span>Order total</span><strong>{formatPrice(total)}</strong></div>
-            <button className="button button-dark button-wide" type="submit">Place demo order <Lock size={15} /></button>
+            <div className="checkout-total"><span>Preview total</span><strong>{formatPrice(total)}</strong></div>
+            <button className="button button-dark button-wide" type="submit">Check order availability <Lock size={15} /></button>
             <button type="button" className="text-button" onClick={() => setView("cart")}>← Back to bag</button>
-            <p className="checkout-disclaimer">This demo checkout is ready for your payment provider. No payment is collected.</p>
+            <p className="checkout-disclaimer">Checkout is a preview only. No order or payment will be created until the real backend is connected.</p>
+            {checkoutMessage ? <p className="checkout-disclaimer" role="status" aria-live="polite">{checkoutMessage}</p> : null}
           </form>
-        )}
-
-        {view === "success" && (
-          <div className="success-state"><div className="success-icon"><Check size={28} /></div><p className="eyebrow">Order confirmed</p><h3>Good choice.</h3><p>Your bharatdrip order <strong>{orderNumber}</strong> is on its way to becoming a real outfit. We’ll send a confirmation to your inbox.</p><button className="button button-dark" onClick={closeCart}>Back to the shop <ChevronRight size={16} /></button></div>
         )}
       </aside>
     </div>
