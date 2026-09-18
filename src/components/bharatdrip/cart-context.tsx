@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { Bag, ChevronRight, Lock, Minus, Plus, Truck, X } from "@/components/bharatdrip/icons";
-import { formatPrice, products, type Product } from "@/lib/bharatdrip/products";
+import { formatPrice, products as staticProducts, type Product } from "@/lib/bharatdrip/products";
 
 type CartLine = {
   product: Product;
@@ -33,7 +33,7 @@ function clampQuantity(value: number) {
   return Math.min(MAX_LINE_QUANTITY, Math.max(1, Math.trunc(value)));
 }
 
-export function restoreCart(value: unknown): CartLine[] {
+export function restoreCart(value: unknown, catalogue: Product[] = staticProducts): CartLine[] {
   if (!Array.isArray(value)) return [];
 
   const restored: CartLine[] = [];
@@ -48,7 +48,7 @@ export function restoreCart(value: unknown): CartLine[] {
     const productId = typeof candidate.product?.id === "string" ? candidate.product.id : "";
     const size = typeof candidate.size === "string" ? candidate.size : "";
     const quantity = Number(candidate.quantity);
-    const product = products.find((item) => item.id === productId);
+    const product = catalogue.find((item) => item.id === productId);
 
     // Rehydrate from the canonical catalogue. Never trust persisted product
     // pricing/details from localStorage.
@@ -60,7 +60,7 @@ export function restoreCart(value: unknown): CartLine[] {
   return restored;
 }
 
-export function CartProvider({ children }: { children: ReactNode }) {
+export function CartProvider({ children, catalogue = staticProducts }: { children: ReactNode; catalogue?: Product[] }) {
   const [items, setItems] = useState<CartLine[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [hasHydrated, setHasHydrated] = useState(false);
@@ -68,14 +68,14 @@ export function CartProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     try {
       const stored = window.localStorage.getItem(STORAGE_KEY);
-      if (stored) setItems(restoreCart(JSON.parse(stored)));
+      if (stored) setItems(restoreCart(JSON.parse(stored), catalogue));
     } catch {
       // Private browsing, malformed storage, or storage access failures must
       // not break the cart; keep the in-memory cart usable.
     } finally {
       setHasHydrated(true);
     }
-  }, []);
+  }, [catalogue]);
 
   useEffect(() => {
     if (!hasHydrated) return;
