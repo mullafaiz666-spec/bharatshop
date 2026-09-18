@@ -63,35 +63,29 @@ The storefront manager launches its Windows process with `windowsHide: true`.
 
 ## 3. BharatDrip storefront
 
-Status: **present and visually implemented; dynamic product connection incomplete**
+Status: **live database connection implemented and CI-verified on the repair branch; local laptop runtime verification pending**
 
 Primary code:
 - `src/app/bharatdrip/`
 - `src/components/bharatdrip/`
 - `src/lib/bharatdrip/products.ts`
+- `src/lib/bharatdrip/live-products.ts`
 
 Current storefront flow:
 
 ```
 /bharatdrip
-  -> Storefront component
-  -> static BharatDrip product catalogue
-  -> product cards / product detail pages
+  -> getLiveBharatDripProducts()
+  -> Published + brand=BharatDrip database products
+  -> verified fashion images / real pricing / sizes / metadata
+  -> themed BharatDrip product cards and live detail routes
+  -> static themed catalogue as safe fallback
 ```
 
-Important current gap:
-- The dedicated `/bharatdrip` storefront still reads the static catalogue in `src/lib/bharatdrip/products.ts`.
-- Newly created BharatDrip products written by the Fashion Designer AI are not yet loaded dynamically by this dedicated storefront.
+Published Fashion Designer drops now appear in the dedicated BharatDrip theme. Live product detail routes use:
+`/bharatdrip/products/live-<id>-<slug>`
 
-Target connection:
-
-```
-Fashion Designer AI
-  -> products + product_details + product_images
-  -> brand = BharatDrip
-  -> approval / listing gate
-  -> dynamic /bharatdrip catalogue
-```
+New live drops do not receive invented ratings or customer reviews.
 
 ## 4. BharatDrip Fashion Designer AI
 
@@ -171,10 +165,10 @@ Trend / studio concept
   -> AI activity log
   -> CEO_PENDING or Published
   -> general BharatShop store
+  -> when Published + brand=BharatDrip: dedicated /bharatdrip theme
 ```
 
-Known missing final link:
-- The same live database products must feed the dedicated `/bharatdrip` theme automatically.
+BharatDrip live products are treated as Qikink made-to-order products by the storefront order gateway, so zero warehouse stock does not incorrectly block an order.
 
 ## 7. Agent/runtime safety model
 
@@ -225,12 +219,13 @@ Target hosting remains Netlify for the current BharatShop deployment path unless
 
 ## 10. Next highest-priority work
 
-1. Reconcile the dirty `bharatshop-harness` working tree safely with the repair branch.
-2. Preserve the hidden-window Machine AI fix during reconciliation.
-3. Start and smoke-test the local BharatShop app on port 3000.
-4. Convert `/bharatdrip` from static product data to live BharatDrip database products.
-5. Verify Fashion Designer -> DB -> BharatDrip automatic publishing/display path.
-6. Run full local production acceptance before any deployment decision.
+1. Reconcile the dirty `bharatshop-harness` working tree safely without overwriting local changes.
+2. Pull and verify the current repair branch in the separate repair worktree.
+3. Run the complete local workstation with BharatShop on port 3001 and Machine AI on port 3002.
+4. Verify Fashion Designer -> publish -> live BharatDrip display against the actual local database.
+5. Verify the live BharatDrip protected checkout with configured test/sandbox payment credentials; do not create real production payments during verification.
+6. Verify auth, database, admin, order persistence, payment callbacks and remaining external integrations.
+7. Run final production acceptance and decide DEPLOY or KEEP MODIFYING LOCALLY.
 
 ## Update rule
 
@@ -252,23 +247,54 @@ Observed on the user's current laptop runtime:
 The command `npm run local:storefront:start` is not available in the user's current `bharatshop-harness` working tree because the earlier branch switch/pull did not complete. The repair branch contains that script, but the user's active working tree still has local changes and must not be force-overwritten.
 
 
-## 12. BharatDrip live-catalogue integration — 2026-09-18
 
-Implemented on `repair/reconcile-20260918`:
+
+## 12. BharatDrip live catalogue + protected checkout — 2026-09-18
+
+Implemented and CI-verified on `repair/reconcile-20260918`:
 - Added `src/lib/bharatdrip/live-products.ts`.
-- `/bharatdrip` now merges published database products whose brand/design origin is BharatDrip ahead of the static themed fallback catalogue.
-- Live products retain the BharatDrip theme and route through `/bharatdrip/products/live-<id>-<slug>`.
-- Live product images accept verified original/editorial fashion assets and normalize local fashion-art/photo URLs to same-origin paths.
-- Dynamic category mapping derives Tops/Hoodies/Outerwear/Bottoms/Accessories from garment metadata.
-- Live AI-created drops use real price, sizes, material/print metadata and do not fabricate customer ratings or reviews.
-- Existing static BharatDrip products remain available as a fallback if the database is unavailable.
-- Added `tests/bharatdrip-live-catalog.test.mjs`.
-- Fixed BharatDrip product-card and hero links so navigation remains under `/bharatdrip/products/... `.
+- `/bharatdrip` now loads published database products for brand/design origin BharatDrip before the static themed fallback catalogue.
+- Live products retain the BharatDrip design and use dedicated live detail routes.
+- Live AI-created products use real database prices, sizes, Qikink metadata and verified fashion imagery.
+- New live drops display no fabricated ratings/reviews.
+- The cart rehydrates live items from the canonical current catalogue rather than trusting prices stored in localStorage.
+- The storefront order gateway recognizes both BharatShop Studio and BharatDrip as Qikink made-to-order fashion.
+- Live BharatDrip products use the existing protected partial-COD order/payment path.
+- Razorpay success is shown only after backend payment verification.
+- Cashfree uses the existing hosted checkout path.
+- No unprotected plain-COD fallback is used when payment providers are not configured.
+- Legacy static BharatDrip showcase products remain browse/preview-only until they are migrated into the live database catalogue.
 
-Verification state:
-- Existing integration tests passed in GitHub Actions before the typecheck step.
-- Earlier typecheck failures were traced to `Array.map(cleanText)` callback typing and have been corrected in commit `c04315e3645939cc7d8bd71bce6f627c08cf151f`.
-- Latest CI is running against the corrected branch head; do not call this production-verified until those checks and the user's local build/runtime check pass.
+Verification:
+- Creative Engine CI: success.
+- Integration tests: success.
+- TypeScript: success.
+- Production build: success.
+- Lint: success.
+- Agent Suite Build: success.
+- Local laptop runtime/payment-provider verification remains required before deployment.
 
-Remaining commerce gap:
-- BharatDrip's themed cart must still be verified against the real backend order/checkout path for live database products before production deployment.
+## 13. Local port map and one-command workstation — 2026-09-18
+
+Canonical local ports:
+- BharatShop / BharatDrip / Fashion Studio: `127.0.0.1:3001`
+- Machine AI UI: `127.0.0.1:3002`
+- Ollama: `127.0.0.1:11434`
+- Qwen shim: `127.0.0.1:11555`
+
+The repair branch now pins these defaults in the local managers, `.env.example`, and regression tests.
+
+One-command local runtime:
+- `npm run local:workstation:start`
+- `npm run local:workstation:status`
+- `npm run local:workstation:stop`
+
+`scripts/local-workstation-manager.mjs` starts the Machine AI supervisor, Machine AI web UI and BharatShop storefront through the existing hidden-window managers. It does not reinstall the old Startup-folder launchers.
+
+Latest CI for the port map + workstation manager:
+- Integration tests: success.
+- TypeScript: success.
+- Production build: success.
+- Lint: success.
+- Creative Engine CI: success.
+- Agent Suite Build: success.
