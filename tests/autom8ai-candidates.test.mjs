@@ -15,10 +15,16 @@ test("Autom8AI candidate preflight is read-only and credit-free", () => {
   assert.ok(source.includes('existing-bharatshop-harness-env'));
   assert.ok(source.includes('secretValuesPrinted: false'));
   assert.ok(source.includes('parseDotEnv(readFileSync(file))'));
+  assert.ok(source.includes('existing-bharatshop-dev-db-container-env'));
+  assert.ok(source.includes('"docker"'));
+  assert.ok(source.includes('["inspect", "-f", "{{json .Config.Env}}", "bharatshop-dev-db"]'));
+  assert.ok(source.includes('changedDatabasePassword: false'));
+  assert.ok(source.includes('persistedSecretChanges: false'));
   assert.doesNotMatch(source, /\bINSERT\s+INTO\b/i);
   assert.doesNotMatch(source, /\bUPDATE\s+[A-Za-z0-9_."]+\s+SET\b/i);
   assert.doesNotMatch(source, /\bDELETE\s+FROM\b/i);
   assert.doesNotMatch(source, /console\.(log|error).*rawDatabaseUrl/);
+  assert.doesNotMatch(source, /POSTGRES_PASSWORD[^\n]*console/i);
 });
 
 test("Autom8AI candidate preflight mirrors key marketing and fashion gates", () => {
