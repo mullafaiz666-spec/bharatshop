@@ -78,6 +78,23 @@ export async function dispatchAutom8AiJob(input: Autom8AiJobInput) {
       : { format: "fashion-concept-and-ugc", aspectRatios: ["4:5", "9:16"], preferredRenderer: "Higgsfield-or-configured-creative-worker" },
     product: input.product || null,
     creative: input.creative,
+    resultContract: {
+      mode: "review-only-callback",
+      path: "/api/automation/autom8ai/result",
+      method: "POST",
+      auth: "Bearer BHARATSHOP_AUTOMATION_TOKEN",
+      productId: input.product?.id || null,
+      workflows: ["marketing-video", "fashion-creative"],
+      terminalStatuses: ["COMPLETED", "FAILED", "NEEDS_REVIEW"],
+      fields: ["productId", "workflow", "status", "jobId", "renderer", "assetUrl", "workflowUrl", "message"],
+      policy: {
+        productMutation: false,
+        autoPublish: false,
+        adSpend: false,
+        createsOrders: false,
+        createsPayments: false,
+      },
+    },
   };
 
   const token = configuredToken();
