@@ -7,6 +7,7 @@ const live = readFileSync(new URL("../src/lib/bharatdrip/live-products.ts", impo
 const card = readFileSync(new URL("../src/components/bharatdrip/product-card.tsx", import.meta.url), "utf8");
 const detailPage = readFileSync(new URL("../src/app/bharatdrip/products/[slug]/page.tsx", import.meta.url), "utf8");
 const detail = readFileSync(new URL("../src/components/bharatdrip/product-detail.tsx", import.meta.url), "utf8");
+const ordersSource = readFileSync(new URL("../src/app/api/storefront/orders/route.ts", import.meta.url), "utf8");
 
 test("BharatDrip storefront merges published database drops with the themed catalogue", () => {
   assert.ok(page.includes("getLiveBharatDripProducts"));
@@ -28,4 +29,11 @@ test("new AI-created drops do not fabricate customer ratings or reviews", () => 
   assert.ok(live.includes("reviews: []"));
   assert.ok(detail.includes("no customer reviews yet"));
   assert.ok(detail.includes("We do not generate or display invented buyer reviews."));
+});
+
+
+test("storefront order gateway recognizes BharatDrip as made-to-order fashion", () => {
+  assert.ok(ordersSource.includes('"bharatshop studio","bharatdrip"'));
+  assert.ok(ordersSource.includes('String(specs.inventoryMode||"").toUpperCase()==="MADE_TO_ORDER"'));
+  assert.ok(ordersSource.includes('String(specs.productionSupplier||"").toLowerCase()==="qikink"'));
 });
