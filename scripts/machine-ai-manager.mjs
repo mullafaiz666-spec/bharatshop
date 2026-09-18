@@ -68,7 +68,7 @@ function startSupervisor() {
     cwd: root,
     detached: true,
     stdio: 'ignore',
-    windowsHide: false,
+    windowsHide: true,
     env: process.env,
   });
   child.unref();
