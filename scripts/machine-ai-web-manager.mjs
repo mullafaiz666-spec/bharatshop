@@ -5,6 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { spawn, spawnSync } from 'node:child_process';
+import { isMachineAiStatus } from './machine-ai-web-readiness.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..');
@@ -33,8 +34,9 @@ function alive(pid) {
 
 async function ready() {
   try {
-    const response = await fetch(url, { signal: AbortSignal.timeout(2_000), cache: 'no-store' });
-    return response.ok;
+    const response = await fetch(`${url}/api/status`, { signal: AbortSignal.timeout(2_000), cache: 'no-store' });
+    if (!response.ok || !String(response.headers.get('content-type') || '').toLowerCase().includes('application/json')) return false;
+    return isMachineAiStatus(await response.json());
   } catch { return false; }
 }
 

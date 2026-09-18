@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { normalizeRoute, isAllowedOrigin, isLoopbackHost, buildMemoryContext, buildReadOnlyProjectContext } from '../scripts/machine-ai-web.mjs';
 import { classifyDepartments, chooseDepartmentAgents } from '../scripts/bharatshop-operator-router.mjs';
+import { isMachineAiStatus } from '../scripts/machine-ai-web-readiness.mjs';
 
 test('machine web UI defaults background/chat routing safely', () => {
   assert.equal(normalizeRoute('agency'), 'agency');
@@ -29,6 +30,23 @@ test('UI ships as local static assets with no external CDN dependency', () => {
   assert.match(js, /\/api\/chat/);
   assert.match(js, /\/api\/agents/);
   assert.match(js, /\/api\/memory/);
+});
+
+test('machine web readiness rejects an unrelated healthy web server', () => {
+  assert.equal(isMachineAiStatus({}), false);
+  assert.equal(isMachineAiStatus({ ollama: { ready: true }, shim: { ready: true }, agents: 264 }), true);
+  assert.equal(isMachineAiStatus({ ollama: { ready: true }, shim: { ready: true }, agents: '264' }), false);
+});
+
+test('machine web chat is bounded and the UI exposes cancellation', () => {
+  const server = readFileSync(resolve('scripts/machine-ai-web.mjs'), 'utf8');
+  const ui = readFileSync(resolve('machine-ui/app.js'), 'utf8');
+  assert.match(server, /BHARATSHOP_CHAT_TIMEOUT_MS\s*\|\|\s*'90000'/);
+  assert.match(server, /num_predict:\s*CHAT_PREDICT_TOKENS/);
+  assert.match(server, /req\.once\('aborted',\s*closed\)/);
+  assert.match(ui, /state\.activeController\?\.abort\(\)/);
+  assert.match(ui, /signal:\s*state\.activeController\.signal/);
+  assert.match(server, /needsProjectGrounding/);
 });
 
 

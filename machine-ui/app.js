@@ -181,7 +181,7 @@ function payloadMessages(chat) {
 
 async function submitPrompt(event) {
   event?.preventDefault();
-  if (state.busy) return;
+  if (state.busy) { state.activeController?.abort(); return; }
   const chat = activeChat(); if (!chat) return;
   const typed = els.prompt.value.trim(); if (!typed && !state.attachments.length) return;
   let content = typed;
@@ -198,12 +198,13 @@ async function submitPrompt(event) {
 
   const aiMsg = { id: uid(), role: 'assistant', content: '', createdAt: nowIso(), streaming: true, mode, agents: [] };
   chat.messages.push(aiMsg); renderMessages();
-  state.busy = true; els.send.disabled = true;
+  state.busy = true; state.activeController = new AbortController(); els.send.disabled = false; els.send.textContent = '?'; els.send.title = 'Stop';
 
   try {
     const response = await fetch('/api/chat', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ mode, messages: payloadMessages(chat).slice(0, -1), selectedAgents: state.selectedAgents }),
+      signal: state.activeController.signal,
     });
     if (!response.ok) throw new Error((await response.json()).error || `HTTP ${response.status}`);
     const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = '';
@@ -224,7 +225,7 @@ async function submitPrompt(event) {
   } catch (error) {
     aiMsg.error = true; aiMsg.content = `Could not reach the local Machine AI: ${error.message}`;
   } finally {
-    aiMsg.streaming = false; aiMsg.status = ''; chat.updatedAt = nowIso(); state.busy = false; els.send.disabled = false; saveChats(); renderAll();
+    aiMsg.streaming = false; aiMsg.status = ''; chat.updatedAt = nowIso(); state.busy = false; state.activeController = null; els.send.disabled = false; els.send.textContent = '?'; els.send.title = 'Send'; saveChats(); renderAll();
   }
 }
 

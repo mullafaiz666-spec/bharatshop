@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import http from 'node:http';
+import { inferenceFetch, readOllamaStream, chatError, safeError, withInferenceScope } from './machine-ai-transport.mjs';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, rmSync } from 'node:fs';
 import { dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,8 +19,9 @@ const PORT = Number(process.env.BHARATSHOP_MACHINE_UI_PORT || '3001');
 const MODEL = process.env.PERSONAL_AI_MODEL || process.env.AGENCY_MODEL || process.env.AI_TEXT_MODEL || 'qwen3.5:4b';
 const OLLAMA_BASE_URL = String(process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
 const SHIM_BASE_URL = String(process.env.AI_BASE_URL || 'http://127.0.0.1:11555').replace(/\/+$/, '');
-const CONTEXT = Math.max(4096, Number(process.env.PERSONAL_AI_CONTEXT || '8192'));
-const CHAT_TIMEOUT_MS = Math.max(240_000, Number(process.env.BHARATSHOP_CHAT_TIMEOUT_MS || '600000'));
+const CONTEXT = Math.max(2048, Math.min(8192, Number(process.env.PERSONAL_AI_CONTEXT || '4096')));
+const CHAT_TIMEOUT_MS = Math.max(10_000, Math.min(180_000, Number(process.env.BHARATSHOP_CHAT_TIMEOUT_MS || '90000')));
+const CHAT_PREDICT_TOKENS = Math.max(32, Math.min(512, Number(process.env.BHARATSHOP_CHAT_PREDICT_TOKENS || '256')));
 const BODY_LIMIT = 12_000_000;
 const stateHome = process.env.BHARATSHOP_MACHINE_AI_HOME || join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'BharatShop', 'MachineAI');
 const pendingDir = join(stateHome, 'pending');
@@ -172,18 +174,18 @@ function redactEvidence(value) {
 }
 export function buildMemoryContext(task) {
   const groups=[['WORKING',pickMemory('working',task,4,true)],['PERSONAL',pickMemory('personal',task,4,true)],['SEMANTIC',pickMemory('semantic',task,10,false)],['EPISODIC',pickMemory('episodic',task,2,false)]];
-  let out='PERSISTENT BHARATSHOP MEMORY (local files; project source of truth when relevant)\n';
-  for(const [label,rows] of groups){if(!rows.length)continue;out+='\n['+label+']\n';for(const row of rows)out+='- '+String(row.content||'').trim()+'\n';}
-  return out.slice(0,24000);
+  let out='PERSISTENT BHARATSHOP MEMORY (historical context, NOT evidence of current runtime health)\n';
+  for(const [label,rows] of groups){if(!rows.length)continue;out+='\n['+label+']\n';for(const row of rows)out+='- '+String(row.content||'').trim().slice(0,1600)+'\n';}
+  return out.slice(0,8000);
 }
 function safeGrepTokens(task){return memoryTokens(task).filter(token=>/^[a-z0-9._/-]+$/.test(token)&&token.length>=4).slice(0,6);}
 export function buildReadOnlyProjectContext(task) {
   const state=projectStatus(); let grep='';
   const tokens=safeGrepTokens(task).filter(token=>!['review','check','status','project','local','memory'].includes(token));
   if(tokens.length){const args=['grep','-n','-I','-i'];for(const token of tokens)args.push('-e',token);args.push('--','src','scripts','tests','package.json');grep=fixedGit(args,'');}
-  const matches=grep?grep.split(/\r?\n/).slice(0,40).join('\n'):'(no matching tracked-source lines found)';
+  const matches=grep?grep.split(/\r?\n/).slice(0,16).join('\n'):'(no matching tracked-source lines found)';
   const changes=Array.isArray(state.changes)?state.changes.join('\n'):'';
-  return redactEvidence(['LIVE READ-ONLY REPOSITORY STATE','Root: '+state.root,'Branch: '+state.branch,'HEAD: '+state.head,'Uncommitted entries: '+state.dirtyFiles,'Working-tree sample:',changes||'(clean tracked tree)','','Relevant tracked-source matches (read-only git grep):',matches,'','Use only this evidence for repository claims. Safe read-only inspection does not require approval. Never claim a write, deploy, payment, publishing or browser action occurred unless an actual tool performed it.'].join('\n'));
+  return redactEvidence(['LIVE READ-ONLY REPOSITORY STATE','Root: '+state.root,'Branch: '+state.branch,'HEAD: '+state.head,'Uncommitted entries: '+state.dirtyFiles,'Working-tree sample:',changes||'(clean tracked tree)','','Relevant tracked-source matches (read-only git grep):',matches,'','Use only this evidence for repository claims. Safe read-only inspection does not require approval. Never claim a write, deploy, payment, publishing or browser action occurred unless an actual tool performed it.'].join('\n')).slice(0,7000);
 }
 
 function memoryStatus() {
@@ -274,11 +276,12 @@ function normalizeMessages(messages) {
 }
 
 function directSystemPrompt(installedModels = [], task = '') {
+  const needsProjectGrounding = /\b(bharatshop|bharatdrip|storefront|catalog|checkout|payment|order|agent|repository|repo|project|database|deployment|netlify|render)\b/i.test(task);
   return [
     'You are the user\'s private BharatShop laptop AI running locally through Ollama. Your exact active model is '+MODEL+'. Ollama endpoint is '+OLLAMA_BASE_URL+'. The currently installed Ollama model names, which you must reproduce exactly if referenced, are: '+(installedModels.join(', ')||MODEL)+'. The active local model is '+MODEL+'; a model name ending in :cloud is only listed by Ollama and is not active unless explicitly selected.',
     '',
     'GROUNDING RULES',
-    '- PERSISTENT BHARATSHOP MEMORY below is authoritative for BharatShop project facts, owner rules, architecture and backlog when relevant.',
+    '- Stored memory is historical context and preferences, not current process, queue, database or integration evidence. Never infer live health, running PIDs or completed work from memory. Registered agent count does not prove running workers. Zero queued tasks is not a fault by itself. This chat provides reasoning and bounded repository snapshots, not arbitrary execution tools. For observed runtime state use /audit; unavailable evidence is NOT VERIFIED, not an authorization lockdown.',
     '- Previous assistant messages may contain mistakes and are not authoritative when they conflict with persistent memory or live repository evidence.',
     '- If the user explicitly asks for stored-memory facts, answer from stored memory and say NOT VERIFIED for anything absent. Do not fill gaps from generic knowledge.',
     '- LIVE READ-ONLY REPOSITORY STATE is evidence available without changing files. Do not claim access beyond the evidence supplied.',
@@ -286,14 +289,14 @@ function directSystemPrompt(installedModels = [], task = '') {
     '- File writes, git writes, deployment, publishing, payments, browser actions, credentials and destructive database actions remain approval-gated.',
     '- Never invent completed external actions. Never request secrets.',
     '',
-    buildMemoryContext(task),
+    needsProjectGrounding ? buildMemoryContext(task) : 'No project-memory excerpt was loaded because this request does not require BharatShop grounding.',
     '',
-    buildReadOnlyProjectContext(task),
+    needsProjectGrounding ? buildReadOnlyProjectContext(task) : 'No repository snapshot was loaded because this request does not require repository evidence.',
   ].join('\n');
 }
 
 async function ollamaChat(systemPrompt, messages, { stream = false } = {}) {
-  const response = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
+  const response = await inferenceFetch(`${OLLAMA_BASE_URL}/api/chat`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -301,25 +304,27 @@ async function ollamaChat(systemPrompt, messages, { stream = false } = {}) {
       stream,
       think: false,
       messages: [{ role: 'system', content: systemPrompt }, ...normalizeMessages(messages)],
-      options: { num_ctx: CONTEXT },
+      options: { num_ctx: CONTEXT, num_predict: CHAT_PREDICT_TOKENS },
     }),
     signal: AbortSignal.timeout(CHAT_TIMEOUT_MS),
   });
-  if (!response.ok) throw new Error(`Ollama HTTP ${response.status}: ${(await response.text()).slice(0, 400)}`);
+  if (!response.ok) { await response.body?.cancel(); throw safeError(`Ollama HTTP ${response.status}. Check model availability and Ollama logs.`); }
   return response;
 }
 
 async function nonStreamingChat(systemPrompt, messages) {
   const response = await ollamaChat(systemPrompt, messages, { stream: false });
   const data = await response.json();
-  return String(data?.message?.content || '').trim();
+  if (data?.error || data?.done !== true || !String(data?.message?.content || '').trim()) throw safeError('Ollama did not return a completed specialist answer.');
+  return String(data.message.content).trim();
 }
 
 function writeEvent(res, event) {
+  if (res.destroyed || res.writableEnded) return;
   res.write(`${JSON.stringify(event)}\n`);
 }
 
-async function streamOllamaResponse(res,response){if(!response.body)throw new Error('Ollama returned no response body');const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='',full='';while(true){const {done,value}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});while(true){const n=buffer.indexOf('\n');if(n<0)break;const line=buffer.slice(0,n).trim();buffer=buffer.slice(n+1);if(!line)continue;let p;try{p=JSON.parse(line)}catch{continue}const t=String(p?.message?.content||'');if(t){full+=t;writeEvent(res,{type:'delta',text:t})}if(p?.done)writeEvent(res,{type:'meta',totalDuration:p.total_duration||null})}}const tail=buffer.trim();if(tail)try{const p=JSON.parse(tail),t=String(p?.message?.content||'');if(t){full+=t;writeEvent(res,{type:'delta',text:t})}}catch{}return full}
+async function streamOllamaResponse(res, response) { return readOllamaStream(response, event => writeEvent(res, event)); }
 
 async function handleDirectChat(res, messages) {
   const installed = await getModels();
@@ -358,7 +363,44 @@ async function handleAgencyChat(res, messages, selectedSlugs) {
   return streamOllamaResponse(res, response);
 }
 
-async function handleChat(req,res){const body=await readJson(req);let mode=normalizeRoute(body.mode),messages=normalizeMessages(body.messages);if(!messages.length||messages.at(-1)?.role!=='user')throw new Error('A user message is required');const original=String(messages.at(-1)?.content||'').trim();let resumed=null;res.writeHead(200,securityHeaders({'content-type':'application/x-ndjson; charset=utf-8','transfer-encoding':'chunked'}));try{if(isCancellationMessage(original)){const p=loadPendingApproval();clearPendingApproval();writeEvent(res,{type:'delta',text:p?'Pending BharatShop action cancelled.':'There is no pending BharatShop approval to cancel.'});writeEvent(res,{type:'done'});return res.end()}if(isApprovalMessage(original)){resumed=loadPendingApproval();if(!resumed){writeEvent(res,{type:'delta',text:'There is no pending BharatShop action awaiting approval. Tell me the task you want approved.'});writeEvent(res,{type:'done'});return res.end()}mode=normalizeRoute(resumed.mode);messages=[...messages.slice(0,-1),{role:'user',content:`APPROVAL GRANTED. Resume the pending task, but never claim a file/browser/production/payment/deployment action unless a tool actually ran it.\n\nPENDING TASK:\n${resumed.task}`}];writeEvent(res,{type:'status',text:`Resuming approved task: ${resumed.task.slice(0,140)}`})}const task=resumed?.task||original;const answer=mode==='agency'?await handleAgencyChat(res,messages,body.selectedAgents):await handleDirectChat(res,messages);if(resumed)clearPendingApproval();else if(asksForApproval(answer)){savePendingApproval(task,mode,answer);writeEvent(res,{type:'approval',status:'NEEDS_APPROVAL',task})}writeEvent(res,{type:'done'})}catch(e){writeEvent(res,{type:'error',error:e instanceof Error?e.message:String(e)})}res.end()}
+async function handleChatInner(req,res){const body=await readJson(req);let mode=normalizeRoute(body.mode),messages=normalizeMessages(body.messages);if(!messages.length||messages.at(-1)?.role!=='user')throw new Error('A user message is required');const original=String(messages.at(-1)?.content||'').trim();let resumed=null;res.writeHead(200,securityHeaders({'content-type':'application/x-ndjson; charset=utf-8','transfer-encoding':'chunked'}));try{if (/^\/audit\s*$/i.test(original)) { writeEvent(res,{type:'delta',text:await auditReport()});writeEvent(res,{type:'done'});return res.end(); }if(isCancellationMessage(original)){const p=loadPendingApproval();clearPendingApproval();writeEvent(res,{type:'delta',text:p?'Pending BharatShop action cancelled.':'There is no pending BharatShop approval to cancel.'});writeEvent(res,{type:'done'});return res.end()}if(isApprovalMessage(original)){resumed=loadPendingApproval();if(!resumed){writeEvent(res,{type:'delta',text:'There is no pending BharatShop action awaiting approval. Tell me the task you want approved.'});writeEvent(res,{type:'done'});return res.end()}mode=normalizeRoute(resumed.mode);messages=[...messages.slice(0,-1),{role:'user',content:`APPROVAL GRANTED. Resume the pending task, but never claim a file/browser/production/payment/deployment action unless a tool actually ran it.\n\nPENDING TASK:\n${resumed.task}`}];writeEvent(res,{type:'status',text:`Resuming approved task: ${resumed.task.slice(0,140)}`})}const task=resumed?.task||original;const answer=mode==='agency'?await handleAgencyChat(res,messages,body.selectedAgents):await handleDirectChat(res,messages);if(resumed)clearPendingApproval();else if(asksForApproval(answer)){savePendingApproval(task,mode,answer);writeEvent(res,{type:'approval',status:'NEEDS_APPROVAL',task})}writeEvent(res,{type:'done'})}catch(e){writeEvent(res,{type:'error',error:chatError(e)})}res.end()}
+
+// Serialize UI generations rather than silently overloading a small local model.
+let chatBusy = false;
+async function handleChat(req, res) {
+  if (chatBusy) return sendError(res, 429, 'A chat request is still running. Wait for completion before sending another.');
+  chatBusy = true;
+  const controller = new AbortController();
+  const closed = () => { if (!res.writableEnded) controller.abort(); };
+  req.once('aborted', closed);
+  res.once('close', closed);
+  try { await withInferenceScope(controller.signal, () => handleChatInner(req, res)); }
+  finally { req.off('aborted', closed); res.off('close', closed); controller.abort(); chatBusy = false; }
+}
+
+function queueCount(dir) {
+  try { return readdirSync(dir).filter(name => name.endsWith('.json')).length; }
+  catch { return 'UNKNOWN'; }
+}
+export async function auditReport() {
+  const status = await runtimeStatus();
+  const heartbeat = status.supervisor;
+  const stamp = Date.parse(heartbeat?.updatedAt || '');
+  const age = Number.isFinite(stamp) ? Math.max(0, Math.round((Date.now()-stamp)/1000)) : null;
+  return [
+    'LOCAL READ-ONLY AUDIT ? '+new Date().toISOString(),
+    'Ollama model-list endpoint: '+(status.ollama.ready ? 'RESPONDING' : 'UNREACHABLE'),
+    'Configured model: '+MODEL+'; installed: '+status.ollama.modelInstalled,
+    'Shim health: '+(status.shim.ready ? 'READY' : 'NOT READY'),
+    'Registered agent definitions: '+status.agents+' (not a running-process count; discovery errors may yield zero).',
+    'Queue files: pending='+queueCount(pendingDir)+', running='+queueCount(runningDir)+', results='+queueCount(resultsDir)+'.',
+    'Queue filenames alone do not establish successful task execution.',
+    'Supervisor heartbeat age: '+(age === null ? 'UNKNOWN' : age+' seconds')+'. A heartbeat file alone does not prove a live process.',
+    'Zero pending tasks can be normal idle state.',
+    'Individual agent health, model generation, task outputs, database, payments and external integrations: NOT VERIFIED by this check.',
+    'No production actions, restarts or tasks were executed.'
+  ].join('\n');
+}
 
 function serveStatic(req, res, pathname) {
   let relative = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
@@ -383,6 +425,7 @@ export function createServer() {
       const url = new URL(req.url || '/', `http://${req.headers.host}`);
 
       if (req.method === 'GET' && serveStatic(req, res, url.pathname)) return;
+      if (req.method === 'GET' && url.pathname === '/api/audit') return sendJson(res, 200, { ok: true, report: await auditReport() });
       if (req.method === 'GET' && url.pathname === '/api/status') return sendJson(res, 200, await runtimeStatus());
       if (req.method === 'GET' && url.pathname === '/api/agents') {
         const agents = await getAgents();
