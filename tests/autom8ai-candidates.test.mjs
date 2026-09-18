@@ -33,6 +33,17 @@ test("Autom8AI candidate preflight mirrors key marketing and fashion gates", () 
   assert.ok(source.includes("LOWER(p.supplier_name) = 'qikink'"));
   assert.ok(source.includes("custom_margin_pct::numeric >= 18"));
   assert.ok(source.includes("LIKE '%ORIGINAL%'"));
+  assert.ok(source.includes("eligibilityDiagnostics"));
+  assert.ok(source.includes("marketingFailureCounts"));
+  assert.ok(source.includes("fashionFailureCounts"));
+  assert.ok(source.includes("marketingNearMatches"));
+  assert.ok(source.includes("fashionNearMatches"));
+  assert.ok(source.includes("NOT_PUBLISHED"));
+  assert.ok(source.includes("NON_POSITIVE_PROFIT"));
+  assert.ok(source.includes("MARGIN_BELOW_18"));
+  assert.ok(source.includes("PRODUCTION_SUPPLIER_NOT_QIKINK"));
+  assert.ok(source.includes("NOT_MADE_TO_ORDER"));
+  assert.ok(source.includes("ORIGINAL_ART_POLICY_MISSING"));
 });
 
 test("package exposes the Autom8AI candidate preflight command", () => {
