@@ -150,6 +150,34 @@ export default function FashionAgentCockpit() {
     }
   }
 
+  async function queueAutom8Fashion(product: Product) {
+    if (busy) return;
+    setBusy(`autom8-${product.id}`);
+    setNotice("");
+    try {
+      const r = await fetch("/api/automation/autom8ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "fashion-creative",
+          productId: product.id,
+          objective: "Create an original BharatDrip campaign concept and short-form UGC/video brief while preserving the approved garment, artwork direction, IP policy and economics.",
+        }),
+      });
+      const d = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+      if (!r.ok) {
+        setNotice(d.error || "Autom8AI fashion workflow failed.");
+        return;
+      }
+      const job = d.result?.remoteJobId ? ` Job ${d.result.remoteJobId}.` : "";
+      setNotice(`Autom8AI creative workflow accepted for ${product.title}.${job} Returned assets remain review-only; no auto-publish or ad spend.`);
+    } catch {
+      setNotice("Autom8AI connection failed. Check the webhook configuration and retry.");
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function listDrop() {
     const d = await call({ action: "queue-and-list", trendName: direction?.trendName, trendIndex: selectedTrend, garmentCode, publishNow }, "list");
     if (!d) return;
@@ -183,6 +211,7 @@ export default function FashionAgentCockpit() {
                   <span className="rounded-full border border-orange-400/30 bg-orange-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.2em] text-orange-300">AI fashion employee</span>
                   <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.2em] text-emerald-300">Qikink made-to-order</span>
                   <span className="rounded-full border border-violet-400/30 bg-violet-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.2em] text-violet-300">Higgsfield UGC ready</span>
+                  <span className="rounded-full border border-cyan-400/30 bg-cyan-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.2em] text-cyan-300">Autom8AI orchestration</span>
                 </div>
                 <h1 className="max-w-4xl text-3xl font-black tracking-[-0.045em] text-white md:text-5xl">BharatDrip Fashion Designer AI Cockpit</h1>
                 <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-400 md:text-base">Live trends → Qikink blank selection → original streetwear direction → Higgsfield UGC creative → profitability/IP gate → BharatShop listing.</p>
@@ -297,7 +326,7 @@ export default function FashionAgentCockpit() {
                 <div className="p-4">
                   <div className="flex items-start justify-between gap-3"><div><div className="text-sm font-black text-white">{p.title}</div><div className="mt-1 text-[10px] font-bold uppercase tracking-[0.13em] text-slate-500">{p.sku}</div></div><StatusPill value={p.status} /></div>
                   <div className="mt-3 grid grid-cols-3 gap-2 text-center"><div className="rounded-lg bg-white/[0.035] p-2"><div className="text-[9px] text-slate-500">Price</div><div className="mt-1 text-xs font-black"><Money value={p.sellingPriceInr} /></div></div><div className="rounded-lg bg-white/[0.035] p-2"><div className="text-[9px] text-slate-500">Profit</div><div className="mt-1 text-xs font-black text-emerald-300"><Money value={p.netProfitInr} /></div></div><div className="rounded-lg bg-white/[0.035] p-2"><div className="text-[9px] text-slate-500">Margin</div><div className="mt-1 text-xs font-black text-emerald-300">{Math.round(p.marginPct)}%</div></div></div>
-                  <a href={`/store/product/${p.id}`} className="mt-3 inline-flex items-center gap-1.5 text-xs font-black text-orange-300">View product <ExternalLink className="h-3.5 w-3.5" /></a>
+                  <div className="mt-3 flex flex-wrap items-center gap-3"><a href={`/store/product/${p.id}`} className="inline-flex items-center gap-1.5 text-xs font-black text-orange-300">View product <ExternalLink className="h-3.5 w-3.5" /></a><button onClick={() => void queueAutom8Fashion(p)} disabled={!!busy} className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-400/20 bg-cyan-400/[0.07] px-2.5 py-1.5 text-[10px] font-black uppercase tracking-[0.1em] text-cyan-200 disabled:opacity-50">{busy === `autom8-${p.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />} Autom8AI creative</button></div>
                 </div>
               </div>
             ))}
