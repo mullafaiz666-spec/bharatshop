@@ -394,7 +394,9 @@ Files:
 
 Live execution requires:
 - `AUTOM8AI_WEBHOOK_URL`
-- `AUTOM8AI_WEBHOOK_TOKEN`
+
+Optional:
+- `AUTOM8AI_WEBHOOK_TOKEN` — only if the chosen webhook/provider adds bearer-token protection.
 
 Autom8AI does not replace Higgsfield or another renderer. It orchestrates the job and can call the configured renderer.
 
@@ -425,3 +427,17 @@ The token is never printed by the helper. Existing `.env.local` is backed up bef
 Live Autom8AI execution still requires the real webhook URL and token from the user's Autom8AI workflow.
 
 The activation-helper code head `e755819524e6e541217492b54ee195dc7a09169d` passed Creative Engine CI and the full Agent Suite Build, including integration tests, TypeScript, production build, and lint.
+
+
+## Autom8AI credential correction — 2026-09-18
+
+The user's actual Autom8AI Generic Webhook Trigger configuration screen shows a generated HTTPS webhook URL and no separate webhook-token field.
+
+Project behavior was corrected:
+- URL-only generic webhook is valid.
+- `AUTOM8AI_WEBHOOK_TOKEN` is optional.
+- BharatShop sends an Authorization header only when a token is configured.
+- Local configuration accepts a blank token and removes any stale token from `.env.local`.
+- Read-only verification considers a valid webhook URL sufficient for Autom8AI configuration.
+
+For the current workflow, leave "Wait for a completion event" OFF because BharatShop expects an immediate accepted/queued response and reviews resulting assets separately.
