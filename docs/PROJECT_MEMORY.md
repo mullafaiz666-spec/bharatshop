@@ -504,3 +504,10 @@ A safe helper now exists:
 - `npm run db:local:ensure`
 
 It may start only the existing container. It cannot create/reset/reseed/remove/replace the database or volume. After it succeeds, `npm run autom8ai:candidates` should be rerun.
+
+
+## Local DB credential alignment fallback — 2026-09-19
+
+The preserved `bharatshop-dev-db` container is now reachable on `127.0.0.1:55432`. The remaining failure was password authentication for user `bharatshop`.
+
+The candidate preflight now performs a secret-safe local-only retry using the existing container's own `POSTGRES_*` environment values in memory. It does not print/persist those values and does not alter the database password, container, volume, or records.
