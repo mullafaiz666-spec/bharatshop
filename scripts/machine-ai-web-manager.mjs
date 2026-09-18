@@ -9,7 +9,7 @@ import { isMachineAiStatus } from './machine-ai-web-readiness.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..');
-const port = Number(process.env.BHARATSHOP_MACHINE_UI_PORT || '3001');
+const port = Number(process.env.BHARATSHOP_MACHINE_UI_PORT || '3002');
 const url = `http://127.0.0.1:${port}`;
 const stateHome = join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'BharatShop', 'MachineAI', 'WebUI');
 const pidFile = join(stateHome, 'web-ui.pid');
