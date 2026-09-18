@@ -441,3 +441,23 @@ Project behavior was corrected:
 - Read-only verification considers a valid webhook URL sufficient for Autom8AI configuration.
 
 For the current workflow, leave "Wait for a completion event" OFF because BharatShop expects an immediate accepted/queued response and reviews resulting assets separately.
+
+
+## Local workstation + Autom8AI verified — 2026-09-18
+
+The clean repair worktree was restarted and verified successfully on the user's laptop.
+
+Verified runtime:
+- Store / BharatDrip / Fashion Studio: port 3001
+- Machine AI: port 3002
+- Ollama: ready
+- Qwen shim: ready
+- Supervisor: LOCAL_READY
+- Agents: 264
+- Read-only runtime verification: true
+- Autom8AI: configured
+- Current Autom8AI generic webhook uses URL-only configuration; no bearer token is in use
+
+The webhook URL itself is intentionally not recorded in project memory.
+
+Next step is a safe, explicit Autom8AI test event only. No ad spend, product publication, order creation, payment creation, approval creation, database mutation, or deployment should occur during that test.
