@@ -16,6 +16,10 @@ test('cockpit exposes only the fixed local operation allowlist', () => {
     'machine-start',
     'machine-status',
     'machine-stop',
+    'storefront-smoke',
+    'storefront-start',
+    'storefront-status',
+    'storefront-stop',
     'verify-local',
   ]);
   assert.equal(ids.some(id => /deploy|publish|payment|database|shell/i.test(id)), false);
@@ -40,6 +44,8 @@ test('web server and UI wire the operations cockpit', () => {
   assert.match(ui, /engineer-task/);
   assert.match(ui, /verify-local/);
   assert.match(ui, /db-local-status/);
+  assert.match(ui, /storefront-start/);
+  assert.match(ui, /storefront-smoke/);
   assert.match(html, /data-drawer="operations"/);
 });
 
@@ -57,4 +63,14 @@ test('local database health is loopback-only and read-only', () => {
   assert.match(source, /Refusing database health check for non-local host/);
   assert.match(source, /select 1 as ok/i);
   assert.doesNotMatch(source, /\b(?:insert|update|delete|drop|truncate|alter)\b/i);
+});
+
+
+test('local storefront manager is loopback-bound and production-build gated', () => {
+  const source = readFileSync(resolve('scripts/local-storefront-manager.mjs'), 'utf8');
+  assert.match(source, /const HOST = '127\.0\.0\.1'/);
+  assert.match(source, /\.next.*BUILD_ID/);
+  assert.match(source, /nextBin, 'start'/);
+  assert.match(source, /windowsHide: true/);
+  assert.match(source, /READ_ONLY_HTTP_SMOKE/);
 });
