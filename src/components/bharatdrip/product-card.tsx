@@ -20,7 +20,7 @@ export function ProductCard({ product, index = 0 }: { product: Product; index?: 
   return (
     <article className="product-card" style={{ "--card-index": index } as CSSProperties}>
       <div className="product-image-wrap">
-        <Link href={`/products/${product.slug}`} className="product-image-link" aria-label={`View ${product.name}`}>
+        <Link href={`/bharatdrip/products/${product.slug}`} className="product-image-link" aria-label={`View ${product.name}`}>
           <img src={product.images[0]} alt={product.name} className="product-image" loading={index > 3 ? "lazy" : "eager"} />
           <span className="product-view-label">View piece <ArrowUpRight size={14} /></span>
         </Link>
@@ -28,8 +28,8 @@ export function ProductCard({ product, index = 0 }: { product: Product; index?: 
         <button className={`save-button ${saved ? "saved" : ""}`} onClick={() => setSaved((value) => !value)} aria-label={saved ? `Remove ${product.name} from saved items` : `Save ${product.name}`}><Heart size={17} /></button>
       </div>
       <div className="product-card-info">
-        <div className="product-card-heading"><div><Link href={`/products/${product.slug}`} className="product-name">{product.name}</Link><p className="product-tagline">{product.tagline}</p></div><strong className="product-price">{formatPrice(product.price)}</strong></div>
-        <div className="product-card-meta"><span>{product.color}</span><span className="product-rating"><Star size={11} /> {product.rating}</span></div>
+        <div className="product-card-heading"><div><Link href={`/bharatdrip/products/${product.slug}`} className="product-name">{product.name}</Link><p className="product-tagline">{product.tagline}</p></div><strong className="product-price">{formatPrice(product.price)}</strong></div>
+        <div className="product-card-meta"><span>{product.color}</span>{product.reviewCount > 0 ? <span className="product-rating"><Star size={11} /> {product.rating}</span> : <span className="product-rating">New</span>}</div>
         <button className={`quick-add ${added ? "added" : ""}`} onClick={quickAdd}>{added ? "Added to bag" : "Quick add"}<span>{added ? "✓" : "+"}</span></button>
       </div>
     </article>
