@@ -316,3 +316,24 @@ Whenever a major change is made, update the appropriate durable docs with:
 - next action
 
 For decisions that materially change architecture, also record the reason so future work does not accidentally reverse the decision.
+
+
+## BharatDrip live database connection — 2026-09-18
+
+The previously missing Fashion Designer -> DB -> dedicated BharatDrip storefront connection has now been implemented on the repair branch.
+
+Current flow:
+Fashion Designer AI
+-> Qikink costing / IP / profitability gates
+-> product + details + images in DB
+-> status Published
+-> `getLiveBharatDripProducts()`
+-> themed `/bharatdrip` catalogue
+-> dedicated `/bharatdrip/products/live-...` detail route
+
+Static BharatDrip catalogue entries remain as safe fallback content. New live database drops do not receive invented ratings/reviews.
+
+Still to verify before production:
+- branch CI after latest type fix
+- local laptop build/runtime on the reconciled worktree
+- BharatDrip live-product cart/checkout/order persistence
