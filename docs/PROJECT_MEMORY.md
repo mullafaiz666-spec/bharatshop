@@ -461,3 +461,19 @@ Verified runtime:
 The webhook URL itself is intentionally not recorded in project memory.
 
 Next step is a safe, explicit Autom8AI test event only. No ad spend, product publication, order creation, payment creation, approval creation, database mutation, or deployment should occur during that test.
+
+
+## Autom8AI live webhook handshake verified — 2026-09-18
+
+The live Generic Webhook Trigger is now confirmed working from the BharatShop repair worktree.
+
+Safe dry-run result:
+- HTTP 200
+- received=true
+- fired=1
+- no bearer token used
+- no ad spend, publishing, product mutation, order/payment/approval creation, database mutation, or deployment
+
+Autom8AI connectivity is therefore no longer a blocker.
+
+Next milestone is downstream workflow execution: take the received BharatShop event and route marketing/fashion requests to the configured creative/video renderer, with human review before publication.
