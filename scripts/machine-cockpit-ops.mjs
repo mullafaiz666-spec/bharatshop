@@ -91,8 +91,11 @@ function listJobs(limit = 12) {
       .map(name => readJson(join(jobsDir, name)))
       .filter(Boolean)
       .map(job => {
-        if (job.status === 'RUNNING' && job.pid && !pidAlive(job.pid)) return { ...job, status: 'STALE' };
-        return job;
+        let normalized = job;
+        if (job.status === 'RUNNING' && job.pid && !pidAlive(job.pid)) normalized = { ...job, status: 'STALE' };
+        let logTail = '';
+        try { logTail = redact(readFileSync(logPath(job.id), 'utf8')).slice(-6000); } catch {}
+        return { ...normalized, logTail };
       });
   } catch {
     return [];
