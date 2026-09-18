@@ -17,7 +17,7 @@ test("Autom8AI adapter is explicit webhook orchestration with fail-closed config
   assert.ok(adapter.includes('adSpend: false'));
   assert.ok(adapter.includes('productMutation: false'));
   assert.ok(adapter.includes('requiresHumanReview: true'));
-  assert.ok(adapter.includes('Authorization: `Bearer ${configuredToken()}`'));
+  assert.ok(adapter.includes('...(token ? { Authorization: `Bearer ${token}` } : {})'));
 });
 
 test("Autom8AI marketing-video jobs require a real published profitable product", () => {
@@ -50,4 +50,5 @@ test("read-only marketing connection checks never trigger Autom8AI webhooks", ()
   assert.ok(connections.includes("Read-only verification does not trigger workflow webhooks"));
   assert.ok(env.includes("AUTOM8AI_WEBHOOK_URL="));
   assert.ok(env.includes("AUTOM8AI_WEBHOOK_TOKEN="));
+  assert.ok(env.includes("Optional. Leave blank for Autom8AI generic webhooks"));
 });
