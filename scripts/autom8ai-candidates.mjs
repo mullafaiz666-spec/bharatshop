@@ -3,6 +3,7 @@
 import { config as loadDotEnv, parse as parseDotEnv } from "dotenv";
 import pg from "pg";
 import { existsSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 
@@ -58,14 +59,64 @@ if (!isLocalDatabase) {
   } catch {}
 }
 
-const pool = new Pool({
-  connectionString: databaseUrl,
-  ssl: isLocalDatabase ? undefined : { rejectUnauthorized: false, minVersion: "TLSv1.2" },
-  max: 1,
-  idleTimeoutMillis: 5_000,
-  connectionTimeoutMillis: 10_000,
-  allowExitOnIdle: true,
-});
+function createPool(connectionString, local) {
+  return new Pool({
+    connectionString,
+    ssl: local ? undefined : { rejectUnauthorized: false, minVersion: "TLSv1.2" },
+    max: 1,
+    idleTimeoutMillis: 5_000,
+    connectionTimeoutMillis: 10_000,
+    allowExitOnIdle: true,
+  });
+}
+
+function exactLocalContainerTarget(rawUrl) {
+  try {
+    const parsed = new URL(rawUrl);
+    return ["127.0.0.1", "localhost"].includes(parsed.hostname.toLowerCase())
+      && String(parsed.port || "5432") === "55432";
+  } catch {
+    return false;
+  }
+}
+
+function existingContainerDatabaseUrl() {
+  if (!exactLocalContainerTarget(rawDatabaseUrl)) return null;
+
+  const inspect = spawnSync(
+    "docker",
+    ["inspect", "-f", "{{json .Config.Env}}", "bharatshop-dev-db"],
+    { encoding: "utf8", windowsHide: true, shell: false },
+  );
+  if (inspect.status !== 0) return null;
+
+  try {
+    const envList = JSON.parse(String(inspect.stdout || "").trim());
+    if (!Array.isArray(envList)) return null;
+
+    const env = Object.fromEntries(
+      envList
+        .map((entry) => String(entry))
+        .map((entry) => {
+          const index = entry.indexOf("=");
+          return index > 0 ? [entry.slice(0, index), entry.slice(index + 1)] : null;
+        })
+        .filter(Boolean),
+    );
+
+    const user = String(env.POSTGRES_USER || "").trim();
+    const password = String(env.POSTGRES_PASSWORD || "");
+    const database = String(env.POSTGRES_DB || user || "").trim();
+    if (!user || !password || !database) return null;
+
+    return {
+      value: `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@127.0.0.1:55432/${encodeURIComponent(database)}`,
+      source: "existing-bharatshop-dev-db-container-env",
+    };
+  } catch {
+    return null;
+  }
+}
 
 function safeNumber(value) {
   const n = Number(value);
@@ -86,40 +137,70 @@ function summary(row) {
   };
 }
 
-try {
-  await pool.query("BEGIN READ ONLY");
+async function queryCandidates(connectionString, local) {
+  const pool = createPool(connectionString, local);
+  try {
+    await pool.query("BEGIN READ ONLY");
 
-  const marketing = await pool.query(`
-    SELECT id, title, brand, supplier_name, status, selling_price_inr,
-           net_profit_inr, custom_margin_pct, image_url
-      FROM products
-     WHERE status = 'Published'
-       AND net_profit_inr::numeric > 0
-     ORDER BY net_profit_inr::numeric DESC, id DESC
-     LIMIT 10
-  `);
+    const marketing = await pool.query(`
+      SELECT id, title, brand, supplier_name, status, selling_price_inr,
+             net_profit_inr, custom_margin_pct, image_url
+        FROM products
+       WHERE status = 'Published'
+         AND net_profit_inr::numeric > 0
+       ORDER BY net_profit_inr::numeric DESC, id DESC
+       LIMIT 10
+    `);
 
-  const fashion = await pool.query(`
-    SELECT p.id, p.title, p.brand, p.supplier_name, p.status, p.selling_price_inr,
-           p.net_profit_inr, p.custom_margin_pct, p.image_url,
-           COALESCE(pd.specifications_json ->> 'productionSupplier', '') AS production_supplier,
-           COALESCE(pd.specifications_json ->> 'inventoryMode', '') AS inventory_mode,
-           COALESCE(pd.specifications_json ->> 'ipPolicy', '') AS ip_policy
-      FROM products p
-      LEFT JOIN product_details pd ON pd.product_id = p.id
-     WHERE LOWER(p.brand) IN ('bharatdrip', 'bharatshop studio')
-       AND LOWER(p.supplier_name) = 'qikink'
-       AND p.net_profit_inr::numeric > 0
-       AND p.custom_margin_pct::numeric >= 18
-       AND LOWER(COALESCE(pd.specifications_json ->> 'productionSupplier', '')) = 'qikink'
-       AND UPPER(COALESCE(pd.specifications_json ->> 'inventoryMode', '')) = 'MADE_TO_ORDER'
-       AND UPPER(COALESCE(pd.specifications_json ->> 'ipPolicy', '')) LIKE '%ORIGINAL%'
-     ORDER BY p.net_profit_inr::numeric DESC, p.id DESC
-     LIMIT 10
-  `);
+    const fashion = await pool.query(`
+      SELECT p.id, p.title, p.brand, p.supplier_name, p.status, p.selling_price_inr,
+             p.net_profit_inr, p.custom_margin_pct, p.image_url,
+             COALESCE(pd.specifications_json ->> 'productionSupplier', '') AS production_supplier,
+             COALESCE(pd.specifications_json ->> 'inventoryMode', '') AS inventory_mode,
+             COALESCE(pd.specifications_json ->> 'ipPolicy', '') AS ip_policy
+        FROM products p
+        LEFT JOIN product_details pd ON pd.product_id = p.id
+       WHERE LOWER(p.brand) IN ('bharatdrip', 'bharatshop studio')
+         AND LOWER(p.supplier_name) = 'qikink'
+         AND p.net_profit_inr::numeric > 0
+         AND p.custom_margin_pct::numeric >= 18
+         AND LOWER(COALESCE(pd.specifications_json ->> 'productionSupplier', '')) = 'qikink'
+         AND UPPER(COALESCE(pd.specifications_json ->> 'inventoryMode', '')) = 'MADE_TO_ORDER'
+         AND UPPER(COALESCE(pd.specifications_json ->> 'ipPolicy', '')) LIKE '%ORIGINAL%'
+       ORDER BY p.net_profit_inr::numeric DESC, p.id DESC
+       LIMIT 10
+    `);
 
-  await pool.query("ROLLBACK");
+    await pool.query("ROLLBACK");
+    return { marketing, fashion };
+  } catch (error) {
+    try { await pool.query("ROLLBACK"); } catch {}
+    throw error;
+  } finally {
+    await pool.end().catch(() => undefined);
+  }
+}
 
+async function run() {
+  let selectedDatabase = { value: databaseUrl, source: inheritedDatabase?.source || "unknown" };
+  let result;
+
+  try {
+    result = await queryCandidates(selectedDatabase.value, isLocalDatabase);
+  } catch (error) {
+    const authFailure = String(error instanceof Error ? error.message : error).toLowerCase().includes("password authentication failed")
+      || String(error?.code || "") === "28P01";
+
+    if (!authFailure || !exactLocalContainerTarget(rawDatabaseUrl)) throw error;
+
+    const containerDatabase = existingContainerDatabaseUrl();
+    if (!containerDatabase) throw error;
+
+    selectedDatabase = containerDatabase;
+    result = await queryCandidates(selectedDatabase.value, true);
+  }
+
+  const { marketing, fashion } = result;
   console.log(JSON.stringify({
     ok: true,
     mode: "AUTOM8AI_READ_ONLY_CANDIDATE_PREFLIGHT",
@@ -127,8 +208,10 @@ try {
     startsRenderer: false,
     consumesCredits: false,
     mutatesDatabase: false,
-    databaseSource: inheritedDatabase?.source || "unknown",
+    databaseSource: selectedDatabase.source,
     secretValuesPrinted: false,
+    persistedSecretChanges: false,
+    changedDatabasePassword: false,
     marketingVideoCandidates: marketing.rows.map(summary),
     fashionCreativeCandidates: fashion.rows.map(summary),
     next: fashion.rowCount
@@ -137,14 +220,16 @@ try {
         ? `No strict fashion candidate found. ProductId ${marketing.rows[0].id} is available for a marketing-video workflow test.`
         : "No eligible Published profitable products were found.",
   }, null, 2));
-} catch (error) {
-  try { await pool.query("ROLLBACK"); } catch {}
+}
+
+run().catch((error) => {
   console.error(JSON.stringify({
     ok: false,
     mode: "AUTOM8AI_READ_ONLY_CANDIDATE_PREFLIGHT",
     error: error instanceof Error ? error.message : String(error),
+    secretValuesPrinted: false,
+    persistedSecretChanges: false,
+    changedDatabasePassword: false,
   }, null, 2));
   process.exitCode = 1;
-} finally {
-  await pool.end().catch(() => undefined);
-}
+});
