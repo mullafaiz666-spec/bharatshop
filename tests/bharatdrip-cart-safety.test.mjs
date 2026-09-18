@@ -7,8 +7,8 @@ const source = readFileSync(resolve('src/components/bharatdrip/cart-context.tsx'
 
 test('BharatDrip restores persisted cart from canonical products instead of trusting stored prices', () => {
   assert.match(source, /export function restoreCart/);
-  assert.match(source, /products\.find\(\(item\) => item\.id === productId\)/);
-  assert.match(source, /setItems\(restoreCart\(JSON\.parse\(stored\)\)\)/);
+  assert.match(source, /catalogue\.find\(\(item\) => item\.id === productId\)/);
+  assert.match(source, /setItems\(restoreCart\(JSON\.parse\(stored\), catalogue\)\)/);
   assert.match(source, /product\.sizes\.includes\(size\)/);
   assert.match(source, /MAX_LINE_QUANTITY/);
 });
@@ -23,4 +23,11 @@ test('BharatDrip checkout cannot invent or clear a fake order', () => {
   assert.doesNotMatch(source, /setView\(["']success["']\)/);
   assert.match(source, /no order was created and no payment was attempted/i);
   assert.match(source, /Checkout is a preview only/i);
+});
+
+
+test('BharatDrip cart provider can rehydrate live database products without trusting persisted prices', () => {
+  assert.match(source, /catalogue = staticProducts/);
+  assert.match(source, /restoreCart\(value: unknown, catalogue: Product\[\]/);
+  assert.match(source, /catalogue\.find\(\(item\) => item\.id === productId\)/);
 });
