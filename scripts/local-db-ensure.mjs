@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import net from "node:net";
 
 const HOST = "127.0.0.1";
@@ -35,6 +37,52 @@ function runDocker(args) {
   };
 }
 
+function dockerDesktopCandidates() {
+  if (process.platform !== "win32") return [];
+  return [
+    process.env.ProgramFiles ? join(process.env.ProgramFiles, "Docker", "Docker", "Docker Desktop.exe") : "",
+    process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, "Docker", "Docker Desktop.exe") : "",
+  ].filter(Boolean);
+}
+
+function startDockerDesktopIfInstalled() {
+  const executable = dockerDesktopCandidates().find((candidate) => existsSync(candidate));
+  if (!executable) return { started: false, reason: "not-found" };
+  const child = spawn(executable, [], {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  child.unref();
+  return { started: true, reason: "launched" };
+}
+
+async function ensureDockerEngine() {
+  const current = runDocker(["info", "--format", "{{.ServerVersion}}"]);
+  if (current.ok) return { ok: true, action: "already-running" };
+
+  const launch = startDockerDesktopIfInstalled();
+  if (!launch.started) {
+    return {
+      ok: false,
+      action: "docker-desktop-not-found",
+      error: "Docker engine is unavailable and Docker Desktop executable was not found in the standard Windows locations.",
+    };
+  }
+
+  for (let i = 0; i < 120; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    const probe = runDocker(["info", "--format", "{{.ServerVersion}}"]);
+    if (probe.ok) return { ok: true, action: "started-docker-desktop" };
+  }
+
+  return {
+    ok: false,
+    action: "docker-engine-timeout",
+    error: "Docker Desktop was launched but the Docker engine did not become ready.",
+  };
+}
+
 async function main() {
   if (await portOpen()) {
     console.log(JSON.stringify({
@@ -52,6 +100,23 @@ async function main() {
     return;
   }
 
+  const docker = await ensureDockerEngine();
+  if (!docker.ok) {
+    console.error(JSON.stringify({
+      ok: false,
+      mode: "LOCAL_DB_EXISTING_SERVICE_ENSURE",
+      host: HOST,
+      port: PORT,
+      error: docker.error,
+      next: "Start Docker Desktop manually if needed, then rerun. This helper will not create or replace the database container.",
+      createdContainer: false,
+      resetDatabase: false,
+      removedContainer: false,
+      reseededDatabase: false,
+    }, null, 2));
+    process.exit(1);
+  }
+
   const inspect = runDocker(["inspect", "-f", "{{.State.Status}}", CONTAINER]);
   if (!inspect.ok) {
     console.error(JSON.stringify({
@@ -59,8 +124,9 @@ async function main() {
       mode: "LOCAL_DB_EXISTING_SERVICE_ENSURE",
       host: HOST,
       port: PORT,
-      error: "Existing Docker container bharatshop-dev-db is unavailable or Docker Desktop is not running.",
-      next: "Start Docker Desktop, then rerun this command. This helper will not create or replace the database container.",
+      dockerAction: docker.action,
+      error: "Docker is running, but the preserved bharatshop-dev-db container was not found.",
+      next: "Do not create a replacement automatically. Locate the preserved container/volume before proceeding.",
       createdContainer: false,
       resetDatabase: false,
       removedContainer: false,
@@ -94,6 +160,7 @@ async function main() {
         host: HOST,
         port: PORT,
         container: CONTAINER,
+        dockerAction: docker.action,
         action: before === "running" ? "waited-for-listener" : "started-existing-container",
         createdContainer: false,
         resetDatabase: false,
