@@ -4,7 +4,7 @@
   "scripts": {
     "dev": "next dev",
     "dev:full": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-upstream-runtime.ps1 -Mode Bootstrap && next dev --webpack",
-    "build": "next build --webpack",
+    "build": "next build",
     "creative": "node scripts/bharatshop-creative.mjs",
     "db:push": "node scripts/safe-db-push.mjs",
     "db:check": "drizzle-kit check",
