@@ -194,3 +194,25 @@ The callback accepts:
 - HTTPS asset/workflow URLs only
 
 A completed result is recorded in `ai_activity_logs` as review-only evidence. The callback does not update `products`, does not add `product_images`, does not publish, and does not spend ad budget.
+
+
+## Current Higgsfield renderer target — verified 2026-09-18
+
+Read-only Higgsfield model discovery currently recommends:
+
+Primary:
+- renderer: Higgsfield
+- model: `marketing_studio_video`
+- mode: `ugc`
+- use case: realistic product / creator UGC for Reels and TikTok
+- preferred aspect ratio: `9:16`
+- supported UGC duration target: 12-15 seconds
+- default resolution target: 720p
+- audio: enabled when appropriate
+
+Fallback for longer or more flexible reference-driven video:
+- model: `seedance_2_5`
+- duration: 4-30 seconds
+- supports image/reference-driven generation and 9:16 output
+
+These are render hints, not automatic credit-spend authorization. Autom8AI should not initiate paid generation unless the configured renderer account/workflow permits it and the operator has authorized that workflow.
