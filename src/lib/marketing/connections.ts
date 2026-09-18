@@ -14,6 +14,7 @@ export function marketingConnections(): Channel[] {
     { key:"facebook", label:"Facebook Page", missing:["META_ACCESS_TOKEN","META_PAGE_ID"].filter(n=>!present(n)) },
     { key:"instagram", label:"Instagram Business", missing:["META_ACCESS_TOKEN","META_INSTAGRAM_ACCOUNT_ID","META_PAGE_ID"].filter(n=>!present(n)) },
     { key:"meta-capi", label:"Meta Pixel/Dataset + Conversions API", missing:[...(datasetId()?[]:["META_DATASET_ID or META_PIXEL_ID or NEXT_PUBLIC_META_PIXEL_ID"]),...(capiToken()?[]:["META_CONVERSIONS_API_TOKEN or META_CAPI_TOKEN or META_ACCESS_TOKEN"])] },
+    { key:"autom8ai", label:"Autom8AI Creative Orchestration", missing:["AUTOM8AI_WEBHOOK_URL","AUTOM8AI_WEBHOOK_TOKEN"].filter(n=>!present(n)) },
   ];
   return configs.map(c=>({key:c.key,label:c.label,configured:!c.missing.length,connected:false,status:c.missing.length?"NOT_CONFIGURED":"NOT_TESTED",missing:c.missing}));
 }
@@ -28,6 +29,9 @@ export async function verifyMarketingConnections() {
   return Promise.all(marketingConnections().map(async channel => {
     if (!channel.configured) return channel;
     try {
+      if (channel.key === "autom8ai") {
+        return { ...channel, connected: false, status: "NOT_TESTED" as const, error: "Read-only verification does not trigger workflow webhooks. Queue an explicit creative job to test connectivity." };
+      }
       if (channel.key === "google") {
         const customerId = process.env.GOOGLE_ADS_CUSTOMER_ID!.replace(/-/g, "");
         const version = process.env.GOOGLE_ADS_API_VERSION || "v25";
