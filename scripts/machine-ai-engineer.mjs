@@ -44,6 +44,11 @@ function safeChildEnv() {
   }
   env.CI = '1';
   env.BHARATSHOP_ENGINEERING_SANDBOX = '1';
+  env.GIT_TERMINAL_PROMPT = '0';
+  env.GCM_INTERACTIVE = 'Never';
+  env.GIT_CONFIG_COUNT = '1';
+  env.GIT_CONFIG_KEY_0 = 'remote.origin.pushurl';
+  env.GIT_CONFIG_VALUE_0 = 'disabled://bharatshop-machine-engineer';
   return env;
 }
 
@@ -83,6 +88,21 @@ function assertPreflight({ requireClean = true } = {}) {
     if (dirty) throw new Error('Refusing to start from a dirty worktree. Checkpoint/stash the existing changes first.');
   }
   return { branch, head: currentHead(), clean: !workingTree(), secretFiles: secrets };
+}
+
+function assertPostHarness(preflight) {
+  const secrets = secretFiles();
+  if (secrets.length) {
+    throw new Error(`Harness created or exposed secret-bearing workspace files: ${secrets.join(', ')}. Verification stopped.`);
+  }
+  const branch = currentBranch();
+  if (branch !== preflight.branch) {
+    throw new Error(`Harness changed branches from "${preflight.branch}" to "${branch}". Verification stopped.`);
+  }
+  const head = currentHead();
+  if (head !== preflight.head) {
+    throw new Error('Harness created or moved a commit. Verification stopped; inspect the isolated repair branch before continuing.');
+  }
 }
 
 function redact(value) {
@@ -206,6 +226,7 @@ try {
   console.log('Production writes/deploy/commit/push: DISABLED');
 
   const first = invokeHarness(makePrompt(task));
+  assertPostHarness(preflight);
   let verification = runChecks();
   let repair = null;
   let failures = verification.filter(item => !item.ok);
@@ -217,6 +238,7 @@ try {
       exitCode: first.exitCode,
       outputTail: redact(first.error || 'Harness task exited non-zero without deterministic check failures.'),
     }]));
+    assertPostHarness(preflight);
     verification = runChecks();
     failures = verification.filter(item => !item.ok);
   }
