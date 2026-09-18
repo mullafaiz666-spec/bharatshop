@@ -490,3 +490,19 @@ Current Higgsfield render hints were refreshed from read-only model discovery:
 - fallback: `seedance_2_5` for flexible 4-30 second reference-driven video.
 
 No renderer generation was executed during this change and no credits were spent.
+
+
+## 20. Autom8AI candidate preflight DB-env fallback — 2026-09-19
+
+The first local candidate preflight correctly failed because the repair worktree's `.env.local` contained the Autom8AI webhook but no `DATABASE_URL` or `SUPABASE_DB_URL`.
+
+The preflight was corrected without copying or printing secrets:
+- first uses the repair worktree/process DB env when available;
+- otherwise reads the existing sibling `bharatshop-harness` `.env.local` or `.env` in memory;
+- uses only `DATABASE_URL` / `SUPABASE_DB_URL`;
+- does not write the secret into the repair worktree;
+- does not print the secret value;
+- remains `BEGIN READ ONLY` + `ROLLBACK`;
+- does not trigger Autom8AI or any renderer.
+
+A CI safety-test false positive was also fixed: JavaScript `URLSearchParams.delete()` is no longer mistaken for SQL `DELETE FROM`.
