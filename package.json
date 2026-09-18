@@ -83,7 +83,11 @@
     "machine:web:stop": "node scripts/machine-ai-web-manager.mjs stop",
     "machine:web:status": "node scripts/machine-ai-web-manager.mjs status",
     "machine:web:uninstall": "node scripts/machine-ai-web-manager.mjs uninstall",
-    "machine:web:foreground": "node scripts/machine-ai-web.mjs"
+    "machine:web:foreground": "node scripts/machine-ai-web.mjs",
+    "openmontage:status": "node scripts/openmontage-creative.mjs status",
+    "openmontage:bootstrap": "node scripts/openmontage-creative.mjs bootstrap",
+    "openmontage:plan": "node scripts/openmontage-creative.mjs plan",
+    "openmontage:backlot": "node scripts/openmontage-creative.mjs backlot"
   },
   "dependencies": {
     "@types/node": "22.19.15",
