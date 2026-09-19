@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync, appendFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve, sep } from "node:path";
+import { specialistAiEmployee } from "@/lib/agents/employees";
 
 export type ChatRole = "user" | "assistant";
 export type ChatMessage = { role: ChatRole; content: string };
@@ -127,7 +128,14 @@ export function publicAgents(query = "") {
   const q = query.trim().toLowerCase();
   return discoverAgents()
     .filter((agent) => !q || `${agent.name} ${agent.slug} ${agent.description} ${agent.division}`.toLowerCase().includes(q))
-    .map(({ slug, shortSlug, name, description, division }) => ({ slug, shortSlug, name, description, division }));
+    .map(({ slug, shortSlug, name, description, division }) => ({
+      slug,
+      shortSlug,
+      name,
+      description,
+      division,
+      employee: specialistAiEmployee({ slug, name, description, division }),
+    }));
 }
 
 function agentScore(agent: AgentRecord, task: string) {
