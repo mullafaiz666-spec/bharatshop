@@ -55,9 +55,9 @@ export default function AgentStudio() {
       const data = await response.json();
       if (data.sessionId) setSessionId(String(data.sessionId));
       if (Array.isArray(data.toolExecutions)) setTrace(data.toolExecutions);
-      setMessages((current) => [...current, { role: "assistant", content: String(data.reply || data.error || "The agent did not return an answer.") }]);
+      setMessages((current) => [...current, { role: "assistant", content: String(data.reply || data.error || "The AI employee did not return an answer.") }]);
     } catch (error) {
-      setMessages((current) => [...current, { role: "assistant", content: `Agent request failed: ${String(error)}` }]);
+      setMessages((current) => [...current, { role: "assistant", content: `AI employee request failed: ${String(error)}` }]);
     } finally {
       setBusy(false);
     }
@@ -65,13 +65,13 @@ export default function AgentStudio() {
 
   return <main className="mx-auto max-w-7xl p-4 sm:p-7 text-slate-100">
     <div className="mb-6">
-      <h1 className="text-3xl sm:text-4xl font-black tracking-tight">BharatShop Agent Studio</h1>
-      <p className="mt-2 text-sm text-slate-400">All operational agents now share one conversational plan → tool → observe → continue runtime with persistent session memory and audited tool use.</p>
+      <h1 className="text-3xl sm:text-4xl font-black tracking-tight">BharatShop AI Employee Studio</h1>
+      <p className="mt-2 text-sm text-slate-400">Every operational agent is now presented as an AI employee with a defined role, reporting line, persistent session memory, audited tools and human-protected approval boundaries.</p>
     </div>
 
     <div className="grid gap-5 lg:grid-cols-[330px_1fr]">
       <aside className="rounded-2xl border border-slate-800 bg-slate-950/70 p-3 lg:max-h-[78vh] lg:overflow-y-auto">
-        <div className="px-2 pb-3 text-xs font-bold uppercase tracking-wider text-slate-500">Specialist agents</div>
+        <div className="px-2 pb-3 text-xs font-bold uppercase tracking-wider text-slate-500">AI employees</div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-2">
           {agents.map((item) => <button
             key={item.id}
@@ -87,7 +87,7 @@ export default function AgentStudio() {
       <section className="min-h-[70vh] overflow-hidden rounded-2xl border border-slate-800 bg-slate-950/70 flex flex-col">
         <header className="border-b border-slate-800 p-4">
           <div className="font-black text-lg">{selected.title}</div>
-          <div className="text-xs text-emerald-400 mt-1">Conversational agent • multi-step tools • PostgreSQL memory • human approval protected</div>
+          <div className="text-xs text-emerald-400 mt-1">AI employee • multi-step tools • PostgreSQL memory • reports through AI CEO • human approval protected</div>
         </header>
 
         <div className="flex-1 min-h-[420px] p-4 space-y-3 overflow-y-auto">
