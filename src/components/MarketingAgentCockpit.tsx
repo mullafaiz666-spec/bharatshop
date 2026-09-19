@@ -196,6 +196,7 @@ export default function MarketingAgentCockpit() {
   const [connections, setConnections] = useState<Connection[]>([]);
   const [busy, setBusy] = useState<string>("");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const hydrated = useRef(false);
   const importRef = useRef<HTMLInputElement>(null);
@@ -267,6 +268,31 @@ export default function MarketingAgentCockpit() {
   function selectProduct(id: string) {
     const next = data?.products.find((item) => String(item.id) === id);
     setLaunch((current) => ({ ...current, productId: id, bodyText: next?.aiMarketingCopy || "", targetAudience: next?.aiTargetAudience || "" }));
+  }
+
+  async function queueMarketingVideo() {
+    if (!launch.productId) return setError("Select a product first.");
+    setBusy("autom8-video"); setError(""); setNotice("");
+    try {
+      const body = await readJson(await fetch("/api/automation/autom8ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "marketing-video",
+          productId: Number(launch.productId),
+          platforms: [launch.platform],
+          objective: launch.bodyText || undefined,
+          hook: launch.headline || undefined,
+          cta: launch.ctaText || "Shop now",
+        }),
+      }));
+      const job = body.result?.remoteJobId ? ` · job ${body.result.remoteJobId}` : "";
+      setNotice(`Autom8AI marketing-video workflow accepted for review${job}. No ad spend or publishing was enabled.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Autom8AI marketing-video request failed");
+    } finally {
+      setBusy("");
+    }
   }
 
   async function createCampaign() {
@@ -452,6 +478,7 @@ export default function MarketingAgentCockpit() {
 
     <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
       {error && <div className="mb-5 flex items-start justify-between gap-4 rounded-2xl border border-rose-400/30 bg-rose-400/10 p-4 text-sm text-rose-100"><span>{error}</span><button onClick={() => setError("")} className="font-black">×</button></div>}
+      {notice && <div className="mb-5 flex items-start justify-between gap-4 rounded-2xl border border-emerald-400/30 bg-emerald-400/10 p-4 text-sm text-emerald-100"><span>{notice}</span><button onClick={() => setNotice("")} className="font-black">×</button></div>}
 
       {tab === "Overview" && <div className="space-y-5">
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -504,7 +531,7 @@ export default function MarketingAgentCockpit() {
             <label className="text-xs text-slate-400 lg:col-span-2">Body<textarea className={`${input} mt-1 min-h-24`} value={launch.bodyText} onChange={(e) => setLaunch({ ...launch, bodyText: e.target.value })} /></label>
             <label className="text-xs text-slate-400">Audience<textarea className={`${input} mt-1 min-h-24`} value={launch.targetAudience} onChange={(e) => setLaunch({ ...launch, targetAudience: e.target.value })} /></label>
           </div>
-          <div className="mt-4 flex items-center gap-3"><button className={primary} onClick={() => void createCampaign()} disabled={busy === "launch" || !launch.productId}>{busy === "launch" ? "Creating…" : "Create campaign"}</button><span className="text-xs text-slate-500">Published profitable products pass through the existing eligibility gate.</span></div>
+          <div className="mt-4 flex flex-wrap items-center gap-3"><button className={primary} onClick={() => void createCampaign()} disabled={busy === "launch" || !launch.productId}>{busy === "launch" ? "Creating…" : "Create campaign"}</button><button className={btn} onClick={() => void queueMarketingVideo()} disabled={busy === "autom8-video" || !launch.productId}>{busy === "autom8-video" ? "Queuing video…" : "Autom8AI video"}</button><span className="text-xs text-slate-500">Published profitable products pass through the existing eligibility gate. Autom8AI creates a review-only video job; it cannot spend or publish.</span></div>
         </section>
 
         <div className="grid gap-4 xl:grid-cols-2">

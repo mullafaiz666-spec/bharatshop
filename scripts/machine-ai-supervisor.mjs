@@ -61,7 +61,7 @@ async function fetchJson(url, options = {}, timeoutMs = 8_000) {
 }
 
 function findOllama() {
-  const which = spawnSync(process.platform === 'win32' ? 'where.exe' : 'which', ['ollama'], { encoding: 'utf8', windowsHide: false });
+  const which = spawnSync(process.platform === 'win32' ? 'where.exe' : 'which', ['ollama'], { encoding: 'utf8', windowsHide: true });
   if (which.status === 0) {
     const first = String(which.stdout || '').split(/\r?\n/).map(x => x.trim()).find(Boolean);
     if (first) return first;
@@ -96,7 +96,7 @@ async function ensureOllama() {
       cwd: root,
       detached: true,
       stdio: 'ignore',
-      windowsHide: false,
+      windowsHide: true,
       env: { ...process.env, OLLAMA_HOST: '127.0.0.1:11434', OLLAMA_NUM_PARALLEL: '1', OLLAMA_MAX_LOADED_MODELS: '1' },
     });
     child.unref();
@@ -110,7 +110,7 @@ async function ensureOllama() {
   if (!status.hasModel) {
     if (!ollama) throw new Error(`Model ${model} is missing and Ollama executable was not found`);
     log(`Pulling required free local model ${model}.`);
-    const pull = spawnSync(ollama, ['pull', model], { cwd: root, stdio: 'inherit', windowsHide: false });
+    const pull = spawnSync(ollama, ['pull', model], { cwd: root, stdio: 'inherit', windowsHide: true });
     if (pull.status !== 0) throw new Error(`Could not pull ${model}`);
   }
 }
@@ -132,7 +132,7 @@ async function ensureShim() {
     cwd: root,
     detached: true,
     stdio: 'ignore',
-    windowsHide: false,
+    windowsHide: true,
     env: { ...process.env, OLLAMA_BASE_URL: 'http://127.0.0.1:11434', OLLAMA_SHIM_HOST: '127.0.0.1', OLLAMA_SHIM_PORT: '11555' },
   });
   child.unref();
@@ -184,7 +184,7 @@ function runOneQueuedTask() {
   const result = spawnSync(process.execPath, args, {
     cwd: root,
     encoding: 'utf8',
-    windowsHide: false,
+    windowsHide: true,
     timeout: Number(process.env.BHARATSHOP_MACHINE_AI_TASK_TIMEOUT_MS || 900_000),
     env: {
       ...process.env,

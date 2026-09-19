@@ -2,12 +2,11 @@ import { defineConfig, globalIgnores } from "eslint/config";
 import nextCoreWebVitals from "eslint-config-next/core-web-vitals";
 
 export default defineConfig([
-  ...nextCoreWebVitals,
-  {
-    // React 19's set-state-in-effect diagnostic is advisory for these existing
-    // client-side synchronization/data-loading patterns; runtime correctness is
-    // still checked by typecheck and production build.
-    rules: { "react-hooks/set-state-in-effect": "warn" },
-  },
+  ...nextCoreWebVitals.map((config) => config.name === "next" ? {
+    ...config,
+    // Keep the override in the config object that declares the react-hooks
+    // plugin; ESLint flat-config plugin declarations are object-scoped.
+    rules: { ...config.rules, "react-hooks/set-state-in-effect": "warn" },
+  } : config),
   globalIgnores([".next/**", "out/**", "build/**", "next-env.d.ts"]),
 ]);

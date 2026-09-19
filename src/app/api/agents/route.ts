@@ -3,6 +3,7 @@ import { publicAgentContracts } from "@/lib/agents/contracts";
 import { GOOGLE_INTELLIGENCE_POLICY } from "@/lib/agents/live-intelligence";
 import { agentRuntimeCatalog, runAgentRuntime, type RuntimeMessage } from "@/lib/agents/runtime";
 import { runCompactAgentFallback } from "@/lib/agents/compact-runtime";
+import { AI_WORKFORCE_POLICY, operationalAiEmployees } from "@/lib/agents/employees";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -74,6 +75,8 @@ export async function GET() {
     memory: "PostgreSQL session memory with request-history fallback",
     intelligence: { provider: "local OpenAI-compatible Gemma + verified BharatShop/public evidence tools", sharedAcrossAgents: true, policy: GOOGLE_INTELLIGENCE_POLICY },
     operationalAgents: publicAgentContracts(),
+    aiEmployees: operationalAiEmployees(),
+    workforcePolicy: AI_WORKFORCE_POLICY,
     runtimeAgents: agentRuntimeCatalog(),
     rule: "Every agent is conversational and evidence-backed. Full tool-calling is attempted first; a compact evidence workflow recovers when the free local model cannot carry the full schema. No agent may fabricate execution. Paid spend, supplier purchases, refunds/payouts, credentials and destructive database actions remain human-approval gated.",
   });

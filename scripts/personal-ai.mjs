@@ -7,6 +7,11 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import readline from 'node:readline/promises';
 import process from 'node:process';
+import { randomUUID } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
+import { selectSpecialists, arithmeticCheck, validateDraft, inspectFeature } from './agency-reliability.mjs';
+import { inferenceFetch, readOllamaStream } from './machine-ai-transport.mjs';
+let lastAgencyResult = null;
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(SCRIPT_DIR, '..');
@@ -124,20 +129,21 @@ async function ollamaModels() {
 }
 
 async function localChat(systemPrompt, messages, { json = false } = {}) {
-  const response = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
+  const response = await inferenceFetch(`${OLLAMA_BASE_URL}/api/chat`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       model: MODEL,
-      stream: false,
+      stream: true,
+      think: false,
       format: json ? 'json' : undefined,
       messages: [{ role: 'system', content: systemPrompt }, ...messages],
-      options: { num_ctx: Number(process.env.PERSONAL_AI_CONTEXT || 32768) },
+      options: { num_ctx: Number(process.env.PERSONAL_AI_CONTEXT || 4096) },
     }),
+    signal: AbortSignal.timeout(180000),
   });
-  if (!response.ok) throw new Error(`Ollama request failed (${response.status}): ${await response.text()}`);
-  const payload = await response.json();
-  return payload?.message?.content?.trim() || '';
+  if (!response.ok) { await response.body?.cancel(); throw new Error(`Ollama request failed (HTTP ${response.status}).`); }
+  return (await readOllamaStream(response, () => {})).trim();
 }
 
 function memorySafe(text) {
@@ -182,32 +188,43 @@ async function routeTask(task) {
   }
 }
 
-function agentScore(agent, task) {
-  const tokens = [...new Set(task.toLowerCase().match(/[a-z0-9]{4,}/g) || [])];
-  const haystack = `${agent.slug} ${agent.shortSlug} ${agent.name} ${agent.description} ${agent.division}`.toLowerCase();
-  return tokens.reduce((score, token) => score + (haystack.includes(token) ? 1 : 0), 0);
+function saveAgencyResult(task, result) {
+  const id = randomUUID();
+  const reportDir = join(AI_HOME, 'agency-reports');
+  mkdirSync(reportDir, { recursive: true });
+  const reportFile = join(reportDir, id + '.json');
+  const report = { id, at: new Date().toISOString(), task: memorySafe(task) ? task : '[sensitive task omitted]', ...result };
+  writeFileSync(reportFile, JSON.stringify(report, null, 2), { encoding: 'utf8', flag: 'wx' });
+  lastAgencyResult = report;
+  console.log('EXECUTION: ' + result.execution);
+  console.log('VALIDATION: ' + result.validation.status + ' (' + result.validation.scope + ')');
+  console.log('REPORT: ' + reportFile);
+  return result.text;
 }
 
 async function agencyAnswer(task) {
+  const qa = task.trim().match(/^\/qa-source\s+(cart|checkout|products|auth)$/i);
+  if (qa) return saveAgencyResult(task, inspectFeature(ROOT, qa[1].toLowerCase()));
+  const arithmetic = arithmeticCheck(task);
+  if (arithmetic) return saveAgencyResult(task, arithmetic);
   const { discoverAgents } = await import('./local-agency.mjs');
-  const agents = discoverAgents();
-  if (!agents.length) throw new Error('Agency catalog is not installed. Run npm.cmd run ai:setup first.');
-  const ranked = [...agents].map(agent => ({ agent, score: agentScore(agent, task) })).sort((a, b) => b.score - a.score || a.agent.slug.localeCompare(b.agent.slug));
-  const selected = ranked.filter(item => item.score > 0).slice(0, 3).map(item => item.agent);
-  if (!selected.length) selected.push(...agents.slice(0, 3));
-
-  console.log(`\nAgency team: ${selected.map(agent => agent.name).join(' + ')}`);
+  const selected = selectSpecialists(discoverAgents(), task);
+  if (!selected.length) return saveAgencyResult(task, {
+    execution:'BLOCKED', validation:{ status:'FAIL', scope:'routing', reason:'No relevant specialist matched; no arbitrary fallback team was used.' },
+    selectedAgents:[], text:'No suitable specialist was found. Specify the feature or domain to review.'
+  });
+  console.log('Agency team: ' + selected.map(agent => agent.name).join(' + '));
   const reports = [];
   for (const agent of selected) {
-    const system = `${agent.content}\n\nYou are running locally as part of the user's Personal AI specialist team. Do not claim external actions were performed. Do not request secrets. Give a concrete specialist report for the task.`;
-    const answer = await localChat(system, [{ role: 'user', content: task }]);
-    reports.push({ name: agent.name, answer });
+    const answer = await localChat(`${agent.content}\nYou are a local specialist providing a draft. Do not claim tool execution or current repository/runtime facts without supplied evidence. Be concise; omit internal deliberation. Never request secrets.`, [{ role:'user', content:task }]);
+    reports.push({ name:agent.name, slug:agent.slug, answer });
   }
   const synthesis = await localChat(
-    'You are the local Personal AI manager. Synthesize specialist reports into one concise, practical answer. Preserve uncertainty and disagreements. Do not invent completed external actions.',
-    [{ role: 'user', content: `TASK:\n${task}\n\nREPORTS:\n${reports.map(item => `## ${item.name}\n${item.answer}`).join('\n\n')}` }],
+    'Combine these draft reports concisely. Check calculations. Remove abandoned calculations and self-corrections. Do not claim verification, tests, external actions, or specialist agreement prove correctness. Return only the final draft.',
+    [{role:'user',content:'TASK:\n'+task+'\nREPORTS:\n'+reports.map(r=>r.name+': '+r.answer).join('\n')}]
   );
-  return synthesis;
+  return saveAgencyResult(task, { execution:'COMPLETED', validation:validateDraft(synthesis),
+    method:'local specialist inference and synthesis', selectedAgents:selected.map(a=>({slug:a.slug,name:a.name})), reports, text:synthesis });
 }
 
 function python312() {
@@ -284,7 +301,7 @@ function setupHarnessLocal() {
     console.log('DeepSeek Harness local bridge skipped because Ollama was not found.');
     return;
   }
-  console.log('\nConfiguring official Ollama → DeepSeek Harness local bridge...');
+  console.log('\nConfiguring official Ollama â†’ DeepSeek Harness local bridge...');
   const result = run(ollama, ['launch', 'dsh', '--config']);
   if (result.status !== 0) {
     console.log('Ollama could not configure DeepSeek Harness automatically. Update Ollama, then rerun ai:setup.');
@@ -292,7 +309,7 @@ function setupHarnessLocal() {
 }
 
 async function setupAll() {
-  console.log('=== BharatShop Personal AI — free/local setup ===');
+  console.log('=== BharatShop Personal AI â€” free/local setup ===');
   console.log(`Local model: ${MODEL}`);
   const agency = run(process.execPath, [join(ROOT, 'scripts', 'local-agency.mjs'), 'setup']);
   if (agency.status !== 0) throw new Error('Local Agency/Ollama setup failed.');
@@ -354,9 +371,9 @@ async function statusRows() {
 async function printStatus() {
   console.log('=== Personal AI capability matrix ===');
   for (const row of await statusRows()) {
-    console.log(`${row.ready ? '🟢' : '🟡'} ${row.name.padEnd(32)} ${row.note}`);
+    console.log(`${row.ready ? 'ðŸŸ¢' : 'ðŸŸ¡'} ${row.name.padEnd(32)} ${row.note}`);
   }
-  console.log('\nGreen means the local connector/runtime is actually detected. PixVerse generation is intentionally not called “free” because its provider requires subscription/credits.');
+  console.log('\nGreen means the local connector/runtime is actually detected. PixVerse generation is intentionally not called â€œfreeâ€ because its provider requires subscription/credits.');
 }
 
 async function runBuild(task) {
@@ -459,7 +476,7 @@ function printHelp() {
 
 async function interactive() {
   if (!(await ollamaHealthy())) throw new Error('Local Ollama is not responding. Run npm.cmd run ai:setup first.');
-  console.log(`\nBharatShop Personal AI — ${MODEL}`);
+  console.log(`\nBharatShop Personal AI â€” ${MODEL}`);
   console.log('Private/local brain + Agency Agents + app builder + browser worker. Type /help for commands.');
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   try {
@@ -506,6 +523,7 @@ async function main() {
     console.log(`Route: ${route}`);
     const answer = await dispatch(route, task, { execute });
     console.log(answer);
+    if (route === 'agency' && lastAgencyResult?.validation?.status !== 'PASS') process.exitCode = 2;
     return;
   }
   console.error('Modes: setup | status | start | task');

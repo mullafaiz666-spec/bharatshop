@@ -1,0 +1,218 @@
+# Autom8AI Creative Orchestration
+
+_Last updated: 2026-09-18_
+
+## Purpose
+
+Autom8AI is used as a **workflow orchestration layer** for two BharatShop workflows:
+
+1. Marketing short-video generation.
+2. Fashion Designer creative / UGC orchestration for approved BharatDrip and BharatShop Studio products.
+
+Autom8AI is **not treated as the media renderer itself**. The Autom8AI workflow can call Higgsfield or another configured image/video worker. BharatShop does not hard-code undocumented Autom8AI provider fields.
+
+## Safety boundary
+
+Autom8AI receives a review-only creative job.
+
+It cannot directly:
+- publish or unpublish a BharatShop product,
+- change product pricing,
+- change product profitability or supplier data,
+- bypass the original-art/IP gate,
+- spend ad budget,
+- activate paid campaigns,
+- create customer orders,
+- change payment status.
+
+Returned assets remain subject to BharatShop review and existing approval gates.
+
+## Environment variables
+
+```
+AUTOM8AI_WEBHOOK_URL=
+AUTOM8AI_WEBHOOK_TOKEN=
+```
+
+`AUTOM8AI_WEBHOOK_URL` is required.
+
+`AUTOM8AI_WEBHOOK_TOKEN` is optional. The current Autom8AI Generic Webhook Trigger exposes a URL directly and does not require a separate token in the configuration screen. If a future workflow/provider adds bearer-token protection, set the optional token and BharatShop will send it.
+
+Do not commit real secret values.
+
+The webhook URL must use HTTPS unless it targets localhost.
+
+## BharatShop endpoint
+
+```
+GET  /api/automation/autom8ai
+POST /api/automation/autom8ai
+```
+
+Authorization:
+- signed admin session, or
+- existing BharatShop automation token.
+
+### Marketing video action
+
+```json
+{
+  "action": "marketing-video",
+  "productId": 123,
+  "platforms": ["Instagram Reels"],
+  "objective": "Create a product launch Reel",
+  "hook": "Your first-three-second hook",
+  "cta": "Shop now"
+}
+```
+
+BharatShop only dispatches this workflow for a Published product with positive recorded profit.
+
+### Fashion creative action
+
+```json
+{
+  "action": "fashion-creative",
+  "productId": 123,
+  "objective": "Create a BharatDrip UGC/video concept"
+}
+```
+
+BharatShop only dispatches this workflow for:
+- BharatDrip or BharatShop Studio,
+- Qikink supplier,
+- made-to-order inventory mode,
+- Qikink production supplier metadata,
+- original-art policy,
+- positive profitability.
+
+## Outgoing webhook contract
+
+BharatShop sends:
+
+```json
+{
+  "schema": "bharatshop.autom8ai.v1",
+  "event": "bharatshop.marketing.video.requested",
+  "requestedAt": "ISO-8601 timestamp",
+  "source": "marketing-cockpit",
+  "safety": {
+    "autoPublish": false,
+    "adSpend": false,
+    "productMutation": false,
+    "requiresHumanReview": true
+  },
+  "renderHints": {},
+  "product": {},
+  "creative": {}
+}
+```
+
+Fashion jobs use event:
+
+```
+bharatshop.fashion.creative.requested
+```
+
+The request always includes:
+
+```
+Content-Type: application/json
+```
+
+If `AUTOM8AI_WEBHOOK_TOKEN` is configured, BharatShop also sends:
+
+```
+Authorization: Bearer <AUTOM8AI_WEBHOOK_TOKEN>
+```
+
+For the current Autom8AI Generic Webhook Trigger, URL-only configuration is supported.
+
+## Optional webhook response fields
+
+BharatShop does not require a proprietary Autom8AI response schema. It safely recognizes these optional fields when present:
+
+```json
+{
+  "status": "accepted",
+  "jobId": "job-123",
+  "assetUrl": "https://...",
+  "workflowUrl": "https://...",
+  "message": "Queued"
+}
+```
+
+Aliases `state`, `runId`, `id`, `videoUrl`, `outputUrl`, and `runUrl` are also accepted.
+
+Only HTTPS asset/workflow URLs are surfaced.
+
+## Cockpit integration
+
+Marketing:
+`/dashboard/marketing` -> Pipeline -> select product -> **Autom8AI video**
+
+Fashion:
+`/dashboard/fashion` -> Live catalogue output -> **Autom8AI creative**
+
+Read-only connection verification never calls the Autom8AI webhook because doing so could trigger a workflow. A real connection test happens only when an operator explicitly queues a creative job.
+
+## Renderer recommendation
+
+Recommended workflow:
+
+```
+BharatShop
+ -> Autom8AI webhook
+ -> validate BharatShop schema
+ -> prepare script / scenes / shot list
+ -> Higgsfield or configured video renderer
+ -> save result in the Autom8AI workflow
+ -> return job ID / workflow URL / asset URL when available
+ -> human review
+ -> approved marketing publication through existing BharatShop connectors
+```
+
+Keep paid ad activation and product publication outside the Autom8AI workflow unless a future explicitly approved architecture changes that policy.
+
+
+## Result callback contract
+
+Every creative webhook payload now includes a non-secret `resultContract` describing how a downstream Autom8AI workflow should return renderer results.
+
+Callback route:
+
+```
+POST /api/automation/autom8ai/result
+GET  /api/automation/autom8ai/result?productId=<id>
+```
+
+Autom8AI must authenticate the callback with the existing BharatShop automation token stored in Autom8AI credentials/secrets. The token value is never included in the outgoing webhook payload.
+
+The callback accepts:
+- workflow: `marketing-video` or `fashion-creative`
+- status: `QUEUED`, `RENDERING`, `COMPLETED`, `FAILED`, or `NEEDS_REVIEW`
+- HTTPS asset/workflow URLs only
+
+A completed result is recorded in `ai_activity_logs` as review-only evidence. The callback does not update `products`, does not add `product_images`, does not publish, and does not spend ad budget.
+
+
+## Current Higgsfield renderer target — verified 2026-09-18
+
+Read-only Higgsfield model discovery currently recommends:
+
+Primary:
+- renderer: Higgsfield
+- model: `marketing_studio_video`
+- mode: `ugc`
+- use case: realistic product / creator UGC for Reels and TikTok
+- preferred aspect ratio: `9:16`
+- supported UGC duration target: 12-15 seconds
+- default resolution target: 720p
+- audio: enabled when appropriate
+
+Fallback for longer or more flexible reference-driven video:
+- model: `seedance_2_5`
+- duration: 4-30 seconds
+- supports image/reference-driven generation and 9:16 output
+
+These are render hints, not automatic credit-spend authorization. Autom8AI should not initiate paid generation unless the configured renderer account/workflow permits it and the operator has authorized that workflow.
