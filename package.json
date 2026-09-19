@@ -102,7 +102,9 @@
     "local:verify:readonly": "node scripts/local-readonly-verify.mjs",
     "autom8ai:test:connection": "node scripts/autom8ai-connection-test.mjs",
     "autom8ai:candidates": "node scripts/autom8ai-candidates.mjs",
-    "db:local:ensure": "node scripts/local-db-ensure.mjs"
+    "db:local:ensure": "node scripts/local-db-ensure.mjs",
+    "db:migration:configure:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/configure-database-migration.ps1",
+    "db:migration:preflight:local": "node scripts/database-migration-preflight-local.mjs"
   },
   "dependencies": {
     "@types/node": "22.19.15",
