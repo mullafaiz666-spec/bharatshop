@@ -583,3 +583,29 @@ Fashion diagnostic gates mirror the live workflow:
 - ipPolicy contains ORIGINAL
 
 No product fields are altered by this diagnostic.
+
+
+## 24. Legacy Render database preservation priority — 2026-09-19
+
+Read-only connected-service discovery found the preserved legacy Render PostgreSQL instance:
+- name: `bharatshop-db`
+- database: `bharatshop_db`
+- status: available
+- plan: free
+- region: Oregon
+- Render record expiry: 2026-09-26
+
+The local `bharatshop-dev-db` is confirmed healthy but contains zero products.
+
+Netlify project `bharatshop-35fd` currently has no `DATABASE_URL` or `SUPABASE_DB_URL` environment variable. It only has Supabase public/project settings and migration remains unverified.
+
+The repository's guarded migration contract remains:
+- `SOURCE_DATABASE_URL` = preserved legacy production database
+- `SUPABASE_DB_URL` = Supabase Postgres target
+- run read-only migration preflight before any copy
+- verify schema, row counts, fingerprints and sequences before cutover
+- never reset/reseed/overwrite production data
+
+The Render read-only SQL connector currently fails at connection negotiation because the database requires SSL/TLS, so row counts from the legacy database are not yet verified.
+
+Priority: recover and verify the Render source before its recorded expiry. Do not seed the empty local DB as a substitute.
