@@ -518,3 +518,12 @@ The candidate preflight now performs a secret-safe local-only retry using the ex
 The Autom8AI preflight successfully connected to the preserved local database and returned zero eligible marketing/fashion candidates. This is now treated as an eligibility-data issue rather than a connectivity issue.
 
 The preflight now reports exact failed gates and near matches, read-only, so the next step can identify which existing products are closest to eligibility before any product mutation is considered.
+
+
+## Legacy Render database preservation priority — 2026-09-19
+
+Connected-service discovery found the old Render PostgreSQL instance `bharatshop-db` still available. Its Render record shows expiry on 2026-09-26.
+
+The local preserved Docker DB is healthy but currently has zero products. Netlify has no active server-side PostgreSQL URL configured.
+
+The next priority is to recover/verify the Render database as `SOURCE_DATABASE_URL` and the Supabase Postgres target as `SUPABASE_DB_URL`, then use the existing read-only migration preflight and parity verification. Do not reseed the local DB or cut over until source data is verified.
