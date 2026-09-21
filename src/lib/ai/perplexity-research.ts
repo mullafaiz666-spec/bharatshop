@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { isIP } from "node:net";
 
 export type PublicResearchEvidence = {
-  source: "PERPLEXITY";
+  source: string;
   sourceUrl: string;
   topic: string;
   title: string;
@@ -38,8 +38,12 @@ export class PerplexityResearchError extends Error {
 const endpoint = "https://api.perplexity.ai/v1/sonar";
 const apiKey = () => String(process.env.PERPLEXITY_API_KEY || "").trim();
 const model = () => String(process.env.PERPLEXITY_MODEL || "sonar").trim() || "sonar";
-const timeoutMs = () => Math.max(2_000, Math.min(30_000, Number(process.env.PERPLEXITY_TIMEOUT_MS || 15_000)));
-const maxRetryDelayMs = () => Math.max(0, Math.min(5_000, Number(process.env.PERPLEXITY_MAX_RETRY_DELAY_MS || 2_000)));
+function boundedNumber(value: unknown, fallback: number, min: number, max: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(min, Math.min(max, parsed)) : fallback;
+}
+const timeoutMs = () => boundedNumber(process.env.PERPLEXITY_TIMEOUT_MS, 15_000, 2_000, 30_000);
+const maxRetryDelayMs = () => boundedNumber(process.env.PERPLEXITY_MAX_RETRY_DELAY_MS, 2_000, 0, 5_000);
 
 function privateIpv4(host: string) {
   const parts = host.split(".").map(Number);
@@ -84,9 +88,9 @@ function containsPrivateUrl(text: string) {
 
 const sensitivePatterns: RegExp[] = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/i,
-  /\b(?:password|passcode|secret|client_secret|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|bearer)\b\s*[:=]?\s*\S+/i,
+  /\b(?:password|passcode|secret|client_secret|api[_ -]?key|access[_ -]?token|refresh[_ -]?token)\b\s*[:=]\s*\S+/i,\n  /\bbearer\s+\S+/i,
   /\b(?:DATABASE_URL|SOURCE_DATABASE_URL|SUPABASE_DB_URL|RAZORPAY_KEY_SECRET|RAZORPAY_WEBHOOK_SECRET|CASHFREE_SECRET_KEY|CASHFREE_WEBHOOK_SECRET|ADMIN_SESSION_SECRET|BHARATSHOP_AUTOMATION_TOKEN)\b/i,
-  /\b(?:razorpay_payment_id|razorpay_order_id|cf_payment_id|payment_session_id|order[_ -]?(?:id|ref))\b\s*[:=]?\s*\S+/i,
+  /\b(?:razorpay_payment_id|razorpay_order_id|cf_payment_id|payment_session_id|order[_ -]?(?:id|ref))\b\s*[:=]\s*\S+/i,
   /\bBS-WEB-[A-Za-z0-9_-]{8,}\b/i,
   /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i,
   /\b(?:\+?91[-\s]?)?[6-9]\d{9}\b/,
