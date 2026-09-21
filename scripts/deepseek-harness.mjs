@@ -203,7 +203,6 @@ function runOfficialOllamaDshTask(prompt, { timeoutMs = LOCAL_DSH_TASK_TIMEOUT_M
     '--model',
     LOCAL_ENGINEER_MODEL,
     '--',
-    '--profile',
     'headless',
     prompt,
   ], { env, timeoutMs });
