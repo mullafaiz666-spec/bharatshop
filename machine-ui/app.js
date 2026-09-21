@@ -110,7 +110,7 @@ function renderMessages() {
   const chat = activeChat();
   els.chatTitle.textContent = chat?.title || 'New chat';
   if (!chat || !chat.messages.length) {
-    els.messages.innerHTML = `<div class="empty-state"><div class="empty-inner"><div class="empty-logo">B</div><h1>Your BharatShop Machine AI</h1><p>Private local chat with Qwen, explicit access to the specialist agency, task queue, memory controls and read-only project status.</p><div class="prompt-chips"><button class="prompt-chip">Check my BharatShop project status</button><button class="prompt-chip">Use agency to review a product idea</button><button class="prompt-chip">Explain what this local AI can do</button></div></div></div>`;
+    els.messages.innerHTML = `<div class="empty-state"><div class="empty-inner"><div class="empty-logo">B</div><h1>Your BharatShop Machine AI</h1><p>Private local AI with Qwen, specialist agents, and an approval-gated Machine Engineer for real local fixes, builds and verification.</p><div class="prompt-chips"><button class="prompt-chip">Check my BharatShop project status</button><button class="prompt-chip">Use agency to review a product idea</button><button class="prompt-chip">Explain what this local AI can do</button></div></div></div>`;
     document.querySelectorAll('.prompt-chip').forEach(btn => btn.onclick = () => { els.prompt.value = btn.textContent; autoSize(); els.prompt.focus(); });
     return;
   }
@@ -218,6 +218,8 @@ async function submitPrompt(event) {
         if (evt.type === 'delta') aiMsg.content += evt.text || '';
         else if (evt.type === 'status') aiMsg.status = evt.text || '';
         else if (evt.type === 'agency') aiMsg.agents = evt.agents || [];
+        else if (evt.type === 'approval') { aiMsg.status = 'Approval required — reply approve to run'; aiMsg.approval = true; }
+        else if (evt.type === 'operation') { aiMsg.status = `${evt.operation || 'Operation'} · ${evt.job?.status || 'started'}`; }
         else if (evt.type === 'error') { aiMsg.error = true; aiMsg.content += `\n\nError: ${evt.error}`; }
         renderMessages();
       }
