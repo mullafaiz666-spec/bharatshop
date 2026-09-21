@@ -25,3 +25,11 @@ test('chat approval starts engineer operation rather than only resuming read-onl
   assert.match(source, /runCockpitOperation\('engineer-task',\{approved:true,task:resumed\.task\}\)/);
   assert.match(source, /action:'engineer-task'/);
 });
+
+test('project status bypasses Ollama and direct chat uses non-streaming completion', () => {
+  const source = readFileSync(new URL('../scripts/machine-ai-web.mjs', import.meta.url), 'utf8');
+  assert.match(source, /bharatshop\\s\+project\\s\+status/);
+  assert.match(source, /handleDirectChat[\\s\\S]*nonStreamingChat/);
+  assert.match(source, /Agency Manager is synthesizing[\\s\\S]*nonStreamingChat/);
+  assert.doesNotMatch(source, /handleDirectChat[\\s\\S]{0,500}stream:\\s*true/);
+});
