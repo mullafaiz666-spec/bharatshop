@@ -88,7 +88,8 @@ function containsPrivateUrl(text: string) {
 
 const sensitivePatterns: RegExp[] = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/i,
-  /\b(?:password|passcode|secret|client_secret|api[_ -]?key|access[_ -]?token|refresh[_ -]?token)\b\s*[:=]\s*\S+/i,\n  /\bbearer\s+\S+/i,
+  /\b(?:password|passcode|secret|client_secret|api[_ -]?key|access[_ -]?token|refresh[_ -]?token)\b\s*[:=]\s*\S+/i,
+  /\bbearer\s+\S+/i,
   /\b(?:DATABASE_URL|SOURCE_DATABASE_URL|SUPABASE_DB_URL|RAZORPAY_KEY_SECRET|RAZORPAY_WEBHOOK_SECRET|CASHFREE_SECRET_KEY|CASHFREE_WEBHOOK_SECRET|ADMIN_SESSION_SECRET|BHARATSHOP_AUTOMATION_TOKEN)\b/i,
   /\b(?:razorpay_payment_id|razorpay_order_id|cf_payment_id|payment_session_id|order[_ -]?(?:id|ref))\b\s*[:=]\s*\S+/i,
   /\bBS-WEB-[A-Za-z0-9_-]{8,}\b/i,
