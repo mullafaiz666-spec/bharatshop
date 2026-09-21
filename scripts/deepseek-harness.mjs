@@ -229,7 +229,7 @@ function runOfficialOllamaDshTask(prompt, { timeoutMs = LOCAL_DSH_TASK_TIMEOUT_M
 
   dshArgs.push(prompt);
 
-  console.log('Running DSH headless with Ollama provider patch; no DeepSeek API key is required.');
+  console.log('Running DSH headless with Ollama provider patch; this local path does not require a DeepSeek API key.');
   return runPackageCli('npx', [
     '--yes',
     `@deepseek-ai/dsh@${DSH_VERSION}`,
