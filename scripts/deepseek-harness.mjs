@@ -20,6 +20,9 @@ const PRODUCT_BUNDLES = [
   '@deepseek-ai/dsh-subagent-claude-code',
 ];
 const PRODUCT_PROFILES = ['web', 'headless'];
+const LOCAL_TOOLS_HOME = process.env.BHARATSHOP_TOOLS_HOME || join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'BharatShop', 'Tools');
+const LOCAL_TOOLS_BIN = join(LOCAL_TOOLS_HOME, 'node_modules', '.bin');
+const PNPM_SPEC = process.env.BHARATSHOP_PNPM_SPEC || 'pnpm@10';
 
 const mode = (process.argv[2] || 'status').toLowerCase();
 const args = process.argv.slice(3);
@@ -122,12 +125,55 @@ function runPackageCliOrExit(kind, cliArgs, options = {}) {
   if (status !== 0) process.exit(status);
 }
 
-function npxDsh(dshArgs, env = safeHarnessEnv()) {
+function withLocalToolPath(env = safeHarnessEnv()) {
+  const next = { ...env };
+  const separator = process.platform === 'win32' ? ';' : ':';
+  const existing = next.Path || next.PATH || '';
+  const combined = [LOCAL_TOOLS_BIN, existing].filter(Boolean).join(separator);
+  if (process.platform === 'win32') next.Path = combined;
+  next.PATH = combined;
+  return next;
+}
+
+function pnpmAvailable(env = withLocalToolPath(safeHarnessEnv())) {
+  if (process.platform === 'win32') {
+    const result = commandResult('where.exe', ['pnpm'], env);
+    return result.status === 0;
+  }
+  const result = commandResult('sh', ['-lc', 'command -v pnpm >/dev/null 2>&1'], env);
+  return result.status === 0;
+}
+
+function ensurePnpmEnv() {
+  let env = withLocalToolPath(safeHarnessEnv());
+  if (pnpmAvailable(env)) return env;
+
+  console.log(`pnpm was not found. Installing ${PNPM_SPEC} into BharatShop local tools...`);
+  mkdirSync(LOCAL_TOOLS_HOME, { recursive: true });
+  runPackageCliOrExit('npm', [
+    'install',
+    '--prefix', LOCAL_TOOLS_HOME,
+    '--no-audit',
+    '--no-fund',
+    '--save-exact',
+    PNPM_SPEC,
+  ], { env: safeHarnessEnv() });
+
+  env = withLocalToolPath(safeHarnessEnv());
+  if (!pnpmAvailable(env)) {
+    console.error(`pnpm bootstrap completed but pnpm is still unavailable from ${LOCAL_TOOLS_BIN}.`);
+    process.exit(2);
+  }
+  console.log(`pnpm ready from BharatShop local tools: ${LOCAL_TOOLS_BIN}`);
+  return env;
+}
+
+function npxDsh(dshArgs, env = withLocalToolPath(safeHarnessEnv())) {
   mkdirSync(DSH_HOME, { recursive: true });
   return runPackageCli('npx', ['--yes', `@deepseek-ai/dsh@${DSH_VERSION}`, ...dshArgs], { env });
 }
 
-function npxDshOrExit(dshArgs, env = safeHarnessEnv()) {
+function npxDshOrExit(dshArgs, env = withLocalToolPath(safeHarnessEnv())) {
   const status = npxDsh(dshArgs, env);
   if (status !== 0) process.exit(status);
 }
@@ -200,6 +246,7 @@ function printStatus() {
   console.log(`pinned DSH: ${DSH_VERSION}`);
   console.log(`Node: ${process.versions.node} (${nodeIsSupported() ? 'READY' : 'UPGRADE REQUIRED'})`);
   console.log(`global dsh: ${globalDshStatus()}`);
+  console.log(`pnpm: ${pnpmAvailable() ? 'READY' : 'NOT INSTALLED (subagents will bootstrap locally)'}`);
 
   const ollamaVersion = commandResult(ollama, ['--version']);
   console.log(`Ollama: ${ollamaVersion.status === 0 ? (ollamaVersion.stdout || ollamaVersion.stderr || '').trim() || 'installed' : 'not detected'}`);
@@ -251,11 +298,12 @@ switch (mode) {
     assertSupportedNode();
     const refreshPreset = args.includes('--refresh-preset');
     mkdirSync(DSH_HOME, { recursive: true });
+    const harnessEnv = ensurePnpmEnv();
 
     for (const profile of PRODUCT_PROFILES) {
       console.log(`Configuring official product subagents in Harness profile: ${profile}`);
       for (const packageName of PRODUCT_BUNDLES) {
-        npxDshOrExit(['plugin', '--profile', profile, 'add', `${packageName}@${DSH_VERSION}`]);
+        npxDshOrExit(['plugin', '--profile', profile, 'add', `${packageName}@${DSH_VERSION}`], harnessEnv);
       }
     }
 
