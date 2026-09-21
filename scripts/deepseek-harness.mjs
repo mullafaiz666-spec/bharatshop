@@ -23,6 +23,9 @@ const PRODUCT_PROFILES = ['web', 'headless'];
 const LOCAL_TOOLS_HOME = process.env.BHARATSHOP_TOOLS_HOME || join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'BharatShop', 'Tools');
 const LOCAL_TOOLS_BIN = join(LOCAL_TOOLS_HOME, 'node_modules', '.bin');
 const PNPM_SPEC = process.env.BHARATSHOP_PNPM_SPEC || 'pnpm@10';
+const LOCAL_ENGINEER_MODEL = process.env.BHARATSHOP_LOCAL_ENGINEER_MODEL || process.env.PERSONAL_AI_MODEL || process.env.AGENCY_MODEL || 'qwen3.5:4b';
+const LOCAL_OLLAMA_OPENAI_BASE_URL = process.env.BHARATSHOP_OLLAMA_OPENAI_BASE_URL || 'http://127.0.0.1:11434/v1';
+const SETTINGS_PATH = join(DSH_HOME, 'settings.yaml');
 
 const mode = (process.argv[2] || 'status').toLowerCase();
 const args = process.argv.slice(3);
@@ -67,6 +70,10 @@ function safeHarnessEnv() {
   }
   env.DSH_HOME = DSH_HOME;
   env.BHARATSHOP_DSH_GUARDED = '1';
+  // Ollama's OpenAI-compatible endpoint ignores the key value, but current DSH
+  // requires a named apiKeyEnv reference on Windows. This is a local placeholder,
+  // not a credential and is never written to the repository.
+  env.OLLAMA_API_KEY = 'ollama-local';
   return env;
 }
 
@@ -199,6 +206,56 @@ function profileProductsReady(profile) {
   return PRODUCT_BUNDLES.every(packageName => profileHasBundle(profile, packageName));
 }
 
+
+function yamlScalar(value) {
+  return JSON.stringify(String(value));
+}
+
+function ensureLocalOllamaSettings() {
+  mkdirSync(DSH_HOME, { recursive: true });
+
+  const listed = commandResult(ollama, ['list'], withLocalToolPath(safeHarnessEnv()));
+  if (listed.status !== 0) {
+    console.error('Local Ollama is unavailable. Start Ollama before running Machine Engineer.');
+    process.exit(2);
+  }
+  const inventory = `${listed.stdout || ''}\n${listed.stderr || ''}`;
+  if (!inventory.includes(LOCAL_ENGINEER_MODEL)) {
+    console.error(`Local engineering model "${LOCAL_ENGINEER_MODEL}" is not installed in Ollama.`);
+    console.error(`Install it first with: ollama pull ${LOCAL_ENGINEER_MODEL}`);
+    process.exit(2);
+  }
+
+  const managedMarker = '# managed-by: bharatshop-local-engineer';
+  if (existsSync(SETTINGS_PATH)) {
+    const current = readFileSync(SETTINGS_PATH, 'utf8');
+    if (!current.includes(managedMarker)) {
+      const backupPath = join(DSH_HOME, `settings.before-bharatshop-local-${Date.now()}.yaml`);
+      cpSync(SETTINGS_PATH, backupPath);
+      console.log(`Backed up existing Harness settings: ${backupPath}`);
+    }
+  }
+
+  const settings = [
+    managedMarker,
+    'llm-pi-ai:',
+    '  providers:',
+    '    ollama:',
+    '      displayName: "Ollama Local"',
+    '      apiKeyEnv: OLLAMA_API_KEY',
+    '      api: openai-completions',
+    `      baseURL: ${yamlScalar(LOCAL_OLLAMA_OPENAI_BASE_URL)}`,
+    '      models:',
+    `        - id: ${yamlScalar(LOCAL_ENGINEER_MODEL)}`,
+    'agent-default-model:',
+    '  provider: ollama',
+    `  model: ${yamlScalar(LOCAL_ENGINEER_MODEL)}`,
+    '',
+  ].join('\n');
+  writeFileSync(SETTINGS_PATH, settings, 'utf8');
+  return { provider: 'ollama', model: LOCAL_ENGINEER_MODEL, baseURL: LOCAL_OLLAMA_OPENAI_BASE_URL };
+}
+
 function installPreset({ refresh = false } = {}) {
   if (!existsSync(PRESET_SOURCE)) {
     console.error(`BharatShop Harness preset source is missing: ${PRESET_SOURCE}`);
@@ -259,6 +316,7 @@ function printStatus() {
 
   console.log(`BharatShop preset: ${existsSync(join(PRESET_TARGET, 'agent.cordis.yml')) ? 'READY' : 'NOT INSTALLED'}`);
   console.log(`Headless subagent patch: ${existsSync(HEADLESS_SUBAGENT_PATCH) ? 'READY' : 'MISSING'}`);
+  console.log(`Engineering parent model: Ollama ${LOCAL_ENGINEER_MODEL} (local/free)`);
 
   const localEnv = join(ROOT, '.env.local');
   if (existsSync(localEnv)) {
@@ -329,6 +387,7 @@ switch (mode) {
   case 'task': {
     assertSupportedNode();
     assertProductSetup({ profile: 'headless' });
+    const localRoute = ensureLocalOllamaSettings();
     if (!existsSync(HEADLESS_SUBAGENT_PATCH)) {
       console.error(`Missing headless subagent overlay: ${HEADLESS_SUBAGENT_PATCH}`);
       process.exit(2);
@@ -339,9 +398,9 @@ switch (mode) {
       process.exit(2);
     }
     const guardrails = readGuardrails();
-    const prompt = `${guardrails}\n\nDELEGATION\nYou may delegate bounded independent work to subagent_codex and subagent_claude_code when useful. Keep final responsibility for verification and safety.\n\nCURRENT TASK\n${task}`.trim();
-    console.log('Running one guarded DeepSeek Harness headless task with Codex + Claude Code delegation available...');
-    npxDshOrExit(['--profile', 'headless', '--patch', HEADLESS_SUBAGENT_PATCH, prompt]);
+    const prompt = `${guardrails}\n\nLOCAL-FIRST EXECUTION\nThe parent engineering model is local Ollama. Use repository tools directly to inspect, edit, test, and build. subagent_codex and subagent_claude_code are optional: delegate only when the provider is already authenticated and available; if either provider is unavailable, continue locally instead of failing the task. Keep final responsibility for verification and safety.\n\nCURRENT TASK\n${task}`.trim();
+    console.log(`Running guarded Harness task on local Ollama model ${localRoute.model}; no DeepSeek API key is required.`);
+    npxDshOrExit(['--profile', 'headless', '--patch', HEADLESS_SUBAGENT_PATCH, prompt], withLocalToolPath(safeHarnessEnv()));
     break;
   }
 
