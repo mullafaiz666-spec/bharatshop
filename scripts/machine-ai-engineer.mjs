@@ -3,11 +3,13 @@
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { homedir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..');
 const runtimeDir = join(root, '.runtime', 'machine-ai-engineer');
+const backupDir = join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'BharatShop', 'MachineAI', 'EngineerBackups');
 const harnessScript = join(root, 'scripts', 'deepseek-harness.mjs');
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const argv = process.argv.slice(2);
@@ -73,21 +75,30 @@ function workingTree() {
   return text(git(['status', '--porcelain']));
 }
 
-function assertPreflight({ requireClean = true } = {}) {
+function assertPreflight() {
   const branch = currentBranch();
   if (!/^(?:repair|fix|feature|chore|test|ai)\//i.test(branch)) {
-    throw new Error(`Refusing engineering mutations on branch "${branch}". Use an isolated repair/feature branch or worktree.`);
+    throw new Error(`Refusing engineering mutations on branch "${branch}". Use a repair/fix/feature branch or worktree.`);
   }
   const secrets = secretFiles();
   if (secrets.length) {
-    throw new Error(`Refusing to start while secret-bearing workspace files exist: ${secrets.join(', ')}. Use the isolated repair worktree without credential files.`);
+    throw new Error(`Refusing to start while secret-bearing workspace files exist: ${secrets.join(', ')}. Move secrets outside the engineering checkout first.`);
   }
   if (!existsSync(harnessScript)) throw new Error('DeepSeek Harness launcher is missing.');
-  if (requireClean) {
-    const dirty = workingTree();
-    if (dirty) throw new Error('Refusing to start from a dirty worktree. Checkpoint/stash the existing changes first.');
-  }
-  return { branch, head: currentHead(), clean: !workingTree(), secretFiles: secrets };
+  const dirty = workingTree();
+  return { branch, head: currentHead(), clean: !dirty, dirtyEntries: dirty ? dirty.split(/\r?\n/).filter(Boolean).length : 0, secretFiles: secrets };
+}
+
+function snapshotBaseline(preflight) {
+  mkdirSync(backupDir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const statusPath = join(backupDir, `${stamp}.status.txt`);
+  const patchPath = join(backupDir, `${stamp}.tracked.patch`);
+  const status = workingTree();
+  const patch = text(git(['diff', '--binary', 'HEAD'], { timeout: 60_000 }));
+  writeFileSync(statusPath, `branch=${preflight.branch}\nhead=${preflight.head}\n\n${status}\n`, 'utf8');
+  writeFileSync(patchPath, patch ? `${patch}\n` : '', 'utf8');
+  return { statusPath, patchPath, trackedPatchBytes: Buffer.byteLength(patch || '', 'utf8') };
 }
 
 function assertPostHarness(preflight) {
@@ -155,7 +166,7 @@ function runChecks() {
 function makePrompt(userTask) {
   return `BHARATSHOP LOCAL ENGINEERING TASK
 
-Work only in the current isolated repair/feature worktree.
+Work only in the current repair/fix/feature checkout. Existing local changes may already be present: preserve them and build on top of them; never reset, clean, checkout-overwrite, or discard unrelated work.
 
 TASK:
 ${userTask}
@@ -198,7 +209,7 @@ function writeReport(payload) {
 }
 
 try {
-  const preflight = assertPreflight({ requireClean: !statusOnly });
+  const preflight = assertPreflight();
   if (statusOnly) {
     console.log(JSON.stringify({
       ok: true,
@@ -222,7 +233,9 @@ try {
   }
 
   const startedAt = new Date().toISOString();
+  const baselineBackup = snapshotBaseline(preflight);
   console.log(`BharatShop Machine Engineer starting on ${preflight.branch} @ ${preflight.head.slice(0, 12)}`);
+  console.log(`Existing tracked changes backup: ${baselineBackup.patchPath}`);
   console.log('Production writes/deploy/commit/push: DISABLED');
 
   const first = invokeHarness(makePrompt(task));
@@ -252,6 +265,7 @@ try {
     status,
     task,
     preflight,
+    baselineBackup,
     firstHarness: first,
     repairHarness: repair,
     verification,
