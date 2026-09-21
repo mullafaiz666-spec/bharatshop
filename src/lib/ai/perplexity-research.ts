@@ -174,7 +174,7 @@ function normalizePayload(query: string, payload: any): PublicResearchResult {
   const answer = String(payload?.choices?.[0]?.message?.content || "").trim();
   const fetchedAt = new Date().toISOString();
   const rows = Array.isArray(payload?.search_results) ? payload.search_results : [];
-  const citations = Array.from(new Set((Array.isArray(payload?.citations) ? payload.citations : []).map(validPublicUrl).filter(Boolean)));
+  const citations: string[] = Array.from(new Set<string>((Array.isArray(payload?.citations) ? payload.citations : []).map((value: unknown) => validPublicUrl(value)).filter((value: string) => value.length > 0)));
   const organic = rows.map((item: any) => ({
     title: String(item?.title || item?.url || "Perplexity source").trim(),
     link: validPublicUrl(item?.url),
