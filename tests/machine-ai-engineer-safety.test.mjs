@@ -15,11 +15,15 @@ test('machine engineer refuses protected branches and preserves dirty local star
   assert.doesNotMatch(script, /Refusing to start from a dirty worktree/);
 });
 
-test('machine engineer blocks secret-bearing worktrees and secret env forwarding', () => {
-  assert.match(script, /secret-bearing workspace files/);
+test('machine engineer quarantines secret-bearing workspace files and blocks secret env forwarding', () => {
+  assert.match(script, /quarantineSecretFiles/);
+  assert.match(script, /restoreSecretFiles/);
+  assert.match(script, /EngineerSecretsQuarantine/);
+  assert.match(script, /WILL_QUARANTINE_DURING_ENGINEERING/);
   assert.match(script, /\.env/);
   assert.match(script, /DATABASE\|POSTGRES/);
   assert.match(script, /SECRET\|TOKEN\|PASSWORD/);
+  assert.doesNotMatch(script, /Refusing to start while secret-bearing workspace files exist/);
 });
 
 test('machine engineer delegates through guarded Harness and independently verifies', () => {
