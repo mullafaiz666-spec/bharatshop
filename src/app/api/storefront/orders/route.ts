@@ -34,6 +34,7 @@ export async function POST(req:Request){
     const[existing]=await tx.select().from(storefrontOrders).where(eq(storefrontOrders.orderRef,ref)).limit(1);
     if(existing){
       if(readPaymentMeta(existing.notes||"","checkout_request_hash")!==requestHash)return NextResponse.json({error:"This checkout key was already used for a different order"},{status:409});
+      if(String(existing.paymentStatus||"").toUpperCase()==="CANCELLED"||String(existing.fulfillmentStatus||"").toUpperCase()==="CANCELLED")return NextResponse.json({error:"This checkout was cancelled. Start a new checkout attempt."},{status:409});
       const total=Number(existing.totalAmountInr),confirmation=Number(readPaymentMeta(existing.notes||"","confirmation_amount_inr")),cod=Number(readPaymentMeta(existing.notes||"","cod_balance_inr"));
       return NextResponse.json({ref,madeToOrder:readPaymentMeta(existing.notes||"","made_to_order")==="true",paymentMode:existing.paymentMode,paymentStatus:existing.paymentStatus,paymentPlan:{confirmationAmountInr:confirmation,codBalanceInr:cod,totalAmountInr:total,confirmationPct:total>0?Math.round(confirmation/total*10000)/100:0},message:"Existing order retrieved."},{status:200,headers:{"Cache-Control":"no-store"}});
     }
