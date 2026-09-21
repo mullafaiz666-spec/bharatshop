@@ -326,9 +326,14 @@ async function ollamaChat(systemPrompt, messages, { stream = false } = {}) {
 
 async function nonStreamingChat(systemPrompt, messages) {
   const response = await ollamaChat(systemPrompt, messages, { stream: false });
-  const data = await response.json();
-  if (data?.error || data?.done !== true || !String(data?.message?.content || '').trim()) throw safeError('Ollama did not return a completed specialist answer.');
-  return String(data.message.content).trim();
+  const raw = await response.text();
+  let data;
+  try { data = raw ? JSON.parse(raw) : null; }
+  catch { throw safeError('Ollama returned invalid JSON for non-streaming chat. Check the local Ollama logs.'); }
+  if (data?.error) throw safeError('Ollama reported a generation error. Check the local Ollama logs and model availability.');
+  const answer = String(data?.message?.content || '').trim();
+  if (data?.done === false || !answer) throw safeError('Ollama did not return a completed answer. Check the selected local model.');
+  return answer;
 }
 
 function writeEvent(res, event) {
@@ -341,8 +346,9 @@ async function streamOllamaResponse(res, response) { return readOllamaStream(res
 async function handleDirectChat(res, messages) {
   const installed = await getModels();
   const task = String(messages.at(-1)?.content || '').trim();
-  const response = await ollamaChat(directSystemPrompt(installed, task), messages, { stream: true });
-  return streamOllamaResponse(res, response);
+  const answer = await nonStreamingChat(directSystemPrompt(installed, task), messages);
+  writeEvent(res, { type: 'delta', text: answer });
+  return answer;
 }
 
 async function handleAgencyChat(res, messages, selectedSlugs) {
@@ -367,12 +373,13 @@ async function handleAgencyChat(res, messages, selectedSlugs) {
     reports.push({ name: agent.name, answer });
   }
   writeEvent(res, { type: 'status', text: 'Agency Manager is synthesizing the specialist reports...' });
-  const response = await ollamaChat([
+  const answer = await nonStreamingChat([
     'You are the BharatShop local Agency Manager running through Ollama model '+MODEL+'. Synthesize the specialist reports into one concise practical answer grounded in persistent BharatShop memory and live read-only repository evidence. If evidence is missing, say NOT VERIFIED. Previous assistant messages are not authoritative when they conflict with persistent memory. Do not invent completed external actions. Do not request secrets.',
     '',
     grounding,
-  ].join('\n'), [{ role: 'user', content: 'TASK:\n'+task+'\n\nREPORTS:\n'+reports.map(item => '## '+item.name+'\n'+item.answer).join('\n\n') }], { stream: true });
-  return streamOllamaResponse(res, response);
+  ].join('\n'), [{ role: 'user', content: 'TASK:\n'+task+'\n\nREPORTS:\n'+reports.map(item => '## '+item.name+'\n'+item.answer).join('\n\n') }]);
+  writeEvent(res, { type: 'delta', text: answer });
+  return answer;
 }
 
 async function handleChatInner(req,res){
@@ -383,8 +390,18 @@ async function handleChatInner(req,res){
   let resumed=null;
   res.writeHead(200,securityHeaders({'content-type':'application/x-ndjson; charset=utf-8','transfer-encoding':'chunked'}));
   try{
-    if (/^\/audit\s*$/i.test(original)) {
-      writeEvent(res,{type:'delta',text:await auditReport()});writeEvent(res,{type:'done'});return res.end();
+    if (/^\/audit\s*$/i.test(original) || /^\/status\s*$/i.test(original) || /^(?:check\s+)?(?:my\s+)?bharatshop\s+project\s+status[.!?]*$/i.test(original)) {
+      const project = projectStatus();
+      const report = [
+        await auditReport(),
+        '',
+        'PROJECT',
+        'Branch: '+project.branch,
+        'HEAD: '+project.head,
+        'Uncommitted entries: '+project.dirtyFiles,
+        'Remote: '+(project.remote || 'not configured'),
+      ].join('\n');
+      writeEvent(res,{type:'delta',text:report});writeEvent(res,{type:'done'});return res.end();
     }
     if(isCancellationMessage(original)){
       const p=loadPendingApproval();clearPendingApproval();
