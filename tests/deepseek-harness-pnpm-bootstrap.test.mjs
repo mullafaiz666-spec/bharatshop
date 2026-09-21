@@ -64,3 +64,9 @@ test('local engineering parent run does not require paid provider credentials', 
   assert.match(source, /does not require a DeepSeek API key/);
   assert.match(source, /Do not require DeepSeek, OpenAI, Anthropic, or other paid API credentials/);
 });
+
+
+test('Ollama DSH launcher uses positional headless mode instead of rejected --profile forwarding', () => {
+  assert.match(source, /'--',\s*'headless',\s*prompt/);
+  assert.doesNotMatch(source, /'--',\s*'--profile',\s*'headless'/);
+});
