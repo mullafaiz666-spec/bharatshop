@@ -196,47 +196,66 @@ function CartDrawer() {
   const razorpayReady = !!availability.providers?.razorpay?.configured;
   const cashfreeReady = !!availability.providers?.cashfree?.configured;
 
+  async function cancelPrepared(entries: Array<{ orderRef: string; key: string; payload: string }>) {
+    await Promise.allSettled(entries.map(async (entry) => {
+      const response = await fetch("/api/storefront/orders/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Idempotency-Key": entry.key },
+        body: JSON.stringify({ orderRef: entry.orderRef, reason: "checkout_group_prepare_failed" }),
+      });
+      if (response.ok) orderKeys.current.delete(entry.payload);
+    }));
+  }
+
   async function createOrders() {
     const refs: string[] = [];
+    const created: Array<{ orderRef: string; key: string; payload: string }> = [];
     let confirmationAmountInr = 0;
     let codBalanceInr = 0;
 
-    for (const item of items) {
-      const productId = item.product.liveProductId;
-      if (!productId) throw new Error("This piece is not connected to the live BharatDrip catalogue yet.");
+    try {
+      for (const item of items) {
+        const productId = item.product.liveProductId;
+        if (!productId) throw new Error("This piece is not connected to the live BharatDrip catalogue yet.");
 
-      const payload = JSON.stringify({
-          customerName: form.name,
-          customerEmail: form.email,
-          customerPhone: form.phone,
-          customerAddress: form.address,
-          customerCity: form.city,
-          customerState: form.state,
-          customerPincode: form.pincode,
-          productId,
-          quantity: item.quantity,
-          selectedSize: item.size,
-          paymentMode: provider === "razorpay" ? "PARTIAL_COD_RAZORPAY" : "PARTIAL_COD_CASHFREE",
+        const payload = JSON.stringify({
+            customerName: form.name,
+            customerEmail: form.email,
+            customerPhone: form.phone,
+            customerAddress: form.address,
+            customerCity: form.city,
+            customerState: form.state,
+            customerPincode: form.pincode,
+            productId,
+            quantity: item.quantity,
+            selectedSize: item.size,
+            paymentMode: provider === "razorpay" ? "PARTIAL_COD_RAZORPAY" : "PARTIAL_COD_CASHFREE",
+          });
+        let key = orderKeys.current.get(payload);
+        if (!key) { key = crypto.randomUUID(); orderKeys.current.set(payload, key); }
+        const response = await fetch("/api/storefront/orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Idempotency-Key": key },
+          body: payload,
         });
-      let key = orderKeys.current.get(payload);
-      if (!key) { key = crypto.randomUUID(); orderKeys.current.set(payload, key); }
-      const response = await fetch("/api/storefront/orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Idempotency-Key": key },
-        body: payload,
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error || "Unable to prepare this BharatDrip order.");
-      refs.push(String(data.ref));
-      confirmationAmountInr += Number(data.paymentPlan?.confirmationAmountInr || 0);
-      codBalanceInr += Number(data.paymentPlan?.codBalanceInr || 0);
-    }
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || "Unable to prepare this BharatDrip order.");
+        const ref = String(data.ref);
+        refs.push(ref);
+        created.push({ orderRef: ref, key, payload });
+        confirmationAmountInr += Number(data.paymentPlan?.confirmationAmountInr || 0);
+        codBalanceInr += Number(data.paymentPlan?.codBalanceInr || 0);
+      }
 
-    return {
-      refs,
-      confirmationAmountInr: Number(confirmationAmountInr.toFixed(2)),
-      codBalanceInr: Number(codBalanceInr.toFixed(2)),
-    };
+      return {
+        refs,
+        confirmationAmountInr: Number(confirmationAmountInr.toFixed(2)),
+        codBalanceInr: Number(codBalanceInr.toFixed(2)),
+      };
+    } catch (error) {
+      if (created.length) await cancelPrepared(created);
+      throw error;
+    }
   }
 
   async function submitOrder(event: FormEvent<HTMLFormElement>) {
