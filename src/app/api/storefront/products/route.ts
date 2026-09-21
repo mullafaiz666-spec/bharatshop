@@ -18,6 +18,22 @@ const MIN_FASHION_IMAGES=Math.max(4,Number(process.env.MIN_FASHION_PRODUCT_IMAGE
 const MIN_CONFIDENCE=.75;
 export const dynamic="force-dynamic";
 
+const AUTHORITATIVE_CATALOGUE_ORIGIN="https://bharatshop-9w4a.onrender.com";
+const CATALOGUE_QUERY_KEYS=["category","search","query","sort","limit","page","featured","id"] as const;
+async function authoritativeCatalogueFallback(req:Request){
+  const current=new URL(req.url);
+  if(current.hostname==="bharatshop-9w4a.onrender.com")return null;
+  const upstream=new URL("/api/storefront/products",AUTHORITATIVE_CATALOGUE_ORIGIN);
+  for(const key of CATALOGUE_QUERY_KEYS){const value=current.searchParams.get(key);if(value!==null)upstream.searchParams.set(key,value);}
+  try{
+    const response=await fetch(upstream,{cache:"no-store",signal:AbortSignal.timeout(12000)});
+    if(!response.ok)return null;
+    const body=await response.text();
+    const contentType=response.headers.get("content-type")||"application/json; charset=utf-8";
+    return new NextResponse(body,{status:200,headers:{"Content-Type":contentType,"Cache-Control":"no-store","X-BharatShop-Catalogue-Source":"authoritative-fallback"}});
+  }catch{return null;}
+}
+
 const specsOf=(d:any)=>d?.specificationsJson&&typeof d.specificationsJson==="object"&&!Array.isArray(d.specificationsJson)?d.specificationsJson as Record<string,any>:{};
 const fashionOrigin=(d:any)=>String(specsOf(d).designOrigin||"").trim();
 const madeToOrder=(d:any)=>{const s=specsOf(d),origin=fashionOrigin(d).toLowerCase();return MTO_FASHION_BRANDS.has(origin)&&String(s.inventoryMode||"").toUpperCase()==="MADE_TO_ORDER"&&String(s.productionSupplier||"").toLowerCase()==="qikink"&&Boolean(String(s.qikinkProductCode||"").trim());};
@@ -28,7 +44,14 @@ function customerText(value:unknown){return String(value||"").split(/(?<=[.!?])\
 
 export async function GET(req:Request){
   const{searchParams}=new URL(req.url),origin=publicOrigin(req),category=searchParams.get("category")||"",search=searchParams.get("search")||searchParams.get("query")||"",sort=searchParams.get("sort")||"aiScore",limit=Math.min(Math.max(parseInt(searchParams.get("limit")||"24",10)||24,1),96),page=Math.max(parseInt(searchParams.get("page")||"1",10)||1,1),featured=searchParams.get("featured")==="true",requestedId=Math.max(parseInt(searchParams.get("id")||"0",10)||0,0);
-  const[all,imageRows,detailRows]=await Promise.all([db.select().from(products).orderBy(desc(products.aiScore)),db.select().from(productImages),db.select().from(productDetails)]);
+  let all:any[],imageRows:any[],detailRows:any[];
+  try{
+    [all,imageRows,detailRows]=await Promise.all([db.select().from(products).orderBy(desc(products.aiScore)),db.select().from(productImages),db.select().from(productDetails)]);
+  }catch{
+    const fallback=await authoritativeCatalogueFallback(req);
+    if(fallback)return fallback;
+    return NextResponse.json({error:"Catalogue temporarily unavailable"},{status:503,headers:{"Cache-Control":"no-store"}});
+  }
   const detailMap=new Map(detailRows.map(x=>[x.productId,x]));
   const galleryMap=new Map<number,{url:string;label:string;order:number;editorial:boolean;currentEditorial:boolean}[]>();
 
