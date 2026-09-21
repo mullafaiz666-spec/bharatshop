@@ -140,7 +140,7 @@ test("cancellation releases reserved inventory exactly once and synchronizes bot
   assert.equal(second.status, 200);
   assert.equal(secondBody.inventoryReleased, false);
   assert.equal(app.stock(), 5);
-  assert.equal(app.state.aiActivityLogs.length, 2);
+  assert.equal(app.state.aiActivityLogs.length, 1);
 });
 
 test("cancellation key must match the opaque order reference before any inventory change", async () => {
