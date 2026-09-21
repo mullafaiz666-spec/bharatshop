@@ -131,6 +131,12 @@ cycle cannot be truthfully verified from the Netlify runtime yet.
 
 No payment API call and no production payment was performed.
 
+Sanitized Netlify configuration inspection also shows no native
+`DATABASE_URL`/`SUPABASE_DB_URL`, SearXNG, Perplexity, Gemini key, automation
+token, CJ key or supplier mutation flags. That is consistent with the current
+proxy/transition architecture, but it confirms Netlify is not ready for a native
+backend cutover.
+
 ## Laptop Machine AI
 
 The PR preserves the Machine AI serving-checkout/PID/identity startup repairs.
@@ -148,16 +154,22 @@ The current branch builds successfully. Browser-only localStorage usage in the
 inspected storefront/cart source is effect-gated, so no new hydration diagnosis is
 claimed from static inspection.
 
-The present customer catalogue fetch converts an upstream catalogue failure into an
-empty product list, which can render the same customer-visible "Nothing here yet"
-state as a genuinely empty catalogue. The Netlify catalogue endpoint is intentionally
-proxied to the authoritative Render
+The previous customer catalogue fetch converted an upstream catalogue failure into
+an empty product list, which could render the same customer-visible "Nothing here
+yet" state as a genuinely empty catalogue. This PR now keeps an explicit
+`catalogueError` state, rejects malformed catalogue responses and shows a
+"Catalogue temporarily unavailable" message instead of falsely presenting a
+transport/runtime failure as zero inventory.
+
+The Netlify catalogue endpoint is intentionally proxied to the authoritative Render
 `/api/storefront/products` until database parity is proven.
 
-A previous release investigation observed a hydration error and an empty catalogue,
-but the public Netlify URL could not be reached from this session's HTTP probe, so
-that browser symptom was not independently reproduced here. Live storefront
-loading/hydration remains a runtime gate.
+A previous release investigation observed a hydration error and an empty catalogue.
+The public Netlify and Render URLs could not be reached through this session's web
+or container DNS paths, so that browser symptom was not independently reproduced
+here. Render control-plane app logs on 21 September show repeated successful Next.js
+startup ("Ready"), but no request-log entries for the inspected window. Live
+storefront loading/hydration therefore remains a runtime gate.
 
 ## Netlify build and runtime
 
@@ -179,22 +191,39 @@ it does not prove the stale production runtime has the candidate fixes.
 
 ## Supplier and agent E2E
 
-The integration suite exercises agent/runtime contracts and passes, but a genuine
-supplier/agent E2E run was not performed because database parity, payment sandbox
-configuration, laptop Machine AI execution and current Netlify runtime are not yet
-verified. Triggering supplier purchases/publication merely to obtain a green test
-would violate the release safety constraints.
+A supplier safety review found the CJ POST route previously allowed mutation actions
+without backend authorization and the CJ import path inserted products directly as
+`Published`. This PR now:
 
-Supplier/agent E2E therefore remains **BLOCKED / NOT VERIFIED**, not passed.
+- requires backend automation/admin authorization for mutation actions;
+- keeps `CJ_PRODUCT_IMPORT_ENABLED=false` by default;
+- keeps `CJ_LIVE_FULFILLMENT_ENABLED=false` by default;
+- adds a bounded `DRY_RUN` supplier discovery action that does not write catalogue
+  data or create supplier orders;
+- stages CJ imports as `STAGED` instead of auto-publishing them;
+- adds integration tests proving unauthorized mutation is blocked, disabled import
+  and fulfilment gates return blocked status, dry-run is non-mutating, and imported
+  records are staged.
+
+The connected Netlify project currently has no CJ API key, supplier mutation flags
+or automation token configured, so a genuine external supplier dry-run cannot be
+verified there yet. The integration suite exercises agent/runtime contracts and the
+supplier safety boundary, but a genuine laptop-agent + supplier E2E run was not
+performed because database parity, payment sandbox configuration, laptop Machine AI
+execution and current Netlify runtime are not yet verified.
+
+Triggering supplier purchases/publication merely to obtain a green test would violate
+the release safety constraints. Supplier/agent E2E therefore remains
+**BLOCKED / NOT VERIFIED**, not passed.
 
 ## Verification gates
 
-GitHub Release Verification run #2 on PR #115 completed successfully.
+GitHub Release Verification run #8 on PR #115 completed successfully for code head `7a02e4f2076cf68fc2266fdeb0ff28850a60b61d`.
 
 | Gate | Result |
 |---|---|
 | Focused checkout/inventory/payments/Machine AI/Perplexity | **PASS — 38/38, 0 failed, 0 skipped** |
-| `npm run test:integrations` | **PASS — 298/298, 0 failed, 0 skipped** |
+| `npm run test:integrations` | **PASS — 302/302, 0 failed, 0 skipped** |
 | `npm run typecheck` | **PASS** |
 | `npm run lint` | **PASS — 0 errors, 60 warnings** |
 | `npm run build` | **PASS — optimized production build compiled successfully** |
@@ -221,12 +250,15 @@ reclassified as errors.
    reservations, or otherwise prove the operational cancellation policy cannot
    strand stock.
 6. Verify the current PR on an isolated Netlify preview/runtime without promoting
-   production. Confirm `/api/health`, catalogue loading, customer checkout and
-   browser console/hydration behavior.
-7. Only after the above, run non-destructive supplier/agent E2E through a sandbox or
+   production. Confirm `/api/health`, catalogue loading, the new catalogue-error
+   state, customer checkout and browser console/hydration behavior.
+7. Configure only the non-mutating/sandbox supplier prerequisites needed for a
+   genuine CJ `DRY_RUN` and laptop-agent task. Keep import and live fulfilment flags
+   disabled until separately approved.
+8. Only after the above, run non-destructive supplier/agent E2E through the
    approval-gated path. Do not place supplier orders, publish products/ads or spend
    money as a release test.
-8. Re-run the complete release-verification workflow after any blocker fix. Merge or
+9. Re-run the complete release-verification workflow after any blocker fix. Merge or
    deploy only after both code gates and external runtime gates have evidence.
 
 The candidate is materially safer and all requested repository gates pass, but the
