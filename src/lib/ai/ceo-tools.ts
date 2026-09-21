@@ -1,5 +1,6 @@
 import { pool } from "@/db";
 import { serpSearch } from "@/lib/ai/agent-tools";
+import { researchWithOptionalPerplexity, type PublicResearchResult } from "@/lib/ai/perplexity-research";
 import { resolveVerifiedProductMedia } from "@/lib/ai/media-resolver";
 import { FASHION_COMMANDS, runFashionCommand } from "@/lib/ai/fashion-studio";
 import { runFashionDesigner } from "@/app/api/fashion-designer/route";
@@ -26,7 +27,33 @@ export async function inspectLiveBusinessData(){
  ]);
  return{products:products.rows[0],internalOrders:orders.rows[0],storefrontOrders:storefrontOrders.rows[0],recentActivity:activity.rows,refreshes:refreshes.rows,pendingApprovals:approvals,inspectedAt:new Date().toISOString()};
 }
-export async function researchWeb(query:string){const data=await serpSearch(query);return{organic:Array.isArray(data.organic_results)?data.organic_results.slice(0,8).map((x:any)=>({title:x.title,link:x.link,snippet:x.snippet})):[],shopping:Array.isArray(data.shopping_results)?data.shopping_results.slice(0,8).map((x:any)=>({title:x.title,link:x.link,price:x.price,source:x.source})):[]};}
+export async function researchWeb(query:string){
+ return researchWithOptionalPerplexity(query,async safeQuery=>{
+  const data=await serpSearch(safeQuery);
+  const fetchedAt=new Date().toISOString();
+  const organic=Array.isArray(data.organic_results)?data.organic_results.slice(0,8).map((x:any)=>({title:x.title,link:x.link,snippet:x.snippet,source:x.source||data.providerEngine||"SearXNG"})):[];
+  const shopping=Array.isArray(data.shopping_results)?data.shopping_results.slice(0,8).map((x:any)=>({title:x.title,link:x.link,price:x.price,source:x.source})):[];  
+  return {
+   provider:"searxng",
+   status:"OK",
+   answer:"",
+   citations:organic.map((x:any)=>String(x.link||"")).filter(Boolean),
+   organic,
+   shopping,
+   evidence:organic.filter((x:any)=>/^https?:\/\//i.test(String(x.link||""))).map((x:any)=>({
+    source:"SEARXNG",
+    sourceUrl:String(x.link),
+    topic:safeQuery,
+    title:String(x.title||"Web source"),
+    snippet:String(x.snippet||""),
+    metric:"",
+    observedAt:null,
+    fetchedAt,
+    evidenceHash:"",
+   })),
+  } as PublicResearchResult;
+ });
+}
 export async function resolveProductImages(productId?:number,productName?:string){return resolveVerifiedProductMedia(productId,productName);}
 export async function fashionStudio(command:string,productId?:number,productName?:string,count?:number,extraPrompt?:string){return runFashionCommand({command,productId,productName,count,extraPrompt});}
 export async function designFashionCollection(count:number,origin:string){return runFashionDesigner(count,origin);}
