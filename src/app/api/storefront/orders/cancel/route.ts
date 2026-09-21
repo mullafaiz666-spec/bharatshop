@@ -33,6 +33,9 @@ export async function POST(req: Request) {
 
       const paymentStatus = String(storefront.paymentStatus || "").toUpperCase();
       const fulfillmentStatus = String(storefront.fulfillmentStatus || "").toUpperCase();
+      if (fulfillmentStatus === "CANCELLED" && readPaymentMeta(storefront.notes ?? undefined, "checkout_cancelled") === "true") {
+        return NextResponse.json({ cancelled: true, orderRef, inventoryReleased: false, alreadyCancelled: true, paymentStatus: storefront.paymentStatus, fulfillmentStatus: storefront.fulfillmentStatus }, { headers: { "Cache-Control": "no-store" } });
+      }
       if (["TOKEN_PAID", "PAID", "TOKEN_REFUNDED", "REFUNDED"].includes(paymentStatus)) {
         return NextResponse.json({ error: "Paid or refunded orders require the verified refund/cancellation workflow" }, { status: 409 });
       }
