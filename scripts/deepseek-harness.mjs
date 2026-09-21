@@ -26,6 +26,7 @@ const PNPM_SPEC = process.env.BHARATSHOP_PNPM_SPEC || 'pnpm@10';
 const LOCAL_ENGINEER_MODEL = process.env.BHARATSHOP_LOCAL_ENGINEER_MODEL || process.env.PERSONAL_AI_MODEL || process.env.AGENCY_MODEL || 'qwen3.5:4b';
 const LOCAL_OLLAMA_OPENAI_BASE_URL = process.env.BHARATSHOP_OLLAMA_OPENAI_BASE_URL || 'http://127.0.0.1:11434/v1';
 const SETTINGS_PATH = join(DSH_HOME, 'settings.yaml');
+const OLLAMA_DSH_PATCH_PATH = join(homedir(), '.ollama', 'launch', 'dsh', 'ollama.cordis.yml');
 const LOCAL_DSH_SMOKE_TIMEOUT_MS = Number(process.env.BHARATSHOP_DSH_SMOKE_TIMEOUT_MS || 180000);
 const LOCAL_DSH_TASK_TIMEOUT_MS = Number(process.env.BHARATSHOP_DSH_TASK_TIMEOUT_MS || 2700000);
 
@@ -76,6 +77,7 @@ function safeHarnessEnv() {
   // requires a named apiKeyEnv reference on Windows. This is a local placeholder,
   // not a credential and is never written to the repository.
   env.OLLAMA_API_KEY = 'ollama-local';
+  env.OLLAMA_LAUNCH_DSH_API_KEY = 'ollama';
   return env;
 }
 
@@ -195,16 +197,43 @@ function npxDshOrExit(dshArgs, env = withLocalToolPath(safeHarnessEnv())) {
 
 function runOfficialOllamaDshTask(prompt, { timeoutMs = LOCAL_DSH_TASK_TIMEOUT_MS } = {}) {
   const env = withLocalToolPath(safeHarnessEnv());
-  console.log(`Launching DeepSeek Harness through Ollama with local model ${LOCAL_ENGINEER_MODEL}.`);
-  console.log('This path uses Ollama\'s supported DSH integration and does not require a DeepSeek API key.');
-  return run(ollama, [
+
+  console.log(`Configuring DeepSeek Harness for local Ollama model ${LOCAL_ENGINEER_MODEL}.`);
+  console.log('Ollama generates its provider patch first; DSH headless then runs directly with that patch.');
+
+  const configureStatus = run(ollama, [
     'launch',
     'dsh',
     '--model',
     LOCAL_ENGINEER_MODEL,
-    '--',
-    '--prompt',
-    prompt,
+    '--config',
+  ], { env, timeoutMs: Math.min(timeoutMs, 120000) });
+
+  if (configureStatus !== 0) return configureStatus;
+
+  if (!existsSync(OLLAMA_DSH_PATCH_PATH)) {
+    console.error(`Ollama DSH provider patch was not created: ${OLLAMA_DSH_PATCH_PATH}`);
+    return 2;
+  }
+
+  const dshArgs = [
+    '--profile',
+    'headless',
+    '--patch',
+    OLLAMA_DSH_PATCH_PATH,
+  ];
+
+  if (existsSync(HEADLESS_SUBAGENT_PATCH)) {
+    dshArgs.push('--patch', HEADLESS_SUBAGENT_PATCH);
+  }
+
+  dshArgs.push(prompt);
+
+  console.log('Running DSH headless with Ollama provider patch; no DeepSeek API key is required.');
+  return runPackageCli('npx', [
+    '--yes',
+    `@deepseek-ai/dsh@${DSH_VERSION}`,
+    ...dshArgs,
   ], { env, timeoutMs });
 }
 
