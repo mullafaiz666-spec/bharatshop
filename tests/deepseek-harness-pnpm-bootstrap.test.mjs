@@ -66,7 +66,8 @@ test('local engineering parent run does not require paid provider credentials', 
 });
 
 
-test('Ollama DSH launcher uses positional headless mode instead of rejected --profile forwarding', () => {
-  assert.match(source, /'--',\s*'headless',\s*prompt/);
+test('Ollama DSH launcher uses the supported prompt flag for one-shot execution', () => {
+  assert.match(source, /'--',\s*'--prompt',\s*prompt/);
   assert.doesNotMatch(source, /'--',\s*'--profile',\s*'headless'/);
+  assert.doesNotMatch(source, /'--',\s*'headless',\s*prompt/);
 });
