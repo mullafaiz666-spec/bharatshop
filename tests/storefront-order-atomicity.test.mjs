@@ -10,9 +10,9 @@ const tokenPlan = evaluate(compile('../src/lib/payments/token-plan.ts'), {});
 const inventory = evaluate(compile('../src/lib/orders/inventory-reservation.ts'), { '@/lib/payments/token-plan': tokenPlan, 'drizzle-orm': { sql: (parts,...values) => ({parts,values}) } });
 const route = compile('../src/app/api/storefront/orders/route.ts');
 const payload = { customerName: 'Test Customer', customerEmail: 'test@example.invalid', customerPhone: '9000000000', customerAddress: 'Test address', customerCity: 'Mumbai', customerState: 'Maharashtra', customerPincode: '400001', productId: 1, quantity: 2 };
-function setup({ failTable, price = '100.00' } = {}) {
+function setup({ failTable, price = '100.00', stock = 10 } = {}) {
  const state = { storefrontOrders: [], orders: [], aiActivityLogs: [] };
- let transactions = 0, locks = 0, stockCount = 10;
+ let transactions = 0, locks = 0, stockCount = stock;
  const tables = Object.fromEntries(['storefrontOrders','orders','products','productDetails','aiActivityLogs'].map(name => [name, { name, id: 'id', orderRef: 'orderRef' }]));
  const product = { id: 1, userId: 1, title: 'Test product', brand: 'Generic', supplierName: 'Test', status: 'Published', stockCount: 10, sellingPriceInr: price, supplierCostInr: '30', shippingCostInr: '10', gstPct: '18', netProfitInr: '50' };
  const db = { async transaction(fn) {
@@ -69,7 +69,6 @@ test('retry returns the original reference and creates no duplicate rows', async
  assert.equal(retry.status,200);assert.equal(first.ref,second.ref);assert.deepEqual(first.paymentPlan,second.paymentPlan);
  for(const rows of Object.values(app.state)) assert.equal(rows.length,1);
  assert.equal(app.counts().stockCount,8);
- assert.equal(app.counts().stockCount,8);
 });
 test('a reused key with changed order details is rejected',async()=>{
  const app=setup();await app.request();assert.equal((await app.request({...payload,quantity:3})).status,409);assert.equal(app.state.orders.length,1);
@@ -84,4 +83,14 @@ test('invalid JSON, fields, IDs and keys are rejected before accessing the datab
 });
 test('unusable catalogue prices cannot create orders',async()=>{
  for(const price of ['NaN','0','-10']){const app=setup({price});assert.equal((await app.request()).status,409);assert.equal(app.state.orders.length,0);}
+});
+
+test('atomic inventory reservation prevents oversell across separate checkout keys',async()=>{
+ const app=setup({stock:5});
+ const first=await app.request({...payload,quantity:4},'checkout_stock_key_123');
+ const second=await app.request({...payload,quantity:2},'checkout_stock_key_456');
+ assert.equal(first.status,201);
+ assert.equal(second.status,409);
+ assert.equal(app.state.orders.length,1);
+ assert.equal(app.counts().stockCount,1);
 });
