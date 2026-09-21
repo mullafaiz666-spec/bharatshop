@@ -41,3 +41,9 @@ test('local Ollama settings preserve an existing unmanaged Harness settings back
   assert.match(source, /managed-by: bharatshop-local-engineer/);
   assert.match(source, /cpSync\(SETTINGS_PATH, backupPath\)/);
 });
+
+
+test('local Ollama settings writer imports writeFileSync', () => {
+  assert.match(source, /import \{[^\n]*writeFileSync[^\n]*\} from 'node:fs'/);
+  assert.match(source, /writeFileSync\(SETTINGS_PATH, settings, 'utf8'\)/);
+});
