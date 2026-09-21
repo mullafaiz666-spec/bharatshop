@@ -66,8 +66,11 @@ test('local engineering parent run does not require paid provider credentials', 
 });
 
 
-test('Ollama DSH launcher uses the supported prompt flag for one-shot execution', () => {
-  assert.match(source, /'--',\s*'--prompt',\s*prompt/);
-  assert.doesNotMatch(source, /'--',\s*'--profile',\s*'headless'/);
-  assert.doesNotMatch(source, /'--',\s*'headless',\s*prompt/);
+test('Ollama configures the provider patch and DSH headless consumes it directly', () => {
+  assert.match(source, /OLLAMA_DSH_PATCH_PATH/);
+  assert.match(source, /'launch',\s*'dsh',\s*'--model',\s*LOCAL_ENGINEER_MODEL,\s*'--config'/);
+  assert.match(source, /'--profile',\s*'headless',\s*'--patch',\s*OLLAMA_DSH_PATCH_PATH/);
+  assert.match(source, /dshArgs\.push\('--patch', HEADLESS_SUBAGENT_PATCH\)/);
+  assert.match(source, /Running DSH headless with Ollama provider patch/);
+  assert.doesNotMatch(source, /'--',\s*'--prompt',\s*prompt/);
 });
