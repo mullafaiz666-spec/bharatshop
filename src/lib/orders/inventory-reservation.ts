@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { appendPaymentMeta, readPaymentMeta } from "@/lib/payments/token-plan";
 
-type InventoryTransaction = { execute: (query: unknown) => Promise<unknown> };
+type InventoryTransaction = { execute: (query: any) => any };
 type ReservableOrder = { productId?: number | null; quantity?: number | null; notes?: string | null };
 
 function resultRows(result: unknown) {
