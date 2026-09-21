@@ -26,6 +26,8 @@ const PNPM_SPEC = process.env.BHARATSHOP_PNPM_SPEC || 'pnpm@10';
 const LOCAL_ENGINEER_MODEL = process.env.BHARATSHOP_LOCAL_ENGINEER_MODEL || process.env.PERSONAL_AI_MODEL || process.env.AGENCY_MODEL || 'qwen3.5:4b';
 const LOCAL_OLLAMA_OPENAI_BASE_URL = process.env.BHARATSHOP_OLLAMA_OPENAI_BASE_URL || 'http://127.0.0.1:11434/v1';
 const SETTINGS_PATH = join(DSH_HOME, 'settings.yaml');
+const LOCAL_DSH_SMOKE_TIMEOUT_MS = Number(process.env.BHARATSHOP_DSH_SMOKE_TIMEOUT_MS || 180000);
+const LOCAL_DSH_TASK_TIMEOUT_MS = Number(process.env.BHARATSHOP_DSH_TASK_TIMEOUT_MS || 2700000);
 
 const mode = (process.argv[2] || 'status').toLowerCase();
 const args = process.argv.slice(3);
@@ -83,8 +85,14 @@ function run(command, commandArgs, options = {}) {
     stdio: 'inherit',
     windowsHide: false,
     env: options.env || process.env,
+    timeout: Number.isFinite(options.timeoutMs) ? options.timeoutMs : undefined,
+    killSignal: 'SIGTERM',
   });
   if (result.error) {
+    if (result.error.code === 'ETIMEDOUT') {
+      console.error(`Command timed out after ${options.timeoutMs}ms: ${command}`);
+      return 124;
+    }
     console.error(result.error.message);
     return 1;
   }
@@ -183,6 +191,22 @@ function npxDsh(dshArgs, env = withLocalToolPath(safeHarnessEnv())) {
 function npxDshOrExit(dshArgs, env = withLocalToolPath(safeHarnessEnv())) {
   const status = npxDsh(dshArgs, env);
   if (status !== 0) process.exit(status);
+}
+
+function runOfficialOllamaDshTask(prompt, { timeoutMs = LOCAL_DSH_TASK_TIMEOUT_MS } = {}) {
+  const env = withLocalToolPath(safeHarnessEnv());
+  console.log(`Launching DeepSeek Harness through Ollama with local model ${LOCAL_ENGINEER_MODEL}.`);
+  console.log('This path uses Ollama\'s supported DSH integration and does not require a DeepSeek API key.');
+  return run(ollama, [
+    'launch',
+    'dsh',
+    '--model',
+    LOCAL_ENGINEER_MODEL,
+    '--',
+    '--profile',
+    'headless',
+    prompt,
+  ], { env, timeoutMs });
 }
 
 function readJson(path) {
@@ -384,27 +408,29 @@ switch (mode) {
     break;
   }
 
+  case 'smoke': {
+    assertSupportedNode();
+    const prompt = 'Reply LOCAL_OLLAMA_READY only. Do not inspect or modify files and do not call tools.';
+    const status = runOfficialOllamaDshTask(prompt, { timeoutMs: LOCAL_DSH_SMOKE_TIMEOUT_MS });
+    if (status !== 0) process.exit(status);
+    break;
+  }
+
   case 'task': {
     assertSupportedNode();
-    assertProductSetup({ profile: 'headless' });
-    const localRoute = ensureLocalOllamaSettings();
-    if (!existsSync(HEADLESS_SUBAGENT_PATCH)) {
-      console.error(`Missing headless subagent overlay: ${HEADLESS_SUBAGENT_PATCH}`);
-      process.exit(2);
-    }
     const task = args.join(' ').trim();
     if (!task) {
       console.error('Usage: node scripts/deepseek-harness.mjs task "your task"');
       process.exit(2);
     }
     const guardrails = readGuardrails();
-    const prompt = `${guardrails}\n\nLOCAL-FIRST EXECUTION\nThe parent engineering model is local Ollama. Use repository tools directly to inspect, edit, test, and build. subagent_codex and subagent_claude_code are optional: delegate only when the provider is already authenticated and available; if either provider is unavailable, continue locally instead of failing the task. Keep final responsibility for verification and safety.\n\nCURRENT TASK\n${task}`.trim();
-    console.log(`Running guarded Harness task on local Ollama model ${localRoute.model}; no DeepSeek API key is required.`);
-    npxDshOrExit(['--profile', 'headless', '--patch', HEADLESS_SUBAGENT_PATCH, prompt], withLocalToolPath(safeHarnessEnv()));
+    const prompt = `${guardrails}\n\nLOCAL-FIRST EXECUTION\nThe parent engineering model is local Ollama. Use repository tools directly to inspect, edit, test, and build. Do not require DeepSeek, OpenAI, Anthropic, or other paid API credentials for the parent run. Product subagents are optional and must never block local execution. Keep final responsibility for verification and safety.\n\nCURRENT TASK\n${task}`.trim();
+    const status = runOfficialOllamaDshTask(prompt, { timeoutMs: LOCAL_DSH_TASK_TIMEOUT_MS });
+    if (status !== 0) process.exit(status);
     break;
   }
 
   default:
-    console.error('Unknown mode. Use: status | install | subagents | web | task');
+    console.error('Unknown mode. Use: status | install | subagents | web | smoke | task');
     process.exit(2);
 }
