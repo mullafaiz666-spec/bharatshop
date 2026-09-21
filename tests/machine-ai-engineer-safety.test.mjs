@@ -6,10 +6,13 @@ import { join, resolve } from 'node:path';
 const root = resolve(process.cwd());
 const script = readFileSync(join(root, 'scripts', 'machine-ai-engineer.mjs'), 'utf8');
 
-test('machine engineer refuses protected branches and dirty starts', () => {
+test('machine engineer refuses protected branches and preserves dirty local starts', () => {
   assert.match(script, /repair\|fix\|feature\|chore\|test\|ai/);
   assert.match(script, /Refusing engineering mutations/);
-  assert.match(script, /Refusing to start from a dirty worktree/);
+  assert.match(script, /snapshotBaseline/);
+  assert.match(script, /diff', '--binary', 'HEAD'/);
+  assert.match(script, /never reset, clean, checkout-overwrite, or discard unrelated work/);
+  assert.doesNotMatch(script, /Refusing to start from a dirty worktree/);
 });
 
 test('machine engineer blocks secret-bearing worktrees and secret env forwarding', () => {
