@@ -1,94 +1,233 @@
-# BharatShop verification — 21 September 2026
+# BharatShop release verification — 21 September 2026
 
-Decision: **KEEP MODIFYING LOCALLY. Not ready for production.**
+Decision: **KEEP MODIFYING LOCALLY. Not ready for production promotion.**
 
-## Source and scope
+## Source and safety scope
 
-Continues existing draft PR #114, `repair/reconcile-20260918`, revision
-`30d266b55d207a6941f9c64e7aa3dca5b4c0a781`. The reconstructed candidate's Git tree
-exactly matched GitHub tree `e48d9a5265d9f668f6089cef4ff4dcbe4ffd7efe` before edits.
-The Windows checkout and its uncommitted changes were not accessible. No existing
-checkout was overwritten. No production data, migrations, live payments, supplier
-orders, ads, production deploys or main-branch changes were performed.
+This verification continues draft PR #115 on branch
+`fix/end-to-end-readiness-20260921`. The PR was verified open, draft and unmerged.
+Its starting head for this continuation was
+`ba09d27165ceb9da2ae173ce78d7e47c3011dc90`.
 
-## Repairs
+The Windows checkout at `C:\Users\faizm\bharatshop-harness` is not reachable from
+this cloud execution environment, so its exact working-tree status cannot be asserted
+here. No reset, clean, checkout replacement or destructive reconciliation was
+performed. Existing PR fixes for checkout retry/idempotency, transactional order
+creation, Razorpay cancellation/dismiss recovery, and Machine AI startup identity
+verification were preserved.
 
-- Storefront order, core order and audit writes now share a database transaction.
-  A later insert failure rolls back all earlier writes.
-- Optional Idempotency-Key uses PostgreSQL transaction advisory locking and a
-  deterministic opaque order reference. Identical retries retrieve the original
-  order; reusing a key with different details returns 409. No schema migration.
-- Both storefront checkout components retain per-request keys while mounted so
-  payment/network retries do not create duplicate orders. Keys are not persisted
-  across browser reloads. Multi-line checkout still creates individual orders,
-  rather than an atomic whole-cart transaction; prior lines can remain pending if
-  a later line fails. This remains a release limitation.
-- Invalid JSON, delivery fields, product IDs, keys and unusable prices are rejected.
-  Database error details are no longer returned from order creation.
-- Closing Razorpay's modal unlocks checkout. BharatDrip clears retry keys after
-  verified success so a subsequent intentional order can be created.
-- Machine AI readiness uses a fast loopback-only identity endpoint, verifies the
-  checkout root and serving PID, and no longer treats a saved live PID as proof
-  of a healthy UI. Stop refuses an unverified process. This is UI readiness,
-  not evidence of working Ollama inference or completed agent tasks.
-- Preserved previous unmerged release fixes: cross-platform Node production
-  launcher, loopback start:local, and an explicit acceptance-test target instead
-  of defaulting a mutating acceptance suite to production.
+No production database write, reset, seed, migration or cutover was performed. No
+production or sandbox payment was created. No deploy or PR merge was performed. No
+supplier order, Shopify publication, product publication, advertising publication or
+spend was triggered. No credentials are recorded in this document or committed by
+this work.
 
-## Verification
+## Optional Perplexity research provider
 
-| Check | Result |
+Perplexity was added only to the existing explicit public web-research tool path.
+It does not replace the local Ollama/`qwen3.5:4b` default, the existing AI provider
+chain/Gemini fallback, or the audit/evidence architecture.
+
+Implementation:
+
+- `src/lib/ai/perplexity-research.ts` is server-only and uses the existing Fetch
+  runtime; no new paid SDK/dependency was added.
+- The key is read only from `PERPLEXITY_API_KEY`. The example environment file
+  contains an empty placeholder only.
+- When the key is absent, readiness reports `NOT_CONFIGURED` and research continues
+  through the existing SearXNG path.
+- Configured readiness is reported as `CONFIGURED_UNVERIFIED`; health responses do
+  not return the key.
+- Perplexity is consulted only by `research_web`, which the agent runtime already
+  reserves for current/latest/trend/market/competitor/supplier/research-style tasks.
+  General agent reasoning still uses the existing model provider.
+- Results normalize public source URLs, titles, snippets, timestamps, citations and
+  SHA-256 evidence hashes.
+- Private/local URLs and hosts, database URLs, URL credentials, credential/token
+  material, customer email/phone fields, card/PAN-like data, BharatShop order refs,
+  payment identifiers and named secret variables are blocked before an external
+  request or external-search fallback.
+- Requests have a bounded timeout, one bounded retry for transient/rate-limit
+  conditions, caller cancellation, Retry-After handling and sanitized errors.
+  Malformed successful responses are rejected rather than converted into invented
+  evidence.
+
+Focused Perplexity tests cover configured, unconfigured, timeout, rate limit,
+malformed response, privacy filtering, provider fallback and caller cancellation.
+
+## Inventory reservation and cancellation
+
+The previous checkout only compared `stockCount` before inserting an order, so two
+concurrent checkouts could oversell. The PR now performs a conditional decrement
+inside the existing order transaction:
+
+`UPDATE products SET stock_count = stock_count - quantity ... WHERE stock_count >= quantity RETURNING stock_count`
+
+No schema migration is required. If any later storefront/core/audit write fails, the
+transaction rolls the stock change back. An idempotent checkout retry finds the
+existing order before reservation and does not decrement stock twice.
+
+A cancellation endpoint now requires the same opaque checkout idempotency key,
+locks the order, and can release a held reservation exactly once. Multi-line
+BharatShop and BharatDrip checkout preparation rolls back earlier prepared lines if
+a later line fails before gateway initiation. Cancelled checkout keys cannot be
+reused as live orders.
+
+Safety limitation: after a Razorpay/Cashfree gateway order has been created,
+inventory is deliberately **not** released by the public cancellation endpoint
+without verified gateway state. Automatic expiry/release of abandoned gateway
+sessions is therefore still a release blocker rather than risking stock being sold
+twice after a late payment.
+
+## Database connectivity and parity
+
+### Current Render source
+
+Render control-plane evidence reports `bharatshop-db` available on PostgreSQL 16.
+The free database metadata reports an expiry timestamp of
+`2026-09-26T23:20:33.577398Z`, which is an operational release risk.
+
+A read-only SQL parity query was attempted through Render's read-only database tool.
+It failed before executing the SELECT with `FATAL: SSL/TLS required (SQLSTATE 28000)`.
+No database statement was applied and no source row counts were obtained through
+that connector.
+
+The application DB client itself still explicitly enables TLS for non-local
+PostgreSQL URLs in `src/db/index.ts`; the connector failure does not prove that the
+application connection is broken, but it prevents independent source parity proof
+from this session.
+
+### Supabase target
+
+The connected Supabase project is `ACTIVE_HEALTHY` on PostgreSQL 17. Read-only
+schema inspection shows:
+
+| Table | Rows |
+|---|---:|
+| `public.products` | 0 |
+| `public.orders` | 0 |
+| `public.order_items` | 0 |
+| `public.profiles` | 0 |
+
+The target schema is also materially incompatible with the current BharatShop
+Drizzle schema: for example, Supabase uses UUID product/order identities and a
+different order model, while current BharatShop uses serial/integer product/order
+identities plus `storefront_orders` and broader operational/agent tables.
+
+**Database cutover is blocked.** No migration, copy, seed, reset or write was
+performed on Supabase or Render.
+
+## Razorpay and Cashfree
+
+Source-level payment protections remain intact: server-side credentials, order row
+locking, amount/currency verification, signature verification, payment transition
+guards, replay handling and post-verification fulfilment gating.
+
+The current Netlify project configuration was inspected without displaying values.
+The required Razorpay/Cashfree credential variables and payment-mode variables are
+not configured there, including Razorpay key/secret/webhook and Cashfree
+client/secret/webhook settings. Therefore a real sandbox initiation/cancel/fail/pay
+cycle cannot be truthfully verified from the Netlify runtime yet.
+
+No payment API call and no production payment was performed.
+
+## Laptop Machine AI
+
+The PR preserves the Machine AI serving-checkout/PID/identity startup repairs.
+Focused code regression tests pass. This session cannot execute the user's Windows
+machine at `C:\Users\faizm\bharatshop-harness`, so live evidence for Ollama
+`qwen3.5:4b` generation, the UI on port 3001, supervisors, shim and a completed
+agent task remains **NOT VERIFIED**.
+
+A passing CI test is not being treated as proof that the laptop runtime is currently
+healthy.
+
+## Storefront product loading and hydration
+
+The current branch builds successfully. Browser-only localStorage usage in the
+inspected storefront/cart source is effect-gated, so no new hydration diagnosis is
+claimed from static inspection.
+
+The present customer catalogue fetch converts an upstream catalogue failure into an
+empty product list, which can render the same customer-visible "Nothing here yet"
+state as a genuinely empty catalogue. The Netlify catalogue endpoint is intentionally
+proxied to the authoritative Render
+`/api/storefront/products` until database parity is proven.
+
+A previous release investigation observed a hydration error and an empty catalogue,
+but the public Netlify URL could not be reached from this session's HTTP probe, so
+that browser symptom was not independently reproduced here. Live storefront
+loading/hydration remains a runtime gate.
+
+## Netlify build and runtime
+
+Netlify project `bharatshop-35fd` exists and its current production deploy is
+reported `ready`. However that production deploy is stale relative to PR #115:
+
+- deploy ID: `6aa52ee7ff58fc0008915e6d`
+- deployed branch: `main`
+- deployed commit: `0e3b45ee09e970428ebe63bda08c92a4d7df56a1`
+- published: 12 September 2026
+- PR #115 candidate is a later, different revision
+
+The deployed runtime includes the Next.js server handler, company scheduler and
+storefront-products proxy. Netlify's secret scan for that deploy reported no
+matches.
+
+No new Netlify deploy was triggered. A green PR build proves the candidate compiles;
+it does not prove the stale production runtime has the candidate fixes.
+
+## Supplier and agent E2E
+
+The integration suite exercises agent/runtime contracts and passes, but a genuine
+supplier/agent E2E run was not performed because database parity, payment sandbox
+configuration, laptop Machine AI execution and current Netlify runtime are not yet
+verified. Triggering supplier purchases/publication merely to obtain a green test
+would violate the release safety constraints.
+
+Supplier/agent E2E therefore remains **BLOCKED / NOT VERIFIED**, not passed.
+
+## Verification gates
+
+GitHub Release Verification run #2 on PR #115 completed successfully.
+
+| Gate | Result |
 |---|---|
-| Integration/regression suite | 286 passed, zero failed or skipped |
-| TypeScript | Passed |
-| Production Next.js build | Passed |
-| ESLint | Zero errors; 60 existing warnings |
-| Git whitespace check | Passed |
-| HTTP page smoke | /, /women, /men, /kids, /electronics, /store, /bharatdrip returned 200 |
-| Auth smoke | /dashboard redirected to /admin-login; /api/cart and /api/orders returned 401 |
-| Machine UI identity | Correct service/root/PID returned; foreign Origin rejected with 403 |
-| Stale PID regression | Real manager subprocess refused to stop unrelated test service |
-| Database catalogue | Local /api/storefront/products returned 500; no DB configured here |
-| Payments | Local status reports both providers unconfigured, productionReady=false |
-| Overall health | Local /api/health returned 503 |
+| Focused checkout/inventory/payments/Machine AI/Perplexity | **PASS — 38/38, 0 failed, 0 skipped** |
+| `npm run test:integrations` | **PASS — 298/298, 0 failed, 0 skipped** |
+| `npm run typecheck` | **PASS** |
+| `npm run lint` | **PASS — 0 errors, 60 warnings** |
+| `npm run build` | **PASS — optimized production build compiled successfully** |
+| Creative Engine CI | **PASS** |
 
-Order rollback and retry tests execute the real route with a transactional database
-test double. They are not live PostgreSQL concurrency or payment-provider tests.
-The build reused the candidate's matching dependency versions from a prior workspace;
-a fresh network installation was unavailable. Windows-native process behavior and
-startup registration were not verified.
+The 60 lint findings are warnings, including existing image-optimization and
+React-effect warnings; lint exited successfully. They are not being silently
+reclassified as errors.
 
-## Live observations
+## Remaining release blockers
 
-- Browser inspection of https://bharatshops.netlify.app rendered the storefront,
-  then displayed “Nothing here yet.” No live catalogue products were visible.
-- The browser reported minified React error #418 (hydration). No diagnosis or
-  production fix is claimed from this observation alone.
-- Netlify's PR #114 deployment `6aae1ec56242cb0008e826f7` is in error state, matching
-  the candidate revision. The dashboard identifies the Building stage as failed;
-  detailed error text was not available through the inspected surfaces.
-- The candidate still proxies database-backed APIs to the authoritative Render
-  runtime. This was retained to protect the existing source of truth. Native
-  Supabase cutover is not verified.
+1. Reconcile/verify the exact Windows working tree without discarding local changes,
+   then run the laptop Machine AI/Ollama/shim/supervisor/task execution gate.
+2. Restore read-only access to the authoritative Render PostgreSQL source and obtain
+   schema plus row-count/parity evidence. Address the reported free-database expiry
+   risk without destructive replacement.
+3. Design and execute a guarded real-data migration/parity plan only after source
+   evidence is available. Supabase is currently empty and incompatible; do not cut
+   over.
+4. Configure **sandbox/test** Razorpay and Cashfree credentials in the intended
+   non-production runtime and verify initiation, cancellation, failure, success,
+   webhooks, replay/concurrency and fulfilment transitions.
+5. Add a verified expiry/release path for abandoned gateway-backed inventory
+   reservations, or otherwise prove the operational cancellation policy cannot
+   strand stock.
+6. Verify the current PR on an isolated Netlify preview/runtime without promoting
+   production. Confirm `/api/health`, catalogue loading, customer checkout and
+   browser console/hydration behavior.
+7. Only after the above, run non-destructive supplier/agent E2E through a sandbox or
+   approval-gated path. Do not place supplier orders, publish products/ads or spend
+   money as a release test.
+8. Re-run the complete release-verification workflow after any blocker fix. Merge or
+   deploy only after both code gates and external runtime gates have evidence.
 
-## Remaining release work
-
-1. Reconcile this patch with the latest Windows working tree, preserving local
-   changes. Verify the exact serving checkout, UI, Ollama, shim and supervisors.
-2. Use an isolated PostgreSQL test database. Run real rollback, retry concurrency,
-   customer/admin/seller and multi-item order scenarios.
-3. Implement and verify inventory reservation, release on cancellation/expiry,
-   and oversell prevention. Current stock checking alone is insufficient.
-4. Verify Razorpay and Cashfree sandbox initiation, cancellation, failure, success,
-   webhook replay/concurrency and post-payment fulfillment gates.
-5. Restore/verify the authoritative live catalogue. Inspect migration and data
-   parity before any Netlify/Supabase cutover; never replace production data.
-6. Diagnose the Netlify build failure and hydration error, then verify an isolated
-   preview, mobile/browser customer journey and console before promotion.
-7. Verify supplier, Shopify, Meta/Google and fashion workflows against actual
-   configured services without triggering spend or external publication.
-8. Exercise genuine agent tasks and queue/restart recovery. Agent definitions,
-   heartbeat files and HTTP 200 are not completion evidence.
-
-No deployment is recommended until these gates have evidence. Keep this patch in
-review; do not merge to main or promote it automatically.
+The candidate is materially safer and all requested repository gates pass, but the
+external runtime/data/payment gates above prevent a production release decision.
