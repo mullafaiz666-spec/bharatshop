@@ -16,7 +16,7 @@
     "db:migration-preflight": "node scripts/database-migration-preflight.mjs",
     "db:verify-supabase": "node scripts/verify-supabase-copy.mjs",
     "launch:check": "node scripts/native-launch-readiness.mjs",
-    "start": "next start -H 0.0.0.0 -p ${PORT:-10000}",
+    "start": "node scripts/start-production.mjs",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test:production": "node scripts/production-acceptance-v3.mjs",
@@ -104,7 +104,8 @@
     "autom8ai:candidates": "node scripts/autom8ai-candidates.mjs",
     "db:local:ensure": "node scripts/local-db-ensure.mjs",
     "db:migration:configure:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/configure-database-migration.ps1",
-    "db:migration:preflight:local": "node scripts/database-migration-preflight-local.mjs"
+    "db:migration:preflight:local": "node scripts/database-migration-preflight-local.mjs",
+    "start:local": "node scripts/start-production.mjs --hostname 127.0.0.1 --port 3000"
   },
   "dependencies": {
     "@types/node": "22.19.15",

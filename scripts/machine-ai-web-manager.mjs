@@ -5,7 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { spawn, spawnSync } from 'node:child_process';
-import { isMachineAiStatus } from './machine-ai-web-readiness.mjs';
+import { isMachineAiIdentity } from './machine-ai-web-readiness.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..');
@@ -32,11 +32,12 @@ function alive(pid) {
   try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
-async function ready() {
+async function ready(pid) {
   try {
-    const response = await fetch(`${url}/api/status`, { signal: AbortSignal.timeout(2_000), cache: 'no-store' });
+    const response = await fetch(`${url}/api/identity`, { signal: AbortSignal.timeout(2_000), cache: 'no-store' });
     if (!response.ok || !String(response.headers.get('content-type') || '').toLowerCase().includes('application/json')) return false;
-    return isMachineAiStatus(await response.json());
+    const identity = await response.json();
+    return isMachineAiIdentity(identity, { root, pid }) ? identity : null;
   } catch { return false; }
 }
 
@@ -51,9 +52,10 @@ function openBrowser() {
 }
 
 async function start({ open = false } = {}) {
-  const oldPid = readPid();
-  if (alive(oldPid) || await ready()) {
-    console.log(`BharatShop Machine AI UI is already running at ${url}${oldPid ? ` (PID ${oldPid})` : ''}.`);
+  const running = await ready();
+  if (running) {
+    writeFileSync(pidFile, String(running.pid), 'utf8');
+    console.log(`BharatShop Machine AI UI is already running at ${url} (PID ${running.pid}).`);
     if (open) openBrowser();
     return;
   }
@@ -72,13 +74,15 @@ async function start({ open = false } = {}) {
   log(`started PID ${child.pid}`);
   for (let i = 0; i < 30; i += 1) {
     await new Promise(resolvePromise => setTimeout(resolvePromise, 300));
-    if (await ready()) {
+    if (await ready(child.pid)) {
       console.log(`BharatShop Machine AI UI ready: ${url}`);
       if (open) openBrowser();
       return;
     }
   }
-  throw new Error(`Machine AI UI did not become ready. Check ${logFile}`);
+  child.kill('SIGTERM');
+  if (readPid() === child.pid) rmSync(pidFile, { force: true });
+  throw new Error(`Machine AI UI did not become ready for this checkout. Check the port owner and ${logFile}`);
 }
 
 async function stop() {
@@ -87,6 +91,9 @@ async function stop() {
     rmSync(pidFile, { force: true });
     console.log('BharatShop Machine AI UI is not running.');
     return;
+  }
+  if (!(await ready(pid))) {
+    throw new Error('Refusing to stop an unverified process. Check the UI port owner and checkout.');
   }
   if (process.platform === 'win32') {
     spawnSync('taskkill.exe', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });

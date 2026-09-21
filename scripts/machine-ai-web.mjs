@@ -249,6 +249,7 @@ async function runtimeStatus() {
   try { agents = await getAgents(); } catch {}
   return {
     ok: ollama && models.includes(MODEL),
+    runtime: { pid: process.pid },
     model: MODEL,
     ollama: { ready: ollama, url: OLLAMA_BASE_URL, modelInstalled: models.includes(MODEL), models },
     shim: { ready: shim, url: SHIM_BASE_URL },
@@ -427,6 +428,7 @@ export function createServer() {
 
       if (req.method === 'GET' && serveStatic(req, res, url.pathname)) return;
       if (req.method === 'GET' && url.pathname === '/api/audit') return sendJson(res, 200, { ok: true, report: await auditReport() });
+      if (req.method === 'GET' && url.pathname === '/api/identity') return sendJson(res, 200, { service: 'bharatshop-machine-ui', root, pid: process.pid });
       if (req.method === 'GET' && url.pathname === '/api/status') return sendJson(res, 200, await runtimeStatus());
       if (req.method === 'GET' && url.pathname === '/api/agents') {
         const agents = await getAgents();

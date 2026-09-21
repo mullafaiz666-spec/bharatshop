@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Bag, ChevronRight, Lock, Minus, Plus, Truck, X } from "@/components/bharatdrip/icons";
 import { formatPrice, products as staticProducts, type Product } from "@/lib/bharatdrip/products";
 
@@ -185,6 +185,7 @@ function CartDrawer() {
     return () => { active = false; };
   }, [view, liveCheckout]);
 
+  const orderKeys = useRef(new Map<string, string>());
   if (!isCartOpen) return null;
 
   // Live BharatDrip DB products use the same backend pricing/payment policy as
@@ -204,10 +205,7 @@ function CartDrawer() {
       const productId = item.product.liveProductId;
       if (!productId) throw new Error("This piece is not connected to the live BharatDrip catalogue yet.");
 
-      const response = await fetch("/api/storefront/orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const payload = JSON.stringify({
           customerName: form.name,
           customerEmail: form.email,
           customerPhone: form.phone,
@@ -219,7 +217,13 @@ function CartDrawer() {
           quantity: item.quantity,
           selectedSize: item.size,
           paymentMode: provider === "razorpay" ? "PARTIAL_COD_RAZORPAY" : "PARTIAL_COD_CASHFREE",
-        }),
+        });
+      let key = orderKeys.current.get(payload);
+      if (!key) { key = crypto.randomUUID(); orderKeys.current.set(payload, key); }
+      const response = await fetch("/api/storefront/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Idempotency-Key": key },
+        body: payload,
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || "Unable to prepare this BharatDrip order.");
@@ -266,6 +270,7 @@ function CartDrawer() {
         if (!Razorpay) throw new Error("Razorpay Checkout is unavailable.");
 
         const checkout = new Razorpay({
+          modal: { ondismiss: () => setBusy(false) },
           key: data.keyId,
           amount: data.amount,
           currency: data.currency,
@@ -283,6 +288,7 @@ function CartDrawer() {
               const verified = await verifyResponse.json().catch(() => ({}));
               if (!verifyResponse.ok || !verified.verified) throw new Error(verified.error || "Payment verification failed.");
               setVerifiedRefs(prepared.refs);
+              orderKeys.current.clear();
               clearCart();
               setView("success");
             } catch (error) {

@@ -1,5 +1,11 @@
 #!/usr/bin/env node
-const BASE=(process.env.BHARATSHOP_URL||process.env.BASE_URL||"https://bharatshop-9w4a.onrender.com").replace(/\/$/,"");
+// This suite creates task/approval records. Never silently target production.
+const target=process.env.BHARATSHOP_URL||process.env.BASE_URL;
+if(!target){console.error("Set BHARATSHOP_URL to an explicitly selected test environment. This acceptance suite may write task/approval records; it has no default production target.");process.exit(1);}
+let targetUrl;
+try{targetUrl=new URL(target);}catch{console.error("BHARATSHOP_URL must be a valid HTTP(S) origin.");process.exit(1);}
+if(!["http:","https:"].includes(targetUrl.protocol)||targetUrl.username||targetUrl.password||targetUrl.search||targetUrl.hash||targetUrl.pathname!=="/"){console.error("BHARATSHOP_URL must be an HTTP(S) origin without credentials, path, query or fragment.");process.exit(1);}
+const BASE=targetUrl.origin;
 const TOKEN=process.env.BHARATSHOP_AUTOMATION_TOKEN||"";
 const APPROVAL_TOKEN=process.env.BHARATSHOP_OPERATOR_APPROVAL_TOKEN||"";
 const gates=[];
