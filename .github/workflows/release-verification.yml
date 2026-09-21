@@ -1,0 +1,40 @@
+name: Release Verification
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-verification-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release-gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      CI: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Focused checkout, inventory, payments, Machine AI and Perplexity tests
+        shell: bash
+        run: |
+          mapfile -t payment_tests < <(find tests -maxdepth 1 -type f -iname '*payment*.test.mjs' -print | sort)
+          node --test             tests/storefront-order-atomicity.test.mjs             tests/inventory-reservation.test.mjs             tests/machine-ui-identity.test.mjs             tests/perplexity-research.test.mjs             "${payment_tests[@]}"
+      - name: Integration suite
+        run: npm run test:integrations
+      - name: TypeScript
+        run: npm run typecheck
+      - name: ESLint
+        run: npm run lint
+      - name: Production build
+        run: npm run build
