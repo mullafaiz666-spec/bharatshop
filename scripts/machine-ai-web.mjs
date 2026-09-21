@@ -49,6 +49,16 @@ export function normalizeRoute(value) {
   return String(value || '').trim().toLowerCase() === 'agency' ? 'agency' : 'chat';
 }
 
+export function engineeringTaskFromPrompt(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  const command = text.match(/^\/(?:fix|build|engineer)\b\s*(.*)$/is);
+  if (command) return String(command[1] || '').trim() || text;
+  const startsLikeEngineering = /^(?:please\s+)?(?:fix|build|repair|implement|complete|debug|refactor|patch)\b/i.test(text);
+  const projectScoped = /\b(?:bharatshop|bharatdrip|project|repo|repository|app|storefront|store|checkout|payment|order|code|bug|build|test|ui|api|database|agent|integration)\b/i.test(text);
+  return startsLikeEngineering && projectScoped ? text : '';
+}
+
 export function isAllowedOrigin(origin) {
   if (!origin) return true;
   return origin === `http://127.0.0.1:${PORT}` || origin === `http://localhost:${PORT}`;
@@ -261,7 +271,7 @@ async function runtimeStatus() {
 
 function chooseAgents(agents, task, requested = []) { return chooseDepartmentAgents(agents, task, requested); }
 
-function loadPendingApproval(){const x=safeReadJson(pendingApprovalFile);return x?.status==='NEEDS_APPROVAL'?x:null} function savePendingApproval(task,mode,answer){const x={task:String(task||'').trim(),mode:normalizeRoute(mode),requestedAction:String(answer||'').slice(0,3000),createdAt:new Date().toISOString(),status:'NEEDS_APPROVAL'};writeFileSync(pendingApprovalFile,JSON.stringify(x,null,2),'utf8');return x} function clearPendingApproval(){rmSync(pendingApprovalFile,{force:true})} function asksForApproval(a){return /(approval required|requires? (?:your )?approval|please approve|if you approve|confirmation required|confirm before|approval-gated action|approve (?:this|the))/i.test(String(a||''))}
+function loadPendingApproval(){const x=safeReadJson(pendingApprovalFile);return x?.status==='NEEDS_APPROVAL'?x:null} function savePendingApproval(task,mode,answer,action='chat'){const x={task:String(task||'').trim(),mode:normalizeRoute(mode),action:String(action||'chat'),requestedAction:String(answer||'').slice(0,3000),createdAt:new Date().toISOString(),status:'NEEDS_APPROVAL'};writeFileSync(pendingApprovalFile,JSON.stringify(x,null,2),'utf8');return x} function clearPendingApproval(){rmSync(pendingApprovalFile,{force:true})} function asksForApproval(a){return /(approval required|requires? (?:your )?approval|please approve|if you approve|confirmation required|confirm before|approval-gated action|approve (?:this|the))/i.test(String(a||''))}
 
 function normalizeMessages(messages) {
   const list = Array.isArray(messages) ? messages : [];
@@ -365,7 +375,62 @@ async function handleAgencyChat(res, messages, selectedSlugs) {
   return streamOllamaResponse(res, response);
 }
 
-async function handleChatInner(req,res){const body=await readJson(req);let mode=normalizeRoute(body.mode),messages=normalizeMessages(body.messages);if(!messages.length||messages.at(-1)?.role!=='user')throw new Error('A user message is required');const original=String(messages.at(-1)?.content||'').trim();let resumed=null;res.writeHead(200,securityHeaders({'content-type':'application/x-ndjson; charset=utf-8','transfer-encoding':'chunked'}));try{if (/^\/audit\s*$/i.test(original)) { writeEvent(res,{type:'delta',text:await auditReport()});writeEvent(res,{type:'done'});return res.end(); }if(isCancellationMessage(original)){const p=loadPendingApproval();clearPendingApproval();writeEvent(res,{type:'delta',text:p?'Pending BharatShop action cancelled.':'There is no pending BharatShop approval to cancel.'});writeEvent(res,{type:'done'});return res.end()}if(isApprovalMessage(original)){resumed=loadPendingApproval();if(!resumed){writeEvent(res,{type:'delta',text:'There is no pending BharatShop action awaiting approval. Tell me the task you want approved.'});writeEvent(res,{type:'done'});return res.end()}mode=normalizeRoute(resumed.mode);messages=[...messages.slice(0,-1),{role:'user',content:`APPROVAL GRANTED. Resume the pending task, but never claim a file/browser/production/payment/deployment action unless a tool actually ran it.\n\nPENDING TASK:\n${resumed.task}`}];writeEvent(res,{type:'status',text:`Resuming approved task: ${resumed.task.slice(0,140)}`})}const task=resumed?.task||original;const answer=mode==='agency'?await handleAgencyChat(res,messages,body.selectedAgents):await handleDirectChat(res,messages);if(resumed)clearPendingApproval();else if(asksForApproval(answer)){savePendingApproval(task,mode,answer);writeEvent(res,{type:'approval',status:'NEEDS_APPROVAL',task})}writeEvent(res,{type:'done'})}catch(e){writeEvent(res,{type:'error',error:chatError(e)})}res.end()}
+async function handleChatInner(req,res){
+  const body=await readJson(req);
+  let mode=normalizeRoute(body.mode),messages=normalizeMessages(body.messages);
+  if(!messages.length||messages.at(-1)?.role!=='user')throw new Error('A user message is required');
+  const original=String(messages.at(-1)?.content||'').trim();
+  let resumed=null;
+  res.writeHead(200,securityHeaders({'content-type':'application/x-ndjson; charset=utf-8','transfer-encoding':'chunked'}));
+  try{
+    if (/^\/audit\s*$/i.test(original)) {
+      writeEvent(res,{type:'delta',text:await auditReport()});writeEvent(res,{type:'done'});return res.end();
+    }
+    if(isCancellationMessage(original)){
+      const p=loadPendingApproval();clearPendingApproval();
+      writeEvent(res,{type:'delta',text:p?'Pending BharatShop action cancelled.':'There is no pending BharatShop approval to cancel.'});
+      writeEvent(res,{type:'done'});return res.end();
+    }
+    if(isApprovalMessage(original)){
+      resumed=loadPendingApproval();
+      if(!resumed){
+        writeEvent(res,{type:'delta',text:'There is no pending BharatShop action awaiting approval. Tell me the task you want approved.'});
+        writeEvent(res,{type:'done'});return res.end();
+      }
+      if(resumed.action==='engineer-task'){
+        writeEvent(res,{type:'status',text:'Starting Machine Engineer locally...'});
+        const result=await runCockpitOperation('engineer-task',{approved:true,task:resumed.task});
+        clearPendingApproval();
+        const job=result?.job||{};
+        writeEvent(res,{type:'delta',text:`Machine Engineer started the approved fix/build task.\n\nJob: ${job.id||'created'}\nStatus: ${job.status||'RUNNING'}\n\nOpen Operations → Recent jobs to follow the real execution log. The engineer may edit local code and run verification, but production database writes, payments, publishing, commit/push/merge and deployment remain disabled.`});
+        writeEvent(res,{type:'operation',operation:'engineer-task',job});
+        writeEvent(res,{type:'done'});return res.end();
+      }
+      mode=normalizeRoute(resumed.mode);
+      messages=[...messages.slice(0,-1),{role:'user',content:`APPROVAL GRANTED. Resume the pending task, but never claim a file/browser/production/payment/deployment action unless a tool actually ran it.\n\nPENDING TASK:\n${resumed.task}`}];
+      writeEvent(res,{type:'status',text:`Resuming approved task: ${resumed.task.slice(0,140)}`});
+    } else {
+      const engineeringTask=engineeringTaskFromPrompt(original);
+      if(engineeringTask){
+        savePendingApproval(engineeringTask,mode,'Run the local Machine Engineer to edit and verify BharatShop code.','engineer-task');
+        writeEvent(res,{type:'delta',text:'This is a fix/build request. Reply **approve** and I will hand it to the local Machine Engineer to edit the BharatShop checkout and run tests, typecheck, lint and the production build.'});
+        writeEvent(res,{type:'approval',status:'NEEDS_APPROVAL',task:engineeringTask,action:'engineer-task'});
+        writeEvent(res,{type:'done'});return res.end();
+      }
+    }
+    const task=resumed?.task||original;
+    const answer=mode==='agency'?await handleAgencyChat(res,messages,body.selectedAgents):await handleDirectChat(res,messages);
+    if(resumed)clearPendingApproval();
+    else if(asksForApproval(answer)){
+      savePendingApproval(task,mode,answer);
+      writeEvent(res,{type:'approval',status:'NEEDS_APPROVAL',task});
+    }
+    writeEvent(res,{type:'done'});
+  }catch(e){
+    writeEvent(res,{type:'error',error:chatError(e)});
+  }
+  res.end();
+}
 
 // Serialize UI generations rather than silently overloading a small local model.
 let chatBusy = false;
