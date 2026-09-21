@@ -22,7 +22,7 @@ const inventory = evaluate(compile("../src/lib/orders/inventory-reservation.ts")
   "drizzle-orm": { sql },
 });
 const cancelCode = compile("../src/app/api/storefront/orders/cancel/route.ts");
-const tables = Object.fromEntries(["storefrontOrders", "orders", "aiActivityLogs"].map(name => [name, { name, id: "id", orderRef: "orderRef" }]));
+const tables = Object.fromEntries(["storefrontOrders", "orders", "aiActivityLogs"].map(name => [name, { name, id: "id", orderRef: "orderRef", orderNumber: "orderNumber" }]));
 const responseApi = { NextResponse: { json: (body, init) => new Response(JSON.stringify(body), { ...init, headers: { "Content-Type": "application/json", ...init?.headers } }) } };
 
 function expectedRef(key) {
