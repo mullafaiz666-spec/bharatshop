@@ -32,7 +32,7 @@ test('Machine Engineer parent model is local Ollama and does not require a DeepS
   assert.match(source, /api: openai-completions/);
   assert.match(source, /apiKeyEnv: OLLAMA_API_KEY/);
   assert.match(source, /env\.OLLAMA_API_KEY = 'ollama-local'/);
-  assert.match(source, /no DeepSeek API key is required/);
+  assert.match(source, /OLLAMA_LAUNCH_DSH_API_KEY/);
   assert.doesNotMatch(source, /env\.DEEPSEEK_API_KEY\s*=/);
 });
 
@@ -61,7 +61,7 @@ test('local engineering tasks use the official Ollama DSH launcher with bounded 
 });
 
 test('local engineering parent run does not require paid provider credentials', () => {
-  assert.match(source, /does not require a DeepSeek API key/);
+  assert.match(source, /provider: ollama/);
   assert.match(source, /Do not require DeepSeek, OpenAI, Anthropic, or other paid API credentials/);
 });
 
