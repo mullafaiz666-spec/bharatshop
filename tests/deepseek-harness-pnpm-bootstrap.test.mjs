@@ -47,3 +47,20 @@ test('local Ollama settings writer imports writeFileSync', () => {
   assert.match(source, /import \{[^\n]*writeFileSync[^\n]*\} from 'node:fs'/);
   assert.match(source, /writeFileSync\(SETTINGS_PATH, settings, 'utf8'\)/);
 });
+
+
+test('local engineering tasks use the official Ollama DSH launcher with bounded timeouts', () => {
+  assert.match(source, /function runOfficialOllamaDshTask/);
+  assert.match(source, /'launch',\s*'dsh'/);
+  assert.match(source, /'--model',\s*LOCAL_ENGINEER_MODEL/);
+  assert.match(source, /LOCAL_DSH_SMOKE_TIMEOUT_MS/);
+  assert.match(source, /LOCAL_DSH_TASK_TIMEOUT_MS/);
+  assert.match(source, /case 'smoke'/);
+  assert.match(source, /timeout:/);
+  assert.match(source, /ETIMEDOUT/);
+});
+
+test('local engineering parent run does not require paid provider credentials', () => {
+  assert.match(source, /does not require a DeepSeek API key/);
+  assert.match(source, /Do not require DeepSeek, OpenAI, Anthropic, or other paid API credentials/);
+});
