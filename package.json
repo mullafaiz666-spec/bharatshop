@@ -95,6 +95,7 @@
     "openmontage:backlot": "node scripts/openmontage-creative.mjs backlot",
     "machine:engineer": "node scripts/machine-ai-engineer.mjs",
     "machine:engineer:status": "node scripts/machine-ai-engineer.mjs --status",
+    "machine:verify:all": "node scripts/machine-ai-full-verify.mjs",
     "local:workstation:start": "node scripts/local-workstation-manager.mjs start",
     "local:workstation:status": "node scripts/local-workstation-manager.mjs status",
     "local:workstation:stop": "node scripts/local-workstation-manager.mjs stop",

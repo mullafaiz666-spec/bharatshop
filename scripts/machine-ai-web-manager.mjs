@@ -32,6 +32,44 @@ function alive(pid) {
   try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
+function listeningPid() {
+  if (process.platform !== 'win32') return 0;
+  const result = spawnSync('netstat.exe', ['-ano', '-p', 'tcp'], { encoding: 'utf8', windowsHide: true });
+  const lines = String(result.stdout || '').split(/\r?\n/);
+  for (const line of lines) {
+    const match = line.match(/^\s*TCP\s+(?:127\.0\.0\.1|\[::1\]):(\d+)\s+\S+\s+LISTENING\s+(\d+)\s*$/i);
+    if (match && Number(match[1]) === port) return Number(match[2]) || 0;
+  }
+  return 0;
+}
+
+function processCommandLine(pid) {
+  if (process.platform !== 'win32' || !pid) return '';
+  const script = `$p=Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}" -ErrorAction SilentlyContinue; if($p){$p.CommandLine}`;
+  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+    encoding: 'utf8', windowsHide: true, timeout: 5_000,
+  });
+  return String(result.stdout || '').trim();
+}
+
+async function recoverStaleMachineUi() {
+  const pid = listeningPid();
+  if (!pid) return false;
+  const identity = await ready(pid);
+  if (identity) return false;
+  const commandLine = processCommandLine(pid);
+  const normalized = commandLine.toLowerCase().replace(/\\/g, '/');
+  const rootNeedle = root.toLowerCase().replace(/\\/g, '/');
+  const isPriorBharatShopUi = normalized.includes('machine-ai-web.mjs') && normalized.includes(rootNeedle);
+  if (!isPriorBharatShopUi) {
+    throw new Error(`Port ${port} is occupied by unverified PID ${pid}. Refusing to terminate an unrelated process.`);
+  }
+  spawnSync('taskkill.exe', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true, timeout: 15_000 });
+  log(`recovered stale Machine AI UI PID ${pid} from port ${port}`);
+  await new Promise(resolvePromise => setTimeout(resolvePromise, 700));
+  return true;
+}
+
 async function ready(pid) {
   try {
     const response = await fetch(`${url}/api/identity`, { signal: AbortSignal.timeout(2_000), cache: 'no-store' });
@@ -60,6 +98,7 @@ async function start({ open = false } = {}) {
     return;
   }
   rmSync(pidFile, { force: true });
+  await recoverStaleMachineUi();
   const logFd = openSync(logFile, 'a');
   const child = spawn(process.execPath, [serverScript], {
     cwd: root,

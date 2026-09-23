@@ -21,7 +21,7 @@ const MODEL = process.env.PERSONAL_AI_MODEL || process.env.AGENCY_MODEL || proce
 const OLLAMA_BASE_URL = String(process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
 const SHIM_BASE_URL = String(process.env.AI_BASE_URL || 'http://127.0.0.1:11555').replace(/\/+$/, '');
 const CONTEXT = Math.max(2048, Math.min(8192, Number(process.env.PERSONAL_AI_CONTEXT || '4096')));
-const CHAT_TIMEOUT_MS = Math.max(10_000, Math.min(180_000, Number(process.env.BHARATSHOP_CHAT_TIMEOUT_MS || '90000')));
+const CHAT_TIMEOUT_MS = Math.max(30_000, Math.min(600_000, Number(process.env.BHARATSHOP_CHAT_TIMEOUT_MS || '240000')));
 const CHAT_PREDICT_TOKENS = Math.max(32, Math.min(512, Number(process.env.BHARATSHOP_CHAT_PREDICT_TOKENS || '256')));
 const BODY_LIMIT = 12_000_000;
 const stateHome = process.env.BHARATSHOP_MACHINE_AI_HOME || join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'BharatShop', 'MachineAI');
@@ -46,7 +46,8 @@ const STATIC_TYPES = {
 };
 
 export function normalizeRoute(value) {
-  return String(value || '').trim().toLowerCase() === 'agency' ? 'agency' : 'chat';
+  const route = String(value || '').trim().toLowerCase();
+  return ['chat', 'agency', 'coding', 'executive'].includes(route) ? route : 'chat';
 }
 
 export function engineeringTaskFromPrompt(value) {
@@ -54,9 +55,22 @@ export function engineeringTaskFromPrompt(value) {
   if (!text) return '';
   const command = text.match(/^\/(?:fix|build|engineer)\b\s*(.*)$/is);
   if (command) return String(command[1] || '').trim() || text;
-  const startsLikeEngineering = /^(?:please\s+)?(?:fix|build|repair|implement|complete|debug|refactor|patch)\b/i.test(text);
+  const startsLikeEngineering = /^(?:please\s+)?(?:fix|build|repair|implement|complete|debug|refactor|patch|code|develop|create|modify|change|upgrade)\b/i.test(text);
   const projectScoped = /\b(?:bharatshop|bharatdrip|project|repo|repository|app|storefront|store|checkout|payment|order|code|bug|build|test|ui|api|database|agent|integration)\b/i.test(text);
   return startsLikeEngineering && projectScoped ? text : '';
+}
+
+export function executiveOperationFromPrompt(value) {
+  const text = String(value || '').trim().toLowerCase();
+  if (!text) return '';
+  if (/^(?:please\s+)?(?:verify|test|audit)\b/.test(text) && /\b(?:bharatshop|machine ai|project|app|build|system|everything|operational)\b/.test(text)) return 'verify-local';
+  if (/\bstart\b.*\b(?:machine ai|supervisor)\b/.test(text)) return 'machine-start';
+  if (/\bstop\b.*\b(?:machine ai|supervisor)\b/.test(text)) return 'machine-stop';
+  if (/\bstart\b.*\bagency\b/.test(text)) return 'agency-start';
+  if (/\bstop\b.*\bagency\b/.test(text)) return 'agency-stop';
+  if (/\bstart\b.*\bstorefront\b/.test(text)) return 'storefront-start';
+  if (/\bstop\b.*\bstorefront\b/.test(text)) return 'storefront-stop';
+  return '';
 }
 
 export function isAllowedOrigin(origin) {
@@ -298,7 +312,8 @@ function directSystemPrompt(installedModels = [], task = '') {
     '- If the user explicitly asks for stored-memory facts, answer from stored memory and say NOT VERIFIED for anything absent. Do not fill gaps from generic knowledge.',
     '- LIVE READ-ONLY REPOSITORY STATE is evidence available without changing files. Do not claim access beyond the evidence supplied.',
     '- Safe analysis and read-only inspection do not require approval.',
-    '- File writes, git writes, deployment, publishing, payments, browser actions, credentials and destructive database actions remain approval-gated.',
+    '- You are authorized to act as chat assistant, coding/build engineer, and local executive operator. Explicit local project actions such as editing code, running tests/builds, and starting or stopping BharatShop local services may execute without an extra approval turn.',
+    '- Never expose credentials or perform destructive production-database operations. External spending, live payments, publishing, and production deployment must use dedicated verified integrations; never pretend those actions happened when no tool executed them.',
     '- Never invent completed external actions. Never request secrets.',
     '',
     needsProjectGrounding ? buildMemoryContext(task) : 'No project-memory excerpt was loaded because this request does not require BharatShop grounding.',
@@ -346,9 +361,8 @@ async function streamOllamaResponse(res, response) { return readOllamaStream(res
 async function handleDirectChat(res, messages) {
   const installed = await getModels();
   const task = String(messages.at(-1)?.content || '').trim();
-  const answer = await nonStreamingChat(directSystemPrompt(installed, task), messages);
-  writeEvent(res, { type: 'delta', text: answer });
-  return answer;
+  const response = await ollamaChat(directSystemPrompt(installed, task), messages, { stream: true });
+  return streamOllamaResponse(res, response);
 }
 
 async function handleAgencyChat(res, messages, selectedSlugs) {
@@ -427,11 +441,25 @@ async function handleChatInner(req,res){
       messages=[...messages.slice(0,-1),{role:'user',content:`APPROVAL GRANTED. Resume the pending task, but never claim a file/browser/production/payment/deployment action unless a tool actually ran it.\n\nPENDING TASK:\n${resumed.task}`}];
       writeEvent(res,{type:'status',text:`Resuming approved task: ${resumed.task.slice(0,140)}`});
     } else {
-      const engineeringTask=engineeringTaskFromPrompt(original);
+      const executiveOperation = mode === 'executive' ? executiveOperationFromPrompt(original) : '';
+      if (executiveOperation) {
+        writeEvent(res,{type:'status',text:'Executive mode is running '+executiveOperation+' locally...'});
+        const result=await runCockpitOperation(executiveOperation,{approved:true});
+        const job=result?.job||null;
+        const summary = job
+          ? `Executive operation started.\n\nOperation: ${executiveOperation}\nJob: ${job.id||'created'}\nStatus: ${job.status||'RUNNING'}\n\nOpen Operations → Recent jobs for the verified execution log.`
+          : `Executive operation completed.\n\nOperation: ${executiveOperation}\n${result?.output ? String(result.output).slice(0,6000) : 'Completed locally.'}`;
+        writeEvent(res,{type:'delta',text:summary});
+        writeEvent(res,{type:'operation',operation:executiveOperation,job,result:{ok:result?.ok,exitCode:result?.exitCode}});
+        writeEvent(res,{type:'done'});return res.end();
+      }
+      const engineeringTask = mode === 'coding' ? original : engineeringTaskFromPrompt(original);
       if(engineeringTask){
-        savePendingApproval(engineeringTask,mode,'Run the local Machine Engineer to edit and verify BharatShop code.','engineer-task');
-        writeEvent(res,{type:'delta',text:'This is a fix/build request. Reply **approve** and I will hand it to the local Machine Engineer to edit the BharatShop checkout and run tests, typecheck, lint and the production build.'});
-        writeEvent(res,{type:'approval',status:'NEEDS_APPROVAL',task:engineeringTask,action:'engineer-task'});
+        writeEvent(res,{type:'status',text:'Machine Engineer is starting locally...'});
+        const result=await runCockpitOperation('engineer-task',{approved:true,task:engineeringTask});
+        const job=result?.job||{};
+        writeEvent(res,{type:'delta',text:`Machine Engineer started the coding/build task.\n\nJob: ${job.id||'created'}\nStatus: ${job.status||'RUNNING'}\n\nIt may inspect and edit BharatShop source and run deterministic verification. Open Operations → Recent jobs to follow the real execution log.`});
+        writeEvent(res,{type:'operation',operation:'engineer-task',job});
         writeEvent(res,{type:'done'});return res.end();
       }
     }

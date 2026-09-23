@@ -25,19 +25,19 @@ mkdirSync(logsDir, { recursive: true });
 
 const ACTIONS = Object.freeze({
   'machine-status': { label: 'Machine AI status', kind: 'sync', approval: false, command: process.execPath, args: [machineManager, 'status'] },
-  'machine-start': { label: 'Start Machine AI', kind: 'sync', approval: true, command: process.execPath, args: [machineManager, 'start'] },
-  'machine-stop': { label: 'Stop Machine AI', kind: 'sync', approval: true, command: process.execPath, args: [machineManager, 'stop'] },
+  'machine-start': { label: 'Start Machine AI', kind: 'sync', approval: false, command: process.execPath, args: [machineManager, 'start'] },
+  'machine-stop': { label: 'Stop Machine AI', kind: 'sync', approval: false, command: process.execPath, args: [machineManager, 'stop'] },
   'agency-status': { label: 'Agency status', kind: 'sync', approval: false, command: process.execPath, args: [agencyManager, 'status'] },
-  'agency-start': { label: 'Start Agency', kind: 'sync', approval: true, command: process.execPath, args: [agencyManager, 'start'] },
-  'agency-stop': { label: 'Stop Agency', kind: 'sync', approval: true, command: process.execPath, args: [agencyManager, 'stop'] },
+  'agency-start': { label: 'Start Agency', kind: 'sync', approval: false, command: process.execPath, args: [agencyManager, 'start'] },
+  'agency-stop': { label: 'Stop Agency', kind: 'sync', approval: false, command: process.execPath, args: [agencyManager, 'stop'] },
   'engineer-status': { label: 'Machine Engineer status', kind: 'sync', approval: false, command: process.execPath, args: [engineerScript, '--status'] },
   'db-local-status': { label: 'Local database status', kind: 'sync', approval: false, command: process.execPath, args: [localDbHealth] },
   'storefront-status': { label: 'Local storefront status', kind: 'sync', approval: false, command: process.execPath, args: [storefrontManager, 'status'] },
-  'storefront-start': { label: 'Start local storefront', kind: 'sync', approval: true, command: process.execPath, args: [storefrontManager, 'start'] },
-  'storefront-stop': { label: 'Stop local storefront', kind: 'sync', approval: true, command: process.execPath, args: [storefrontManager, 'stop'] },
+  'storefront-start': { label: 'Start local storefront', kind: 'sync', approval: false, command: process.execPath, args: [storefrontManager, 'start'] },
+  'storefront-stop': { label: 'Stop local storefront', kind: 'sync', approval: false, command: process.execPath, args: [storefrontManager, 'stop'] },
   'storefront-smoke': { label: 'Smoke-check local storefront', kind: 'sync', approval: false, command: process.execPath, args: [storefrontManager, 'smoke'] },
   'verify-local': { label: 'Run local verification', kind: 'verify', approval: false },
-  'engineer-task': { label: 'Run Machine Engineer task', kind: 'engineer', approval: true },
+  'engineer-task': { label: 'Run Machine Engineer task', kind: 'engineer', approval: false },
 });
 
 function safeChildEnv() {
@@ -224,9 +224,16 @@ export function operationsSnapshot() {
   return {
     actions: operationCatalog(),
     jobs: listJobs(),
+    authority: {
+      localProjectAutonomy: true,
+      codeEdits: true,
+      buildsAndTests: true,
+      localServiceControl: true,
+    },
     safety: {
       arbitraryShell: false,
-      productionDatabaseWrites: false,
+      destructiveProductionDatabaseWrites: false,
+      credentialExposure: false,
       payments: false,
       publishing: false,
       deploy: false,
