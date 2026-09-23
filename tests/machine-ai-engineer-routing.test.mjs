@@ -19,11 +19,11 @@ test('Machine Engineer preserves dirty local work instead of requiring a clean t
   assert.doesNotMatch(source, /Refusing to start from a dirty worktree/);
 });
 
-test('chat approval starts engineer operation rather than only resuming read-only chat', () => {
+test('legacy pending engineer approval can still resume into the Machine Engineer', () => {
   const source = readFileSync(new URL('../scripts/machine-ai-web.mjs', import.meta.url), 'utf8');
   assert.match(source, /resumed\.action==='engineer-task'/);
   assert.match(source, /runCockpitOperation\('engineer-task',\{approved:true,task:resumed\.task\}\)/);
-  assert.match(source, /action:'engineer-task'/);
+  assert.match(source, /clearPendingApproval\(\)/);
 });
 
 test('project status bypasses Ollama and direct chat streams for long local generations', () => {
