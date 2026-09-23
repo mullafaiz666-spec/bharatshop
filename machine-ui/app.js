@@ -101,7 +101,8 @@ function messageHtml(msg) {
   const who = msg.role === 'user' ? 'You' : 'Machine AI';
   const avatar = msg.role === 'user' ? 'Y' : 'AI';
   const body = msg.streaming && !msg.content ? '<span class="thinking">Thinking locally…</span>' : markdown(msg.content);
-  const meta = [msg.mode === 'agency' ? 'Agency' : null, msg.agents?.length ? msg.agents.map(a => a.name).join(' + ') : null, msg.status || null].filter(Boolean).join(' · ');
+  const modeLabel = ({ agency:'Agency', coding:'Build / Code', executive:'Executive', chat:'Chat' })[msg.mode] || null;
+  const meta = [modeLabel, msg.agents?.length ? msg.agents.map(a => a.name).join(' + ') : null, msg.status || null].filter(Boolean).join(' · ');
   const attachments = Array.isArray(msg.attachments) && msg.attachments.length ? `<div class="message-meta">Attached: ${msg.attachments.map(escapeHtml).join(', ')}</div>` : '';
   return `<article class="message ${msg.role}"><div class="avatar">${avatar}</div><div><div class="message-role">${who}</div><div class="message-body">${body}</div>${attachments}${meta ? `<div class="message-meta">${escapeHtml(meta)}</div>` : ''}</div></article>`;
 }
@@ -110,7 +111,7 @@ function renderMessages() {
   const chat = activeChat();
   els.chatTitle.textContent = chat?.title || 'New chat';
   if (!chat || !chat.messages.length) {
-    els.messages.innerHTML = `<div class="empty-state"><div class="empty-inner"><div class="empty-logo">B</div><h1>Your BharatShop Machine AI</h1><p>Private local AI with Qwen, specialist agents, and an approval-gated Machine Engineer for real local fixes, builds and verification.</p><div class="prompt-chips"><button class="prompt-chip">Check my BharatShop project status</button><button class="prompt-chip">Use agency to review a product idea</button><button class="prompt-chip">Explain what this local AI can do</button></div></div></div>`;
+    els.messages.innerHTML = `<div class="empty-state"><div class="empty-inner"><div class="empty-logo">B</div><h1>Your BharatShop Machine AI</h1><p>Private local AI with Chat, Build / Code, Executive, and Agency roles. Coding/build requests can launch the Machine Engineer directly for real local edits and verification.</p><div class="prompt-chips"><button class="prompt-chip">Check my BharatShop project status</button><button class="prompt-chip">Use agency to review a product idea</button><button class="prompt-chip">Explain what this local AI can do</button></div></div></div>`;
     document.querySelectorAll('.prompt-chip').forEach(btn => btn.onclick = () => { els.prompt.value = btn.textContent; autoSize(); els.prompt.focus(); });
     return;
   }
@@ -291,16 +292,15 @@ async function openMemory() {
 }
 
 async function openOperations() {
-  openDrawerShell('Operations cockpit', 'Run safe local controls and verification without arbitrary shell or production actions.');
+  openDrawerShell('Operations cockpit', 'Autonomous local controls, coding/build jobs, and verification for BharatShop.');
   try {
     const data = await (await fetch('/api/operations', { cache:'no-store' })).json();
     const jobs = data.jobs || [];
     const latest = jobs.slice(0, 8);
-    els.drawerContent.innerHTML = `<div class="panel-card"><h3>Local runtimes</h3><p>Machine AI and Agency controls stay on this laptop.</p><div class="button-row"><button id="machineStatus" class="panel-button">Machine status</button><button id="machineStart" class="panel-button primary-action">Start Machine AI</button><button id="machineStop" class="panel-button danger">Stop Machine AI</button></div><div class="button-row"><button id="agencyStatus" class="panel-button">Agency status</button><button id="agencyStart" class="panel-button primary-action">Start Agency</button><button id="agencyStop" class="panel-button danger">Stop Agency</button></div><div class="button-row"><button id="storefrontStatus" class="panel-button">Storefront status</button><button id="storefrontStart" class="panel-button primary-action">Start Storefront</button><button id="storefrontStop" class="panel-button danger">Stop Storefront</button><button id="storefrontSmoke" class="panel-button">Smoke check</button><button id="openStorefront" class="panel-button">Open Storefront</button></div></div><div class="panel-card"><h3>Verification</h3><p>Runs git diff check, TypeScript, integration tests, lint and production build with secret-bearing environment variables stripped.</p><div class="button-row"><button id="verifyLocal" class="panel-button primary-action">Run full verification</button><button id="dbLocalStatus" class="panel-button">Local DB status</button><button id="engineerStatus" class="panel-button">Engineer status</button><button id="refreshOps" class="panel-button">Refresh</button></div></div><div class="panel-card"><h3>Machine Engineer</h3><p>Runs only on an isolated repair/fix/feature branch, refuses dirty starts and secrets, and cannot commit, push, merge or deploy.</p><textarea id="engineerTask" class="memory-input" rows="5" placeholder="Describe the BharatShop code task…"></textarea><div class="button-row"><button id="runEngineer" class="panel-button primary-action">Run engineering task</button></div></div><div class="panel-card"><h3>Recent jobs</h3>${latest.length ? latest.map(job => `<div class="task-output"><strong>${escapeHtml(job.kind || 'job')} · ${escapeHtml(job.status || 'unknown')}</strong>\n${escapeHtml(job.currentStep || job.task || job.finishedAt || job.createdAt || '')}${job.logTail ? `\n\n${escapeHtml(job.logTail)}` : ''}</div>`).join('') : '<p>No cockpit jobs yet.</p>'}</div><div class="panel-card"><h3>Safety boundary</h3><p>No arbitrary shell, production database writes, payments, publishing or deployment are exposed here. Those remain separately approval-gated.</p></div>`;
+    els.drawerContent.innerHTML = `<div class="panel-card"><h3>Local runtimes</h3><p>Machine AI and Agency controls stay on this laptop.</p><div class="button-row"><button id="machineStatus" class="panel-button">Machine status</button><button id="machineStart" class="panel-button primary-action">Start Machine AI</button><button id="machineStop" class="panel-button danger">Stop Machine AI</button></div><div class="button-row"><button id="agencyStatus" class="panel-button">Agency status</button><button id="agencyStart" class="panel-button primary-action">Start Agency</button><button id="agencyStop" class="panel-button danger">Stop Agency</button></div><div class="button-row"><button id="storefrontStatus" class="panel-button">Storefront status</button><button id="storefrontStart" class="panel-button primary-action">Start Storefront</button><button id="storefrontStop" class="panel-button danger">Stop Storefront</button><button id="storefrontSmoke" class="panel-button">Smoke check</button><button id="openStorefront" class="panel-button">Open Storefront</button></div></div><div class="panel-card"><h3>Verification</h3><p>Runs git diff check, TypeScript, integration tests, lint and production build with secret-bearing environment variables stripped.</p><div class="button-row"><button id="verifyLocal" class="panel-button primary-action">Run full verification</button><button id="dbLocalStatus" class="panel-button">Local DB status</button><button id="engineerStatus" class="panel-button">Engineer status</button><button id="refreshOps" class="panel-button">Refresh</button></div></div><div class="panel-card"><h3>Machine Engineer</h3><p>Runs on the current repair/fix/feature branch, preserves existing work, protects secrets, edits code, and independently runs typecheck, tests, lint, and production build.</p><textarea id="engineerTask" class="memory-input" rows="5" placeholder="Describe the BharatShop code task…"></textarea><div class="button-row"><button id="runEngineer" class="panel-button primary-action">Run engineering task</button></div></div><div class="panel-card"><h3>Recent jobs</h3>${latest.length ? latest.map(job => `<div class="task-output"><strong>${escapeHtml(job.kind || 'job')} · ${escapeHtml(job.status || 'unknown')}</strong>\n${escapeHtml(job.currentStep || job.task || job.finishedAt || job.createdAt || '')}${job.logTail ? `\n\n${escapeHtml(job.logTail)}` : ''}</div>`).join('') : '<p>No cockpit jobs yet.</p>'}</div><div class="panel-card"><h3>Authority</h3><p>Local code edits, builds, verification, and runtime start/stop actions are authorized here without an extra confirmation. Secret exposure and destructive production-database operations remain blocked.</p></div>`;
 
-    async function run(action, payload = {}, needsApproval = false) {
-      if (needsApproval && !confirm('Run this local cockpit operation?')) return;
-      const response = await fetch('/api/operations', { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ action, approved: needsApproval, ...payload }) });
+    async function run(action, payload = {}) {
+      const response = await fetch('/api/operations', { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ action, approved: true, ...payload }) });
       const result = await response.json();
       if (!response.ok) { alert(result.error || 'Operation failed'); return; }
       if (result.result?.output) alert(result.result.output);
@@ -308,14 +308,14 @@ async function openOperations() {
     }
 
     $('machineStatus').onclick = () => run('machine-status');
-    $('machineStart').onclick = () => run('machine-start', {}, true);
-    $('machineStop').onclick = () => run('machine-stop', {}, true);
+    $('machineStart').onclick = () => run('machine-start');
+    $('machineStop').onclick = () => run('machine-stop');
     $('agencyStatus').onclick = () => run('agency-status');
-    $('agencyStart').onclick = () => run('agency-start', {}, true);
-    $('agencyStop').onclick = () => run('agency-stop', {}, true);
+    $('agencyStart').onclick = () => run('agency-start');
+    $('agencyStop').onclick = () => run('agency-stop');
     $('storefrontStatus').onclick = () => run('storefront-status');
-    $('storefrontStart').onclick = () => run('storefront-start', {}, true);
-    $('storefrontStop').onclick = () => run('storefront-stop', {}, true);
+    $('storefrontStart').onclick = () => run('storefront-start');
+    $('storefrontStop').onclick = () => run('storefront-stop');
     $('storefrontSmoke').onclick = () => run('storefront-smoke');
     $('openStorefront').onclick = () => window.open('http://127.0.0.1:3000', '_blank', 'noopener');
     $('verifyLocal').onclick = () => run('verify-local');
@@ -325,17 +325,17 @@ async function openOperations() {
     $('runEngineer').onclick = () => {
       const task = $('engineerTask').value.trim();
       if (!task) return alert('Enter an engineering task first.');
-      run('engineer-task', { task }, true);
+      run('engineer-task', { task });
     };
   } catch (e) { els.drawerContent.innerHTML = `<div class="panel-card"><p>${escapeHtml(e.message)}</p></div>`; }
 }
 
 async function openProject() {
-  openDrawerShell('BharatShop project', 'Read-only project and runtime controls.');
+  openDrawerShell('BharatShop project', 'Live project state with direct access to the coding and executive roles.');
   try {
     const [project, status] = await Promise.all([(await fetch('/api/project',{cache:'no-store'})).json(), (await fetch('/api/status',{cache:'no-store'})).json()]);
     const heartbeat = status.supervisor || {};
-    els.drawerContent.innerHTML = `<div class="panel-card"><h3>Repository</h3><div class="kv"><span>Path</span><span>${escapeHtml(project.root)}</span><span>Branch</span><span>${escapeHtml(project.branch)}</span><span>HEAD</span><span>${escapeHtml(project.head)}</span><span>Uncommitted</span><span>${project.dirtyFiles}</span></div></div><div class="panel-card"><h3>Machine runtime</h3><div class="kv"><span>Ollama</span><span>${status.ollama?.ready ? 'READY' : 'OFFLINE'}</span><span>Qwen shim</span><span>${status.shim?.ready ? 'READY' : 'OFFLINE'}</span><span>Supervisor</span><span>${escapeHtml(heartbeat.state || 'unknown')}</span><span>Agents</span><span>${status.agents ?? 0}</span></div></div><div class="panel-card"><h3>Safety boundary</h3><p>This panel is deliberately read-only. Git writes, deploys, browser actions, publishing, payments and destructive changes remain approval-gated in the existing tooling layer.</p><div class="button-row"><button id="projectAsk" class="panel-button primary-action">Ask AI about BharatShop</button><button id="refreshProject" class="panel-button">Refresh</button></div></div>${project.changes?.length ? `<div class="panel-card"><h3>Working tree</h3><div class="task-output">${escapeHtml(project.changes.join('\n'))}</div></div>` : ''}`;
+    els.drawerContent.innerHTML = `<div class="panel-card"><h3>Repository</h3><div class="kv"><span>Path</span><span>${escapeHtml(project.root)}</span><span>Branch</span><span>${escapeHtml(project.branch)}</span><span>HEAD</span><span>${escapeHtml(project.head)}</span><span>Uncommitted</span><span>${project.dirtyFiles}</span></div></div><div class="panel-card"><h3>Machine runtime</h3><div class="kv"><span>Ollama</span><span>${status.ollama?.ready ? 'READY' : 'OFFLINE'}</span><span>Qwen shim</span><span>${status.shim?.ready ? 'READY' : 'OFFLINE'}</span><span>Supervisor</span><span>${escapeHtml(heartbeat.state || 'unknown')}</span><span>Agents</span><span>${status.agents ?? 0}</span></div></div><div class="panel-card"><h3>Machine AI roles</h3><p>Use Build / Code for repository changes and Executive for verification and local runtime control. The project summary itself is read-only evidence.</p><div class="button-row"><button id="projectAsk" class="panel-button primary-action">Ask AI about BharatShop</button><button id="refreshProject" class="panel-button">Refresh</button></div></div>${project.changes?.length ? `<div class="panel-card"><h3>Working tree</h3><div class="task-output">${escapeHtml(project.changes.join('\n'))}</div></div>` : ''}`;
     $('refreshProject').onclick = openProject;
     $('projectAsk').onclick = () => { closeDrawer(); els.prompt.value = 'Review the current BharatShop project status and tell me the safest next engineering step.'; autoSize(); els.prompt.focus(); };
   } catch (e) { els.drawerContent.innerHTML = `<div class="panel-card"><p>${escapeHtml(e.message)}</p></div>`; }
