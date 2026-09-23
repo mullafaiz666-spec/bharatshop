@@ -1,13 +1,17 @@
 #!/usr/bin/env node
 
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { homedir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..');
 const runtimeDir = join(root, '.runtime', 'machine-ai-engineer');
+const stateBase = join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'BharatShop', 'MachineAI');
+const backupDir = join(stateBase, 'EngineerBackups');
+const secretQuarantineDir = join(stateBase, 'EngineerSecretsQuarantine');
 const harnessScript = join(root, 'scripts', 'deepseek-harness.mjs');
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const argv = process.argv.slice(2);
@@ -73,27 +77,70 @@ function workingTree() {
   return text(git(['status', '--porcelain']));
 }
 
-function assertPreflight({ requireClean = true } = {}) {
+function assertPreflight() {
   const branch = currentBranch();
   if (!/^(?:repair|fix|feature|chore|test|ai)\//i.test(branch)) {
-    throw new Error(`Refusing engineering mutations on branch "${branch}". Use an isolated repair/feature branch or worktree.`);
-  }
-  const secrets = secretFiles();
-  if (secrets.length) {
-    throw new Error(`Refusing to start while secret-bearing workspace files exist: ${secrets.join(', ')}. Use the isolated repair worktree without credential files.`);
+    throw new Error(`Refusing engineering mutations on branch "${branch}". Use a repair/fix/feature branch or worktree.`);
   }
   if (!existsSync(harnessScript)) throw new Error('DeepSeek Harness launcher is missing.');
-  if (requireClean) {
-    const dirty = workingTree();
-    if (dirty) throw new Error('Refusing to start from a dirty worktree. Checkpoint/stash the existing changes first.');
+  const secrets = secretFiles();
+  const dirty = workingTree();
+  return {
+    branch,
+    head: currentHead(),
+    clean: !dirty,
+    dirtyEntries: dirty ? dirty.split(/\r?\n/).filter(Boolean).length : 0,
+    secretFiles: secrets,
+    secretHandling: secrets.length ? 'QUARANTINE_DURING_ENGINEERING' : 'NONE',
+  };
+}
+
+function quarantineSecretFiles(names = []) {
+  if (!names.length) return [];
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const sessionDir = join(secretQuarantineDir, stamp);
+  mkdirSync(sessionDir, { recursive: true });
+  const moved = [];
+  for (const name of names) {
+    const source = join(root, name);
+    if (!existsSync(source)) continue;
+    const destination = join(sessionDir, name);
+    renameSync(source, destination);
+    moved.push({ name, source, destination });
   }
-  return { branch, head: currentHead(), clean: !workingTree(), secretFiles: secrets };
+  return moved;
+}
+
+function restoreSecretFiles(moved = []) {
+  const restored = [];
+  for (const item of [...moved].reverse()) {
+    if (!existsSync(item.destination)) continue;
+    if (existsSync(item.source)) {
+      const conflict = `${item.destination}.generated-conflict`;
+      renameSync(item.source, conflict);
+    }
+    renameSync(item.destination, item.source);
+    restored.push(item.name);
+  }
+  return restored;
+}
+
+function snapshotBaseline(preflight) {
+  mkdirSync(backupDir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const statusPath = join(backupDir, `${stamp}.status.txt`);
+  const patchPath = join(backupDir, `${stamp}.tracked.patch`);
+  const status = workingTree();
+  const patch = text(git(['diff', '--binary', 'HEAD'], { timeout: 60_000 }));
+  writeFileSync(statusPath, `branch=${preflight.branch}\nhead=${preflight.head}\n\n${status}\n`, 'utf8');
+  writeFileSync(patchPath, patch ? `${patch}\n` : '', 'utf8');
+  return { statusPath, patchPath, trackedPatchBytes: Buffer.byteLength(patch || '', 'utf8') };
 }
 
 function assertPostHarness(preflight) {
   const secrets = secretFiles();
   if (secrets.length) {
-    throw new Error(`Harness created or exposed secret-bearing workspace files: ${secrets.join(', ')}. Verification stopped.`);
+    throw new Error(`Harness created a secret-bearing workspace file while original secrets were quarantined: ${secrets.join(', ')}. Verification stopped.`);
   }
   const branch = currentBranch();
   if (branch !== preflight.branch) {
@@ -155,7 +202,7 @@ function runChecks() {
 function makePrompt(userTask) {
   return `BHARATSHOP LOCAL ENGINEERING TASK
 
-Work only in the current isolated repair/feature worktree.
+Work only in the current repair/fix/feature checkout. Existing local changes may already be present: preserve them and build on top of them; never reset, clean, checkout-overwrite, or discard unrelated work.
 
 TASK:
 ${userTask}
@@ -197,8 +244,9 @@ function writeReport(payload) {
   return path;
 }
 
+let quarantinedSecrets = [];
 try {
-  const preflight = assertPreflight({ requireClean: !statusOnly });
+  const preflight = assertPreflight();
   if (statusOnly) {
     console.log(JSON.stringify({
       ok: true,
@@ -211,6 +259,7 @@ try {
         commits: false,
         pushes: false,
         secretEnvironmentForwarding: false,
+        secretWorkspaceFiles: preflight.secretFiles.length ? 'WILL_QUARANTINE_DURING_ENGINEERING' : 'NONE',
       },
     }, null, 2));
     process.exit(0);
@@ -222,7 +271,13 @@ try {
   }
 
   const startedAt = new Date().toISOString();
+  quarantinedSecrets = quarantineSecretFiles(preflight.secretFiles);
+  if (quarantinedSecrets.length) {
+    console.log(`Secret workspace files quarantined outside repository: ${quarantinedSecrets.map(item => item.name).join(', ')}`);
+  }
+  const baselineBackup = snapshotBaseline(preflight);
   console.log(`BharatShop Machine Engineer starting on ${preflight.branch} @ ${preflight.head.slice(0, 12)}`);
+  console.log(`Existing tracked changes backup: ${baselineBackup.patchPath}`);
   console.log('Production writes/deploy/commit/push: DISABLED');
 
   const first = invokeHarness(makePrompt(task));
@@ -252,6 +307,7 @@ try {
     status,
     task,
     preflight,
+    baselineBackup,
     firstHarness: first,
     repairHarness: repair,
     verification,
@@ -267,6 +323,7 @@ try {
       commits: false,
       pushes: false,
       secretEnvironmentForwarding: false,
+      secretWorkspaceFilesQuarantined: quarantinedSecrets.map(item => item.name),
       repairPasses: repair ? 1 : 0,
     },
   };
@@ -278,8 +335,18 @@ try {
   console.log(`FAILED CHECKS: ${report.final.failedChecks.length ? report.final.failedChecks.join(', ') : 'none'}`);
   console.log(`REPORT: ${reportPath}`);
   console.log('Changes remain uncommitted for human review.');
-  process.exit(status === 'LOCAL_ENGINEERING_PASS' ? 0 : 1);
+  const restored = restoreSecretFiles(quarantinedSecrets);
+  quarantinedSecrets = [];
+  if (restored.length) console.log(`Restored protected workspace files: ${restored.join(', ')}`);
+  process.exitCode = status === 'LOCAL_ENGINEERING_PASS' ? 0 : 1;
 } catch (error) {
+  try {
+    const restored = restoreSecretFiles(quarantinedSecrets);
+    quarantinedSecrets = [];
+    if (restored.length) console.error(`Restored protected workspace files after failure: ${restored.join(', ')}`);
+  } catch (restoreError) {
+    console.error(`CRITICAL: protected workspace file restore failed: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`);
+  }
   console.error(`Machine Engineer blocked: ${error instanceof Error ? error.message : String(error)}`);
-  process.exit(2);
+  process.exitCode = 2;
 }

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { operationCatalog, runCockpitOperation } from '../scripts/machine-cockpit-ops.mjs';
+import { operationCatalog, operationsSnapshot, runCockpitOperation } from '../scripts/machine-cockpit-ops.mjs';
 
 test('cockpit exposes only the fixed local operation allowlist', () => {
   const ids = operationCatalog().map(item => item.id).sort();
@@ -29,9 +29,19 @@ test('cockpit rejects arbitrary command names', async () => {
   await assert.rejects(() => runCockpitOperation('powershell -Command whoami', {}), /Unsupported cockpit operation/);
 });
 
-test('state-changing cockpit controls require explicit local approval', async () => {
-  await assert.rejects(() => runCockpitOperation('machine-start', {}), /Explicit local approval/);
-  await assert.rejects(() => runCockpitOperation('engineer-task', { task: 'Fix a test' }), /Explicit local approval/);
+test('local project controls are authorized directly while risky capabilities stay excluded', () => {
+  const catalog = operationCatalog();
+  for (const id of ['machine-start', 'machine-stop', 'agency-start', 'agency-stop', 'storefront-start', 'storefront-stop', 'engineer-task']) {
+    assert.equal(catalog.find(item => item.id === id)?.approvalRequired, false, id);
+  }
+  const snapshot = operationsSnapshot();
+  assert.equal(snapshot.authority?.localProjectAutonomy, true);
+  assert.equal(snapshot.authority?.codeEdits, true);
+  assert.equal(snapshot.authority?.buildsAndTests, true);
+  assert.equal(snapshot.authority?.localServiceControl, true);
+  assert.equal(snapshot.safety?.arbitraryShell, false);
+  assert.equal(snapshot.safety?.destructiveProductionDatabaseWrites, false);
+  assert.equal(snapshot.safety?.credentialExposure, false);
 });
 
 test('web server and UI wire the operations cockpit', () => {

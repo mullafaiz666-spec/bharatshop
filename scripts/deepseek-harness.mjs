@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,6 +20,15 @@ const PRODUCT_BUNDLES = [
   '@deepseek-ai/dsh-subagent-claude-code',
 ];
 const PRODUCT_PROFILES = ['web', 'headless'];
+const LOCAL_TOOLS_HOME = process.env.BHARATSHOP_TOOLS_HOME || join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'BharatShop', 'Tools');
+const LOCAL_TOOLS_BIN = join(LOCAL_TOOLS_HOME, 'node_modules', '.bin');
+const PNPM_SPEC = process.env.BHARATSHOP_PNPM_SPEC || 'pnpm@10';
+const LOCAL_ENGINEER_MODEL = process.env.BHARATSHOP_LOCAL_ENGINEER_MODEL || process.env.PERSONAL_AI_MODEL || process.env.AGENCY_MODEL || 'qwen3.5:4b';
+const LOCAL_OLLAMA_OPENAI_BASE_URL = process.env.BHARATSHOP_OLLAMA_OPENAI_BASE_URL || 'http://127.0.0.1:11434/v1';
+const SETTINGS_PATH = join(DSH_HOME, 'settings.yaml');
+const OLLAMA_DSH_PATCH_PATH = join(homedir(), '.ollama', 'launch', 'dsh', 'ollama.cordis.yml');
+const LOCAL_DSH_SMOKE_TIMEOUT_MS = Number(process.env.BHARATSHOP_DSH_SMOKE_TIMEOUT_MS || 180000);
+const LOCAL_DSH_TASK_TIMEOUT_MS = Number(process.env.BHARATSHOP_DSH_TASK_TIMEOUT_MS || 2700000);
 
 const mode = (process.argv[2] || 'status').toLowerCase();
 const args = process.argv.slice(3);
@@ -64,6 +73,11 @@ function safeHarnessEnv() {
   }
   env.DSH_HOME = DSH_HOME;
   env.BHARATSHOP_DSH_GUARDED = '1';
+  // Ollama's OpenAI-compatible endpoint ignores the key value, but current DSH
+  // requires a named apiKeyEnv reference on Windows. This is a local placeholder,
+  // not a credential and is never written to the repository.
+  env.OLLAMA_API_KEY = 'ollama-local';
+  env.OLLAMA_LAUNCH_DSH_API_KEY = 'ollama';
   return env;
 }
 
@@ -73,8 +87,14 @@ function run(command, commandArgs, options = {}) {
     stdio: 'inherit',
     windowsHide: false,
     env: options.env || process.env,
+    timeout: Number.isFinite(options.timeoutMs) ? options.timeoutMs : undefined,
+    killSignal: 'SIGTERM',
   });
   if (result.error) {
+    if (result.error.code === 'ETIMEDOUT') {
+      console.error(`Command timed out after ${options.timeoutMs}ms: ${command}`);
+      return 124;
+    }
     console.error(result.error.message);
     return 1;
   }
@@ -122,14 +142,99 @@ function runPackageCliOrExit(kind, cliArgs, options = {}) {
   if (status !== 0) process.exit(status);
 }
 
-function npxDsh(dshArgs, env = safeHarnessEnv()) {
+function withLocalToolPath(env = safeHarnessEnv()) {
+  const next = { ...env };
+  const separator = process.platform === 'win32' ? ';' : ':';
+  const existing = next.Path || next.PATH || '';
+  const combined = [LOCAL_TOOLS_BIN, existing].filter(Boolean).join(separator);
+  if (process.platform === 'win32') next.Path = combined;
+  next.PATH = combined;
+  return next;
+}
+
+function pnpmAvailable(env = withLocalToolPath(safeHarnessEnv())) {
+  if (process.platform === 'win32') {
+    const result = commandResult('where.exe', ['pnpm'], env);
+    return result.status === 0;
+  }
+  const result = commandResult('sh', ['-lc', 'command -v pnpm >/dev/null 2>&1'], env);
+  return result.status === 0;
+}
+
+function ensurePnpmEnv() {
+  let env = withLocalToolPath(safeHarnessEnv());
+  if (pnpmAvailable(env)) return env;
+
+  console.log(`pnpm was not found. Installing ${PNPM_SPEC} into BharatShop local tools...`);
+  mkdirSync(LOCAL_TOOLS_HOME, { recursive: true });
+  runPackageCliOrExit('npm', [
+    'install',
+    '--prefix', LOCAL_TOOLS_HOME,
+    '--no-audit',
+    '--no-fund',
+    '--save-exact',
+    PNPM_SPEC,
+  ], { env: safeHarnessEnv() });
+
+  env = withLocalToolPath(safeHarnessEnv());
+  if (!pnpmAvailable(env)) {
+    console.error(`pnpm bootstrap completed but pnpm is still unavailable from ${LOCAL_TOOLS_BIN}.`);
+    process.exit(2);
+  }
+  console.log(`pnpm ready from BharatShop local tools: ${LOCAL_TOOLS_BIN}`);
+  return env;
+}
+
+function npxDsh(dshArgs, env = withLocalToolPath(safeHarnessEnv())) {
   mkdirSync(DSH_HOME, { recursive: true });
   return runPackageCli('npx', ['--yes', `@deepseek-ai/dsh@${DSH_VERSION}`, ...dshArgs], { env });
 }
 
-function npxDshOrExit(dshArgs, env = safeHarnessEnv()) {
+function npxDshOrExit(dshArgs, env = withLocalToolPath(safeHarnessEnv())) {
   const status = npxDsh(dshArgs, env);
   if (status !== 0) process.exit(status);
+}
+
+function runOfficialOllamaDshTask(prompt, { timeoutMs = LOCAL_DSH_TASK_TIMEOUT_MS } = {}) {
+  const env = withLocalToolPath(safeHarnessEnv());
+
+  console.log(`Configuring DeepSeek Harness for local Ollama model ${LOCAL_ENGINEER_MODEL}.`);
+  console.log('Ollama generates its provider patch first; DSH headless then runs directly with that patch.');
+
+  const configureStatus = run(ollama, [
+    'launch',
+    'dsh',
+    '--model',
+    LOCAL_ENGINEER_MODEL,
+    '--config',
+  ], { env, timeoutMs: Math.min(timeoutMs, 120000) });
+
+  if (configureStatus !== 0) return configureStatus;
+
+  if (!existsSync(OLLAMA_DSH_PATCH_PATH)) {
+    console.error(`Ollama DSH provider patch was not created: ${OLLAMA_DSH_PATCH_PATH}`);
+    return 2;
+  }
+
+  const dshArgs = [
+    '--profile',
+    'headless',
+    '--patch',
+    OLLAMA_DSH_PATCH_PATH,
+  ];
+
+  if (existsSync(HEADLESS_SUBAGENT_PATCH)) {
+    dshArgs.push('--patch', HEADLESS_SUBAGENT_PATCH);
+  }
+
+  dshArgs.push(prompt);
+
+  console.log('Running DSH headless with Ollama provider patch; this local path does not require a DeepSeek API key.');
+  return runPackageCli('npx', [
+    '--yes',
+    `@deepseek-ai/dsh@${DSH_VERSION}`,
+    ...dshArgs,
+  ], { env, timeoutMs });
 }
 
 function readJson(path) {
@@ -151,6 +256,56 @@ function profileHasBundle(profile, packageName) {
 
 function profileProductsReady(profile) {
   return PRODUCT_BUNDLES.every(packageName => profileHasBundle(profile, packageName));
+}
+
+
+function yamlScalar(value) {
+  return JSON.stringify(String(value));
+}
+
+function ensureLocalOllamaSettings() {
+  mkdirSync(DSH_HOME, { recursive: true });
+
+  const listed = commandResult(ollama, ['list'], withLocalToolPath(safeHarnessEnv()));
+  if (listed.status !== 0) {
+    console.error('Local Ollama is unavailable. Start Ollama before running Machine Engineer.');
+    process.exit(2);
+  }
+  const inventory = `${listed.stdout || ''}\n${listed.stderr || ''}`;
+  if (!inventory.includes(LOCAL_ENGINEER_MODEL)) {
+    console.error(`Local engineering model "${LOCAL_ENGINEER_MODEL}" is not installed in Ollama.`);
+    console.error(`Install it first with: ollama pull ${LOCAL_ENGINEER_MODEL}`);
+    process.exit(2);
+  }
+
+  const managedMarker = '# managed-by: bharatshop-local-engineer';
+  if (existsSync(SETTINGS_PATH)) {
+    const current = readFileSync(SETTINGS_PATH, 'utf8');
+    if (!current.includes(managedMarker)) {
+      const backupPath = join(DSH_HOME, `settings.before-bharatshop-local-${Date.now()}.yaml`);
+      cpSync(SETTINGS_PATH, backupPath);
+      console.log(`Backed up existing Harness settings: ${backupPath}`);
+    }
+  }
+
+  const settings = [
+    managedMarker,
+    'llm-pi-ai:',
+    '  providers:',
+    '    ollama:',
+    '      displayName: "Ollama Local"',
+    '      apiKeyEnv: OLLAMA_API_KEY',
+    '      api: openai-completions',
+    `      baseURL: ${yamlScalar(LOCAL_OLLAMA_OPENAI_BASE_URL)}`,
+    '      models:',
+    `        - id: ${yamlScalar(LOCAL_ENGINEER_MODEL)}`,
+    'agent-default-model:',
+    '  provider: ollama',
+    `  model: ${yamlScalar(LOCAL_ENGINEER_MODEL)}`,
+    '',
+  ].join('\n');
+  writeFileSync(SETTINGS_PATH, settings, 'utf8');
+  return { provider: 'ollama', model: LOCAL_ENGINEER_MODEL, baseURL: LOCAL_OLLAMA_OPENAI_BASE_URL };
 }
 
 function installPreset({ refresh = false } = {}) {
@@ -200,6 +355,7 @@ function printStatus() {
   console.log(`pinned DSH: ${DSH_VERSION}`);
   console.log(`Node: ${process.versions.node} (${nodeIsSupported() ? 'READY' : 'UPGRADE REQUIRED'})`);
   console.log(`global dsh: ${globalDshStatus()}`);
+  console.log(`pnpm: ${pnpmAvailable() ? 'READY' : 'NOT INSTALLED (subagents will bootstrap locally)'}`);
 
   const ollamaVersion = commandResult(ollama, ['--version']);
   console.log(`Ollama: ${ollamaVersion.status === 0 ? (ollamaVersion.stdout || ollamaVersion.stderr || '').trim() || 'installed' : 'not detected'}`);
@@ -212,6 +368,7 @@ function printStatus() {
 
   console.log(`BharatShop preset: ${existsSync(join(PRESET_TARGET, 'agent.cordis.yml')) ? 'READY' : 'NOT INSTALLED'}`);
   console.log(`Headless subagent patch: ${existsSync(HEADLESS_SUBAGENT_PATCH) ? 'READY' : 'MISSING'}`);
+  console.log(`Engineering parent model: Ollama ${LOCAL_ENGINEER_MODEL} (local/free)`);
 
   const localEnv = join(ROOT, '.env.local');
   if (existsSync(localEnv)) {
@@ -251,11 +408,12 @@ switch (mode) {
     assertSupportedNode();
     const refreshPreset = args.includes('--refresh-preset');
     mkdirSync(DSH_HOME, { recursive: true });
+    const harnessEnv = ensurePnpmEnv();
 
     for (const profile of PRODUCT_PROFILES) {
       console.log(`Configuring official product subagents in Harness profile: ${profile}`);
       for (const packageName of PRODUCT_BUNDLES) {
-        npxDshOrExit(['plugin', '--profile', profile, 'add', `${packageName}@${DSH_VERSION}`]);
+        npxDshOrExit(['plugin', '--profile', profile, 'add', `${packageName}@${DSH_VERSION}`], harnessEnv);
       }
     }
 
@@ -278,26 +436,29 @@ switch (mode) {
     break;
   }
 
+  case 'smoke': {
+    assertSupportedNode();
+    const prompt = 'Reply LOCAL_OLLAMA_READY only. Do not inspect or modify files and do not call tools.';
+    const status = runOfficialOllamaDshTask(prompt, { timeoutMs: LOCAL_DSH_SMOKE_TIMEOUT_MS });
+    if (status !== 0) process.exit(status);
+    break;
+  }
+
   case 'task': {
     assertSupportedNode();
-    assertProductSetup({ profile: 'headless' });
-    if (!existsSync(HEADLESS_SUBAGENT_PATCH)) {
-      console.error(`Missing headless subagent overlay: ${HEADLESS_SUBAGENT_PATCH}`);
-      process.exit(2);
-    }
     const task = args.join(' ').trim();
     if (!task) {
       console.error('Usage: node scripts/deepseek-harness.mjs task "your task"');
       process.exit(2);
     }
     const guardrails = readGuardrails();
-    const prompt = `${guardrails}\n\nDELEGATION\nYou may delegate bounded independent work to subagent_codex and subagent_claude_code when useful. Keep final responsibility for verification and safety.\n\nCURRENT TASK\n${task}`.trim();
-    console.log('Running one guarded DeepSeek Harness headless task with Codex + Claude Code delegation available...');
-    npxDshOrExit(['--profile', 'headless', '--patch', HEADLESS_SUBAGENT_PATCH, prompt]);
+    const prompt = `${guardrails}\n\nLOCAL-FIRST EXECUTION\nThe parent engineering model is local Ollama. Use repository tools directly to inspect, edit, test, and build. Do not require DeepSeek, OpenAI, Anthropic, or other paid API credentials for the parent run. Product subagents are optional and must never block local execution. Keep final responsibility for verification and safety.\n\nCURRENT TASK\n${task}`.trim();
+    const status = runOfficialOllamaDshTask(prompt, { timeoutMs: LOCAL_DSH_TASK_TIMEOUT_MS });
+    if (status !== 0) process.exit(status);
     break;
   }
 
   default:
-    console.error('Unknown mode. Use: status | install | subagents | web | task');
+    console.error('Unknown mode. Use: status | install | subagents | web | smoke | task');
     process.exit(2);
 }

@@ -21,7 +21,7 @@ const MODEL = process.env.PERSONAL_AI_MODEL || process.env.AGENCY_MODEL || proce
 const OLLAMA_BASE_URL = String(process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
 const SHIM_BASE_URL = String(process.env.AI_BASE_URL || 'http://127.0.0.1:11555').replace(/\/+$/, '');
 const CONTEXT = Math.max(2048, Math.min(8192, Number(process.env.PERSONAL_AI_CONTEXT || '4096')));
-const CHAT_TIMEOUT_MS = Math.max(10_000, Math.min(180_000, Number(process.env.BHARATSHOP_CHAT_TIMEOUT_MS || '90000')));
+const CHAT_TIMEOUT_MS = Math.max(30_000, Math.min(600_000, Number(process.env.BHARATSHOP_CHAT_TIMEOUT_MS || '240000')));
 const CHAT_PREDICT_TOKENS = Math.max(32, Math.min(512, Number(process.env.BHARATSHOP_CHAT_PREDICT_TOKENS || '256')));
 const BODY_LIMIT = 12_000_000;
 const stateHome = process.env.BHARATSHOP_MACHINE_AI_HOME || join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'BharatShop', 'MachineAI');
@@ -46,7 +46,31 @@ const STATIC_TYPES = {
 };
 
 export function normalizeRoute(value) {
-  return String(value || '').trim().toLowerCase() === 'agency' ? 'agency' : 'chat';
+  const route = String(value || '').trim().toLowerCase();
+  return ['chat', 'agency', 'coding', 'executive'].includes(route) ? route : 'chat';
+}
+
+export function engineeringTaskFromPrompt(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  const command = text.match(/^\/(?:fix|build|engineer)\b\s*(.*)$/is);
+  if (command) return String(command[1] || '').trim() || text;
+  const startsLikeEngineering = /^(?:please\s+)?(?:fix|build|repair|implement|complete|debug|refactor|patch|code|develop|create|modify|change|upgrade)\b/i.test(text);
+  const projectScoped = /\b(?:bharatshop|bharatdrip|project|repo|repository|app|storefront|store|checkout|payment|order|code|bug|build|test|ui|api|database|agent|integration)\b/i.test(text);
+  return startsLikeEngineering && projectScoped ? text : '';
+}
+
+export function executiveOperationFromPrompt(value) {
+  const text = String(value || '').trim().toLowerCase();
+  if (!text) return '';
+  if (/^(?:please\s+)?(?:verify|test|audit)\b/.test(text) && /\b(?:bharatshop|machine ai|project|app|build|system|everything|operational)\b/.test(text)) return 'verify-local';
+  if (/\bstart\b.*\b(?:machine ai|supervisor)\b/.test(text)) return 'machine-start';
+  if (/\bstop\b.*\b(?:machine ai|supervisor)\b/.test(text)) return 'machine-stop';
+  if (/\bstart\b.*\bagency\b/.test(text)) return 'agency-start';
+  if (/\bstop\b.*\bagency\b/.test(text)) return 'agency-stop';
+  if (/\bstart\b.*\bstorefront\b/.test(text)) return 'storefront-start';
+  if (/\bstop\b.*\bstorefront\b/.test(text)) return 'storefront-stop';
+  return '';
 }
 
 export function isAllowedOrigin(origin) {
@@ -249,6 +273,7 @@ async function runtimeStatus() {
   try { agents = await getAgents(); } catch {}
   return {
     ok: ollama && models.includes(MODEL),
+    runtime: { pid: process.pid },
     model: MODEL,
     ollama: { ready: ollama, url: OLLAMA_BASE_URL, modelInstalled: models.includes(MODEL), models },
     shim: { ready: shim, url: SHIM_BASE_URL },
@@ -260,7 +285,7 @@ async function runtimeStatus() {
 
 function chooseAgents(agents, task, requested = []) { return chooseDepartmentAgents(agents, task, requested); }
 
-function loadPendingApproval(){const x=safeReadJson(pendingApprovalFile);return x?.status==='NEEDS_APPROVAL'?x:null} function savePendingApproval(task,mode,answer){const x={task:String(task||'').trim(),mode:normalizeRoute(mode),requestedAction:String(answer||'').slice(0,3000),createdAt:new Date().toISOString(),status:'NEEDS_APPROVAL'};writeFileSync(pendingApprovalFile,JSON.stringify(x,null,2),'utf8');return x} function clearPendingApproval(){rmSync(pendingApprovalFile,{force:true})} function asksForApproval(a){return /(approval required|requires? (?:your )?approval|please approve|if you approve|confirmation required|confirm before|approval-gated action|approve (?:this|the))/i.test(String(a||''))}
+function loadPendingApproval(){const x=safeReadJson(pendingApprovalFile);return x?.status==='NEEDS_APPROVAL'?x:null} function savePendingApproval(task,mode,answer,action='chat'){const x={task:String(task||'').trim(),mode:normalizeRoute(mode),action:String(action||'chat'),requestedAction:String(answer||'').slice(0,3000),createdAt:new Date().toISOString(),status:'NEEDS_APPROVAL'};writeFileSync(pendingApprovalFile,JSON.stringify(x,null,2),'utf8');return x} function clearPendingApproval(){rmSync(pendingApprovalFile,{force:true})} function asksForApproval(a){return /(approval required|requires? (?:your )?approval|please approve|if you approve|confirmation required|confirm before|approval-gated action|approve (?:this|the))/i.test(String(a||''))}
 
 function normalizeMessages(messages) {
   const list = Array.isArray(messages) ? messages : [];
@@ -287,7 +312,8 @@ function directSystemPrompt(installedModels = [], task = '') {
     '- If the user explicitly asks for stored-memory facts, answer from stored memory and say NOT VERIFIED for anything absent. Do not fill gaps from generic knowledge.',
     '- LIVE READ-ONLY REPOSITORY STATE is evidence available without changing files. Do not claim access beyond the evidence supplied.',
     '- Safe analysis and read-only inspection do not require approval.',
-    '- File writes, git writes, deployment, publishing, payments, browser actions, credentials and destructive database actions remain approval-gated.',
+    '- You are authorized to act as chat assistant, coding/build engineer, and local executive operator. Explicit local project actions such as editing code, running tests/builds, and starting or stopping BharatShop local services may execute without an extra approval turn.',
+    '- Never expose credentials or perform destructive production-database operations. External spending, live payments, publishing, and production deployment must use dedicated verified integrations; never pretend those actions happened when no tool executed them.',
     '- Never invent completed external actions. Never request secrets.',
     '',
     needsProjectGrounding ? buildMemoryContext(task) : 'No project-memory excerpt was loaded because this request does not require BharatShop grounding.',
@@ -315,9 +341,14 @@ async function ollamaChat(systemPrompt, messages, { stream = false } = {}) {
 
 async function nonStreamingChat(systemPrompt, messages) {
   const response = await ollamaChat(systemPrompt, messages, { stream: false });
-  const data = await response.json();
-  if (data?.error || data?.done !== true || !String(data?.message?.content || '').trim()) throw safeError('Ollama did not return a completed specialist answer.');
-  return String(data.message.content).trim();
+  const raw = await response.text();
+  let data;
+  try { data = raw ? JSON.parse(raw) : null; }
+  catch { throw safeError('Ollama returned invalid JSON for non-streaming chat. Check the local Ollama logs.'); }
+  if (data?.error) throw safeError('Ollama reported a generation error. Check the local Ollama logs and model availability.');
+  const answer = String(data?.message?.content || '').trim();
+  if (data?.done === false || !answer) throw safeError('Ollama did not return a completed answer. Check the selected local model.');
+  return answer;
 }
 
 function writeEvent(res, event) {
@@ -356,15 +387,95 @@ async function handleAgencyChat(res, messages, selectedSlugs) {
     reports.push({ name: agent.name, answer });
   }
   writeEvent(res, { type: 'status', text: 'Agency Manager is synthesizing the specialist reports...' });
-  const response = await ollamaChat([
+  const answer = await nonStreamingChat([
     'You are the BharatShop local Agency Manager running through Ollama model '+MODEL+'. Synthesize the specialist reports into one concise practical answer grounded in persistent BharatShop memory and live read-only repository evidence. If evidence is missing, say NOT VERIFIED. Previous assistant messages are not authoritative when they conflict with persistent memory. Do not invent completed external actions. Do not request secrets.',
     '',
     grounding,
-  ].join('\n'), [{ role: 'user', content: 'TASK:\n'+task+'\n\nREPORTS:\n'+reports.map(item => '## '+item.name+'\n'+item.answer).join('\n\n') }], { stream: true });
-  return streamOllamaResponse(res, response);
+  ].join('\n'), [{ role: 'user', content: 'TASK:\n'+task+'\n\nREPORTS:\n'+reports.map(item => '## '+item.name+'\n'+item.answer).join('\n\n') }]);
+  writeEvent(res, { type: 'delta', text: answer });
+  return answer;
 }
 
-async function handleChatInner(req,res){const body=await readJson(req);let mode=normalizeRoute(body.mode),messages=normalizeMessages(body.messages);if(!messages.length||messages.at(-1)?.role!=='user')throw new Error('A user message is required');const original=String(messages.at(-1)?.content||'').trim();let resumed=null;res.writeHead(200,securityHeaders({'content-type':'application/x-ndjson; charset=utf-8','transfer-encoding':'chunked'}));try{if (/^\/audit\s*$/i.test(original)) { writeEvent(res,{type:'delta',text:await auditReport()});writeEvent(res,{type:'done'});return res.end(); }if(isCancellationMessage(original)){const p=loadPendingApproval();clearPendingApproval();writeEvent(res,{type:'delta',text:p?'Pending BharatShop action cancelled.':'There is no pending BharatShop approval to cancel.'});writeEvent(res,{type:'done'});return res.end()}if(isApprovalMessage(original)){resumed=loadPendingApproval();if(!resumed){writeEvent(res,{type:'delta',text:'There is no pending BharatShop action awaiting approval. Tell me the task you want approved.'});writeEvent(res,{type:'done'});return res.end()}mode=normalizeRoute(resumed.mode);messages=[...messages.slice(0,-1),{role:'user',content:`APPROVAL GRANTED. Resume the pending task, but never claim a file/browser/production/payment/deployment action unless a tool actually ran it.\n\nPENDING TASK:\n${resumed.task}`}];writeEvent(res,{type:'status',text:`Resuming approved task: ${resumed.task.slice(0,140)}`})}const task=resumed?.task||original;const answer=mode==='agency'?await handleAgencyChat(res,messages,body.selectedAgents):await handleDirectChat(res,messages);if(resumed)clearPendingApproval();else if(asksForApproval(answer)){savePendingApproval(task,mode,answer);writeEvent(res,{type:'approval',status:'NEEDS_APPROVAL',task})}writeEvent(res,{type:'done'})}catch(e){writeEvent(res,{type:'error',error:chatError(e)})}res.end()}
+async function handleChatInner(req,res){
+  const body=await readJson(req);
+  let mode=normalizeRoute(body.mode),messages=normalizeMessages(body.messages);
+  if(!messages.length||messages.at(-1)?.role!=='user')throw new Error('A user message is required');
+  const original=String(messages.at(-1)?.content||'').trim();
+  let resumed=null;
+  res.writeHead(200,securityHeaders({'content-type':'application/x-ndjson; charset=utf-8','transfer-encoding':'chunked'}));
+  try{
+    if (/^\/audit\s*$/i.test(original) || /^\/status\s*$/i.test(original) || /^(?:check\s+)?(?:my\s+)?bharatshop\s+project\s+status[.!?]*$/i.test(original)) {
+      const project = projectStatus();
+      const report = [
+        await auditReport(),
+        '',
+        'PROJECT',
+        'Branch: '+project.branch,
+        'HEAD: '+project.head,
+        'Uncommitted entries: '+project.dirtyFiles,
+        'Remote: '+(project.remote || 'not configured'),
+      ].join('\n');
+      writeEvent(res,{type:'delta',text:report});writeEvent(res,{type:'done'});return res.end();
+    }
+    if(isCancellationMessage(original)){
+      const p=loadPendingApproval();clearPendingApproval();
+      writeEvent(res,{type:'delta',text:p?'Pending BharatShop action cancelled.':'There is no pending BharatShop approval to cancel.'});
+      writeEvent(res,{type:'done'});return res.end();
+    }
+    if(isApprovalMessage(original)){
+      resumed=loadPendingApproval();
+      if(!resumed){
+        writeEvent(res,{type:'delta',text:'There is no pending BharatShop action awaiting approval. Tell me the task you want approved.'});
+        writeEvent(res,{type:'done'});return res.end();
+      }
+      if(resumed.action==='engineer-task'){
+        writeEvent(res,{type:'status',text:'Starting Machine Engineer locally...'});
+        const result=await runCockpitOperation('engineer-task',{approved:true,task:resumed.task});
+        clearPendingApproval();
+        const job=result?.job||{};
+        writeEvent(res,{type:'delta',text:`Machine Engineer started the approved fix/build task.\n\nJob: ${job.id||'created'}\nStatus: ${job.status||'RUNNING'}\n\nOpen Operations → Recent jobs to follow the real execution log. The engineer may edit local code and run verification, but production database writes, payments, publishing, commit/push/merge and deployment remain disabled.`});
+        writeEvent(res,{type:'operation',operation:'engineer-task',job});
+        writeEvent(res,{type:'done'});return res.end();
+      }
+      mode=normalizeRoute(resumed.mode);
+      messages=[...messages.slice(0,-1),{role:'user',content:`APPROVAL GRANTED. Resume the pending task, but never claim a file/browser/production/payment/deployment action unless a tool actually ran it.\n\nPENDING TASK:\n${resumed.task}`}];
+      writeEvent(res,{type:'status',text:`Resuming approved task: ${resumed.task.slice(0,140)}`});
+    } else {
+      const executiveOperation = mode === 'executive' ? executiveOperationFromPrompt(original) : '';
+      if (executiveOperation) {
+        writeEvent(res,{type:'status',text:'Executive mode is running '+executiveOperation+' locally...'});
+        const result=await runCockpitOperation(executiveOperation,{approved:true});
+        const job=result?.job||null;
+        const summary = job
+          ? `Executive operation started.\n\nOperation: ${executiveOperation}\nJob: ${job.id||'created'}\nStatus: ${job.status||'RUNNING'}\n\nOpen Operations → Recent jobs for the verified execution log.`
+          : `Executive operation completed.\n\nOperation: ${executiveOperation}\n${result?.output ? String(result.output).slice(0,6000) : 'Completed locally.'}`;
+        writeEvent(res,{type:'delta',text:summary});
+        writeEvent(res,{type:'operation',operation:executiveOperation,job,result:{ok:result?.ok,exitCode:result?.exitCode}});
+        writeEvent(res,{type:'done'});return res.end();
+      }
+      const engineeringTask = mode === 'coding' ? original : engineeringTaskFromPrompt(original);
+      if(engineeringTask){
+        writeEvent(res,{type:'status',text:'Machine Engineer is starting locally...'});
+        const result=await runCockpitOperation('engineer-task',{approved:true,task:engineeringTask});
+        const job=result?.job||{};
+        writeEvent(res,{type:'delta',text:`Machine Engineer started the coding/build task.\n\nJob: ${job.id||'created'}\nStatus: ${job.status||'RUNNING'}\n\nIt may inspect and edit BharatShop source and run deterministic verification. Open Operations → Recent jobs to follow the real execution log.`});
+        writeEvent(res,{type:'operation',operation:'engineer-task',job});
+        writeEvent(res,{type:'done'});return res.end();
+      }
+    }
+    const task=resumed?.task||original;
+    const answer=mode==='agency'?await handleAgencyChat(res,messages,body.selectedAgents):await handleDirectChat(res,messages);
+    if(resumed)clearPendingApproval();
+    else if(asksForApproval(answer)){
+      savePendingApproval(task,mode,answer);
+      writeEvent(res,{type:'approval',status:'NEEDS_APPROVAL',task});
+    }
+    writeEvent(res,{type:'done'});
+  }catch(e){
+    writeEvent(res,{type:'error',error:chatError(e)});
+  }
+  res.end();
+}
 
 // Serialize UI generations rather than silently overloading a small local model.
 let chatBusy = false;
@@ -427,6 +538,7 @@ export function createServer() {
 
       if (req.method === 'GET' && serveStatic(req, res, url.pathname)) return;
       if (req.method === 'GET' && url.pathname === '/api/audit') return sendJson(res, 200, { ok: true, report: await auditReport() });
+      if (req.method === 'GET' && url.pathname === '/api/identity') return sendJson(res, 200, { service: 'bharatshop-machine-ui', root, pid: process.pid });
       if (req.method === 'GET' && url.pathname === '/api/status') return sendJson(res, 200, await runtimeStatus());
       if (req.method === 'GET' && url.pathname === '/api/agents') {
         const agents = await getAgents();

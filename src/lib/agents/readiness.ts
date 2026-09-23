@@ -1,6 +1,7 @@
 import { pool } from "@/db";
 import { aiConfigured, checkAI, aiModels, aiProviderName } from "@/lib/ai/provider";
 import { publicAgentContracts, type OperationalAgentId } from "@/lib/agents/contracts";
+import { perplexityReadiness } from "@/lib/ai/perplexity-research";
 import { agentRuntimeCatalog } from "@/lib/agents/runtime";
 
 export type DependencyProbe = {
@@ -156,6 +157,7 @@ export async function deepAgentReadiness() {
   ]);
   const ai = aiRaw as AIProbe;
   const automation = automationTokenConfigured();
+  const perplexity = perplexityReadiness();
   const runtime = agentRuntimeCatalog();
   const runtimeMap = new Map(runtime.map((entry) => [entry.id, entry]));
   const contracts = publicAgentContracts();
@@ -203,6 +205,7 @@ export async function deepAgentReadiness() {
     suite: "BharatShop Agent Suite v4",
     promptVersion: "agent-suite-v4",
     provider: { name: aiProviderName(), models: aiModels(), configured: Boolean(ai.configured), ready: infrastructure.ai.ready },
+    researchProviders: { perplexity },
     infrastructure,
     agents,
     summary: { total: agents.length, ready: agents.length - blocked.length, blocked, allReady: blocked.length === 0 },
@@ -216,6 +219,7 @@ export function configuredAgentReadiness() {
   const database = databaseConfigured();
   const automation = automationTokenConfigured();
   const runtimeMap = new Map(agentRuntimeCatalog().map((entry) => [entry.id, entry]));
+  const perplexity = perplexityReadiness();
   const infrastructure = {
     database: { ready: database, reason: database ? "PostgreSQL connection configured" : "DATABASE_URL or SUPABASE_DB_URL missing" },
     ai: { ready: ai, reason: ai ? `${aiProviderName()} provider configured` : "AI provider missing" },
@@ -231,5 +235,5 @@ export function configuredAgentReadiness() {
     return { ...contract, ready, status: ready ? "READY" : "BLOCKED", runtimeTools, dependencyChecks, reason: ready ? "Configuration and runtime tool map are present." : dependencyChecks.filter((item) => !item.ready).map((item) => `${item.dependency}: ${item.reason}`).join("; ") };
   });
   const blocked = agents.filter((agent) => !agent.ready).map((agent) => agent.id);
-  return { agents, summary: { total: agents.length, ready: agents.length - blocked.length, blocked, allReady: blocked.length === 0 } };
+  return { agents, researchProviders: { perplexity }, summary: { total: agents.length, ready: agents.length - blocked.length, blocked, allReady: blocked.length === 0 } };
 }

@@ -1,6 +1,7 @@
 import { db } from "@/db";
 import { sql } from "drizzle-orm";
 import { aiModels, checkAI } from "@/lib/ai/provider";
+import { perplexityReadiness } from "@/lib/ai/perplexity-research";
 
 export const dynamic = "force-dynamic";
 
@@ -108,6 +109,7 @@ export async function GET(req: Request) {
     checkSearXNG(deep),
   ]);
 
+  const perplexity = perplexityReadiness();
   const ok = postgres.ready && ai.ready && vision.ready && searxng.ready;
   const revision = process.env.BHARATSHOP_BUILD_REVISION || process.env.COMMIT_REF || process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT_SHA || process.env.COMMIT_SHA || process.env.GITHUB_SHA || "unknown";
   return Response.json({
@@ -117,8 +119,8 @@ export async function GET(req: Request) {
       netlify: Boolean(process.env.NETLIFY || process.env.DEPLOY_ID || process.env.SITE_ID),
       context: process.env.CONTEXT || null,
     },
-    readiness: { postgres, ai, vision, searxng },
-    providers: { ai: ai.ready, vision: vision.ready, searxng: searxng.ready },
+    readiness: { postgres, ai, vision, searxng, perplexity },
+    providers: { ai: ai.ready, vision: vision.ready, searxng: searxng.ready, perplexity: perplexity.status },
     models: ai.models,
     provider: ai.provider,
     imageVerifier: { provider: vision.provider, model: vision.model },

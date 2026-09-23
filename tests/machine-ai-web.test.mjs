@@ -9,6 +9,8 @@ import { isMachineAiStatus } from '../scripts/machine-ai-web-readiness.mjs';
 test('machine web UI defaults background/chat routing safely', () => {
   assert.equal(normalizeRoute('agency'), 'agency');
   assert.equal(normalizeRoute('chat'), 'chat');
+  assert.equal(normalizeRoute('coding'), 'coding');
+  assert.equal(normalizeRoute('executive'), 'executive');
   assert.equal(normalizeRoute('build'), 'chat');
   assert.equal(normalizeRoute('browser'), 'chat');
 });
@@ -41,7 +43,8 @@ test('machine web readiness rejects an unrelated healthy web server', () => {
 test('machine web chat is bounded and the UI exposes cancellation', () => {
   const server = readFileSync(resolve('scripts/machine-ai-web.mjs'), 'utf8');
   const ui = readFileSync(resolve('machine-ui/app.js'), 'utf8');
-  assert.match(server, /BHARATSHOP_CHAT_TIMEOUT_MS\s*\|\|\s*'90000'/);
+  assert.match(server, /BHARATSHOP_CHAT_TIMEOUT_MS\s*\|\|\s*'240000'/);
+  assert.match(server, /Math\.min\(600_000/);
   assert.match(server, /num_predict:\s*CHAT_PREDICT_TOKENS/);
   assert.match(server, /req\.once\('aborted',\s*closed\)/);
   assert.match(ui, /state\.activeController\?\.abort\(\)/);
