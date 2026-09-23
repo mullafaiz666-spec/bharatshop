@@ -1,4 +1,5 @@
 import http from 'node:http';
+import os from 'node:os';
 import { randomBytes, timingSafeEqual, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, resolve, join, delimiter } from 'node:path';
@@ -15,6 +16,10 @@ export function classify(text, selected = 'auto') {
   }
   const explicit = text.match(/^\/(chat|agency|build|browser|company|verify|status)\b\s*(.*)$/is);
   if (explicit) return { route: explicit[1].toLowerCase(), task: explicit[2] || explicit[1] };
+  if (/कंपनी.*चलाओ|एजेंट.*चलाओ/u.test(text)) return { route: 'company', task: text };
+  if (/जाँच|जांच|परीक्षण/u.test(text)) return { route: 'verify', task: text };
+  if (/ठीक करो|बनाओ|कोड|डिबग/u.test(text)) return { route: 'build', task: text };
+  if (/ब्राउज़र|वेब.*खोज/u.test(text)) return { route: 'browser', task: text };
   if (/\b(company cycle|run (the )?(company|employees|agents))\b/i.test(text)) return { route: 'company', task: text };
   if (/\b(verify|test|check)\b.*\b(build|bharatshop|project|types)\b/i.test(text)) return { route: 'verify', task: text };
   if (/\b(build|fix|implement|debug|refactor|code)\b/i.test(text)) return { route: 'build', task: text };
@@ -46,7 +51,13 @@ export function commandFor(root, route, task) {
   if (/^--/.test(task.trim())) throw new Error('Task must be a sentence, not a command-line option');
   return [process.execPath, [join(root, 'scripts/personal-ai.mjs'), 'task', task, '--route', route, ...(['build', 'browser', 'company'].includes(route) ? ['--execute'] : [])]];
 }
-export function createJarvis({ root, token, port = 3002, run = spawn, model = process.env.PERSONAL_AI_MODEL || process.env.AGENCY_MODEL || 'qwen3.5:4b' }) {
+async function localModels() {
+  const response = await fetch('http://127.0.0.1:11434/api/tags', { signal: AbortSignal.timeout(2500) });
+  if (!response.ok) throw new Error('Ollama is not responding');
+  const data = await response.json();
+  return (data.models || []).map(m => m.name || m.model).filter(n => typeof n === 'string');
+}
+export function createJarvis({ root, token, port = 3002, run = spawn, getModels = localModels, model = process.env.PERSONAL_AI_MODEL || process.env.AGENCY_MODEL || 'qwen3.5:4b' }) {
   const jobs = new Map();
   let active = null;
   const local = `http://127.0.0.1:${port}`;
@@ -73,30 +84,41 @@ export function createJarvis({ root, token, port = 3002, run = spawn, model = pr
     job.status = 'running';
     job.startedAt = new Date().toISOString();
     job.timer = setTimeout(() => stop(job, 'timed_out'), 30 * 60 * 1000);
-    const commands = job.route === 'verify' ? ['typecheck', 'build'].map(s => npmCommand(root, s)) : [commandFor(root, job.route, job.task)];
+    const labels = job.route === 'verify' ? ['typecheck', 'build-check'] : [job.route, ...(job.verifyAfter ? ['typecheck', 'build-check'] : [])];
+    job.stages = labels.map(label => ({ label, status: 'pending' }));
+    job.checksStatus = labels.includes('typecheck') ? 'pending' : 'not_requested';
     let index = 0;
     const next = () => {
-      const [command, args] = commands[index++];
-      job.output += `\nStarting ${job.route === 'verify' ? (index === 1 ? 'typecheck' : 'build') : job.route} worker…\n`;
-      const child = run(command, args, { cwd: root, shell: false, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PERSONAL_AI_MODEL: model, PERSONAL_AI_MEMORY: 'false' } });
-      job.child = child;
+      const stage = job.stages[index++];
+      stage.status = 'running';
+      stage.startedAt = new Date().toISOString();
       let settled = false;
       const finish = (code, error) => {
         if (settled) return; settled = true;
+        stage.status = job.status !== 'running' ? job.status : code === 0 ? 'passed' : 'failed';
+        stage.finishedAt = new Date().toISOString();
+        stage.exitCode = code;
         if (error) job.output += '\n' + redact(error.message);
-        if (job.status === 'running' && code === 0 && index < commands.length) return next();
+        if (job.status === 'running' && code === 0 && index < job.stages.length) return next();
         clearTimeout(job.timer);
         if (job.status === 'running') job.status = code === 0 ? 'worker_finished' : 'failed';
+        if (job.checksStatus !== 'not_requested') job.checksStatus = job.stages.filter(s => ['typecheck', 'build-check'].includes(s.label)).every(s => s.status === 'passed') ? 'passed' : 'incomplete_or_failed';
         job.exitCode = code;
         job.finishedAt = new Date().toISOString();
         job.child = null;
         active = null;
       };
-      for (const stream of [child.stdout, child.stderr]) stream?.on('data', chunk => { job.output = (job.output + chunk.toString()).slice(-64000); });
-      child.on('error', error => finish(null, error));
-      child.on('close', code => finish(code));
+      try {
+        const [command, args] = stage.label === 'typecheck' ? npmCommand(root, 'typecheck') : stage.label === 'build-check' ? npmCommand(root, 'build') : commandFor(root, job.route, job.task);
+        job.output += `\nStarting ${stage.label} worker…\n`;
+        const child = run(command, args, { cwd: root, shell: false, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PERSONAL_AI_MODEL: job.model, PERSONAL_AI_MEMORY: 'false' } });
+        job.child = child;
+        for (const stream of [child.stdout, child.stderr]) stream?.on('data', chunk => { job.output = (job.output + chunk.toString()).slice(-64000); });
+        child.on('error', error => finish(null, error));
+        child.on('close', code => finish(code));
+      } catch (error) { finish(null, error); }
     };
-    try { next(); } catch (error) { clearTimeout(job.timer); active = null; job.status = 'failed'; job.output = redact(error.message); job.finishedAt = new Date().toISOString(); }
+    next();
   }
   const server = http.createServer(async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
@@ -121,9 +143,9 @@ export function createJarvis({ root, token, port = 3002, run = spawn, model = pr
     }
     if (!authorized(req)) return reply(401, { error: 'Pair with the session key shown in your laptop terminal' });
     if (req.method === 'GET' && path === '/api/health') {
-      let ollama = false, modelInstalled = false;
-      try { const r = await fetch('http://127.0.0.1:11434/api/tags', { signal: AbortSignal.timeout(2500) }); const data = await r.json(); ollama = r.ok; modelInstalled = ollama && data.models?.some(m => (m.name || m.model) === model) || false; } catch {}
-      return reply(200, { service: 'jarvis-machine-ai', protocol: 1, root, model, ollama, modelInstalled, workerPresent: existsSync(join(root, 'scripts/personal-ai.mjs')), activeJob: active?.id || null, capabilities: ['chat', 'agency', 'build', 'browser', 'company', 'verify', 'status'], note: 'Connector health does not verify task execution or production integrations.' });
+      let ollama = false, models = [];
+      try { models = await getModels(); ollama = true; } catch {}
+      return reply(200, { service: 'jarvis-machine-ai', protocol: 1, version: '2.0.0', root, model, models, ollama, modelInstalled: models.includes(model), workerPresent: existsSync(join(root, 'scripts/personal-ai.mjs')), activeJob: active?.id || null, checkedAt: new Date().toISOString(), machine: { platform: process.platform, cpuCores: os.cpus().length, totalMemoryGB: +(os.totalmem() / 2**30).toFixed(1), freeMemoryGB: +(os.freemem() / 2**30).toFixed(1), connectorUptimeSeconds: Math.floor(process.uptime()) }, capabilities: ['chat', 'agency', 'build', 'browser', 'company', 'verify', 'status'], note: 'Connector health does not verify task execution or production integrations.' });
     }
     if (req.method === 'GET' && path === '/api/jobs') return reply(200, { jobs: [...jobs.values()].reverse().map(j => ({ ...snapshot(j), output: redact(j.output) })) });
     if (req.method === 'POST') {
@@ -136,15 +158,28 @@ export function createJarvis({ root, token, port = 3002, run = spawn, model = pr
           if (!job) return reply(404, { error: 'Task not found' });
           stop(job, 'cancelled'); return reply(200, { id: job.id, status: job.status });
         }
-        if (path !== '/api/jobs') return reply(404, { error: 'Not found' });
-        if (active) return reply(409, { error: 'A task is running. Wait or stop it first.' });
+        if (!['/api/jobs', '/api/preview'].includes(path)) return reply(404, { error: 'Not found' });
+        if (path === '/api/jobs' && data.requestId && [...jobs.values()].some(j => j.requestId === data.requestId)) { const existing = [...jobs.values()].find(j => j.requestId === data.requestId); return reply(200, { ...snapshot(existing), output: redact(existing.output) }); }
+        if (path === '/api/jobs' && active) return reply(409, { error: 'A task is running. Wait or stop it first.' });
         const text = typeof data.text === 'string' ? data.text.trim() : '';
         if (!text || text.length > 8000) return reply(400, { error: 'Enter a task of 1–8000 characters' });
         const { route, task } = classify(text, data.mode || 'auto');
+        const verifyAfter = route === 'build' && data.verifyAfter === true;
+        if (path === '/api/preview') return reply(200, { route, task, verifyAfter, stages: route === 'verify' ? ['typecheck', 'build-check'] : [route, ...(verifyAfter ? ['typecheck', 'build-check'] : [])], approvalRequired: route === 'company' ? 'company' : null, executed: false });
         if (route === 'company' && data.approveCompany !== true) return reply(409, { error: 'Confirm this company cycle before execution', approvalRequired: 'company' });
         if (route !== 'verify') commandFor(root, route, task);
+        let chosenModel = model;
+        if (data.model) {
+          const installed = await getModels();
+          if (!installed.includes(data.model)) return reply(400, { error: 'Choose an installed local model. No model was downloaded.' });
+          chosenModel = data.model;
+        }
+        // Model discovery is asynchronous; recheck duplicate IDs and the execution slot.
+        const duplicate = data.requestId && [...jobs.values()].find(j => j.requestId === data.requestId);
+        if (duplicate) return reply(200, { ...snapshot(duplicate), output: redact(duplicate.output) });
+        if (active) return reply(409, { error: 'A task is running. Wait or stop it first.' });
         if (jobs.size >= 50) jobs.delete(jobs.keys().next().value);
-        const job = { id: randomUUID(), task, route, status: 'queued', output: '', createdAt: new Date().toISOString(), exitCode: null };
+        const job = { id: randomUUID(), requestId: typeof data.requestId === 'string' ? data.requestId.slice(0,100) : null, model: chosenModel, verifyAfter, task, route, status: 'queued', output: '', createdAt: new Date().toISOString(), exitCode: null };
         jobs.set(job.id, job);
         try { start(job); } catch (error) { clearTimeout(job.timer); active = null; job.status = 'failed'; job.output = redact(error.message); }
         return reply(202, { ...snapshot(job), output: redact(job.output) });

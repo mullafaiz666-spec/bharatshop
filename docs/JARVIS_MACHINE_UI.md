@@ -44,3 +44,15 @@ node --test tests/jarvis-bridge.test.mjs
 ```
 
 Tests use temporary fixture workers and real local HTTP/process execution; they do not connect to production or prove the user's Windows worker/model/browser installation works. To finish acceptance on the laptop: connect, run `/chat Say hello`, `/verify`, a small reversible `/build` task, inspect its diff, then run a browser task. Confirm actual worker evidence before enabling business operations. Windows process-tree cancellation and microphone behavior require laptop verification.
+
+## V2 upgrades
+
+- Authenticated live health: available RAM, CPU core count, connector uptime, and a fresh timestamp every ten seconds while connected. These do not imply all business integrations are healthy.
+- Local model selection: choose an installed Ollama model per task; no automatic downloads or paid providers.
+- Preview plan: inspect the route and stages without executing.
+- Optional automatic typecheck and build after a successful coding worker. Checked by default in V2. A failed coding worker never advances to checks; a failed typecheck never advances to build. Passing these two checks is not full functional or production verification.
+- English/Hindi speech selection, keyboard shortcuts, task filtering, reusable commands, copyable output and stage progress. Automatic Hindi routing covers common build/check/browser/company commands; select an explicit mode for ambiguous requests.
+- Duplicate request IDs return the existing task; they cannot launch a second copy while that task remains in the session history.
+- Backup-aware Windows upgrades replace only recognized V1 managed files. Custom edits block replacement. Backups go to LocalAppData/BharatShop/JarvisBackups. Stop the old connector before installing. The V2 hosted UI still supports core V1 commands, but disables V2-only controls until the connector is upgraded.
+
+The Windows upgrade/rollback path and microphone recognition still require verification on the actual laptop. API and worker tests run using temporary fixture projects and an injected model catalog.
