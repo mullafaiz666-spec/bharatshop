@@ -26,7 +26,7 @@ test('authenticated HTTP to real worker, lifecycle, origin checks, company appro
   const root = mkdtempSync(join(tmpdir(), 'jarvis-test-'));
   mkdirSync(join(root, 'scripts'));
   writeFileSync(join(root, 'package.json'), JSON.stringify({ scripts: {} }));
-  writeFileSync(join(root, 'scripts/personal-ai.mjs'), `console.log(JSON.stringify(process.argv.slice(2))); console.log(process.env.PERSONAL_AI_MODEL); if(process.argv.includes('wait')) setInterval(()=>{},1000); else setTimeout(()=>process.exit(process.argv.includes('fail')?1:0),100);`);
+  writeFileSync(join(root, 'scripts/personal-ai.mjs'), `console.log(JSON.stringify(process.argv.slice(2))); console.log(process.env.PERSONAL_AI_MODEL); console.log('context=' + process.env.PERSONAL_AI_CONTEXT); if(process.argv.includes('wait')) setInterval(()=>{},1000); else setTimeout(()=>process.exit(process.argv.includes('fail')?1:0),100);`);
   const port = 31387;
   const app = createJarvis({ root, token: 'test-session-only', port, getModels: async () => ['deepseek-coder-v2:16b', 'test-local-model'] });
   app.server.listen(port, '127.0.0.1'); await once(app.server, 'listening');
@@ -61,6 +61,7 @@ test('authenticated HTTP to real worker, lifecycle, origin checks, company appro
     const finished = await waitJob(job.id, ['worker_finished']);
     assert.match(finished.output, /literal ; \$\(echo surprise\)/);
     assert.match(finished.output, /--execute/);
+    assert.match(finished.output, /context=4096/);
     assert.equal(finished.exitCode, 0);
     const greeting = await (await request('/api/jobs', { text: 'hello', mode: 'chat' })).json();
     assert.equal((await waitJob(greeting.id, ['worker_finished'])).exitCode, 0);
