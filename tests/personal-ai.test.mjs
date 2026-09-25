@@ -25,7 +25,8 @@ test('free/local setup installs Playwright and pins DeepSeek Harness to the loca
 
 test('Personal AI routes core free capabilities through local Ollama', () => {
   assert.match(personalAi, /qwen3\.5:4b/);
-  assert.match(personalAi, /run\(ollama, \['launch', 'dsh'/);
+  assert.match(personalAi, /'@deepseek-ai\/dsh@0\.1\.5-rc\.2', '--profile', 'headless'/);
+  assert.doesNotMatch(personalAi, /'launch', 'dsh', '--model', MODEL, '--', '--profile'/);
   assert.match(personalAi, /Browser Use/);
   assert.match(personalAi, /agencyAnswer/);
   assert.match(personalAi, /runCompany/);
