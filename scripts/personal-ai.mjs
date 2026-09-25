@@ -14,6 +14,7 @@ const AI_HOME = process.env.PERSONAL_AI_HOME || join(homedir(), '.bharatshop-ai'
 const BROWSER_HOME = join(AI_HOME, 'browser-use');
 const BROWSER_VENV = join(BROWSER_HOME, '.venv');
 const BROWSER_RUNNER = join(ROOT, 'services', 'browser-use-local', 'runner.py');
+const BROWSER_FALLBACK = join(ROOT, 'services', 'browser-use-local', 'read-only-fallback.py');
 const MEMORY_FILE = join(AI_HOME, 'memory.jsonl');
 const MODEL = process.env.PERSONAL_AI_MODEL || process.env.AGENCY_MODEL || 'qwen3.5:4b';
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434';
@@ -46,6 +47,11 @@ function run(command, args = [], options = {}) {
 
 function capture(command, args = [], options = {}) {
   return run(command, args, { ...options, stdio: 'pipe', quiet: true });
+}
+
+function localHarnessEnv() {
+  const names = ['PATH', 'Path', 'PATHEXT', 'SystemRoot', 'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'HOME', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH', 'APPDATA', 'LOCALAPPDATA', 'TMP', 'TEMP', 'OLLAMA_HOST'];
+  return Object.fromEntries(names.filter(name => typeof process.env[name] === 'string').map(name => [name, process.env[name]]));
 }
 
 function executablePath(name) {
@@ -366,7 +372,9 @@ async function runBuild(task) {
   const guardrailsPath = join(ROOT, 'agents', 'DEEPSEEK_SYSTEM_AGENT.md');
   const guardrails = existsSync(guardrailsPath) ? readFileSync(guardrailsPath, 'utf8') : '';
   const prompt = `${guardrails}\n\nLOCAL-ONLY MODE\nUse the local Ollama model only. Do not invoke Claude Code, Codex, paid APIs, cloud web search, billing, publishing, production database mutation, or credential inspection. Work only inside the current repository. Verify edits with relevant tests/build checks.\n\nTASK\n${task}`.trim();
-  const result = run(ollama, ['launch', 'dsh', '--model', MODEL, '--', '--profile', 'headless', prompt]);
+  const npxCli = join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npx-cli.js');
+  if (!existsSync(npxCli)) throw new Error('The Node.js npx CLI is missing; repair the Node.js installation.');
+  const result = run(process.execPath, [npxCli, '--yes', '@deepseek-ai/dsh@0.1.5-rc.2', '--profile', 'headless', prompt], { env: localHarnessEnv() });
   if (result.status !== 0) throw new Error(`Local DeepSeek Harness task failed with exit code ${result.status}.`);
   return 'Local coding task completed. Review the Harness output and git diff before committing or deploying.';
 }
@@ -377,7 +385,13 @@ async function runBrowser(task) {
   const args = [BROWSER_RUNNER, task, '--model', MODEL];
   if (/^(1|true|yes|on)$/i.test(String(process.env.PERSONAL_AI_BROWSER_HEADLESS || ''))) args.push('--headless');
   const result = run(python, args);
-  if (result.status !== 0) throw new Error(`Browser worker stopped with exit code ${result.status}.`);
+  if (result.status !== 0) {
+    if (!/\b(open|inspect|read|report|summarize)\b/i.test(task) || !/https?:\/\/[^\s]+/i.test(task) || !existsSync(BROWSER_FALLBACK)) throw new Error(`Browser worker stopped with exit code ${result.status}.`);
+    console.log('Browser Use failed. Trying a read-only Playwright inspection; no clicks or forms will run.');
+    const fallback = run(python, [BROWSER_FALLBACK, task]);
+    if (fallback.status !== 0) throw new Error(`Browser Use and read-only Playwright inspection both failed. Exit code ${fallback.status}.`);
+    return 'Read-only site inspection completed with Playwright. Browser Use actions remain unverified.';
+  }
   return 'Browser task finished. Any irreversible action was intentionally left for your approval.';
 }
 
