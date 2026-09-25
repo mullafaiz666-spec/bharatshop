@@ -117,7 +117,7 @@ export function createJarvis({ root, token, port = 3002, run = spawn, getModels 
       try {
         const [command, args] = stage.label === 'typecheck' ? npmCommand(root, 'typecheck') : stage.label === 'build-check' ? npmCommand(root, 'build') : commandFor(root, job.route, job.workerTask || job.task);
         job.output += `\nStarting ${stage.label} worker…\n`;
-        const child = run(command, args, { cwd: root, shell: false, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PERSONAL_AI_MODEL: job.model, PERSONAL_AI_MEMORY: 'false' } });
+        const child = run(command, args, { cwd: root, shell: false, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PERSONAL_AI_MODEL: job.model, PERSONAL_AI_CONTEXT: process.env.PERSONAL_AI_CONTEXT || '4096', PERSONAL_AI_MEMORY: 'false' } });
         job.child = child;
         for (const stream of [child.stdout, child.stderr]) stream?.on('data', chunk => { job.output = (job.output + chunk.toString()).slice(-64000); });
         child.on('error', error => finish(null, error));
