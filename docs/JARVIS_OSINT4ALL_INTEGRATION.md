@@ -15,13 +15,15 @@ OSINT4ALL currently publishes **188 tool profiles**. The registry captures a cur
 - allowed BharatShop agents
 - public/authorized-use policy boundary
 
+The agent runtime returns only entries labeled free and permitted for the requesting agent. Other pricing entries remain metadata in the registry and are not suggested by the runtime. Free labels may still carry usage limits or account requirements; verify the tool's current terms before use.
+
 The registry is intentionally metadata-first. It does **not** grant credentials, bypass authentication, scrape private accounts, or execute third-party actions.
 
 ## Runtime tools
 
 Two read-only agent tools are exposed:
 
-- `osint_catalog` — list registered tools, optionally filtered by category/pricing/policy.
+- `osint_catalog` — list registered tools, optionally filtered by category and policy; results are limited to free tools.
 - `osint_plan` — map a research task to candidate OSINT tools.
 
 Every invocation is recorded through the existing agent tool-audit path.
