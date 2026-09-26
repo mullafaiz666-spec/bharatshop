@@ -386,7 +386,7 @@ async function executeTool(agentId: OperationalAgentId, call: ToolCall, state: R
       }
       case "osint_plan": {
         const task = String(call.args.task || "").slice(0, 500);
-        result = { task, tools: searchOsintTools(task, Math.max(1, Math.min(25, Number(call.args.limit || 12)))).filter((tool) => assertOsintAgentAccess(tool.id, agentId)), policy: "Public/authorized research only. No private-account access, credential bypass, restricted-data acquisition, or third-party action execution." };
+        result = { task, tools: searchOsintTools(task, Math.max(1, Math.min(25, Number(call.args.limit || 12)))).filter((tool) => tool.pricing === "free" && assertOsintAgentAccess(tool.id, agentId)), policy: "Public/authorized research only. No private-account access, credential bypass, restricted-data acquisition, or third-party action execution." };
         break;
       }
 
