@@ -108,8 +108,20 @@ const AGENT_ALIASES: Record<string, OperationalAgentId> = {
   "fashion enrichment": "listing",
 };
 
-const OSINT_TOOL_DESCRIPTION = "Read-only OSINT4ALL routing catalog. Returns public/authorized research tools, URLs, access/pricing and the policy boundary. It never executes a third-party tool.";\n\nconst TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
-  osint_catalog: {\n    name: "osint_catalog",\n    description: OSINT_TOOL_DESCRIPTION,\n    parameters: { type: "object", properties: { category: { type: "string" }, pricing: { type: "string" }, policy: { type: "string" } }, additionalProperties: false },\n  },\n  osint_plan: {\n    name: "osint_plan",\n    description: "Build a read-only OSINT research plan for a task using the configured OSINT4ALL registry. Returns candidate tools and their policy boundaries; does not execute them.",\n    parameters: { type: "object", properties: { task: { type: "string", minLength: 3, maxLength: 500 }, limit: { type: "integer", minimum: 1, maximum: 25 } }, required: ["task"], additionalProperties: false },\n  },\n
+const OSINT_TOOL_DESCRIPTION = "Read-only OSINT4ALL routing catalog. Returns free public/authorized research tools, URLs, access and the policy boundary. It never executes a third-party tool.";
+
+const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
+  osint_catalog: {
+    name: "osint_catalog",
+    description: OSINT_TOOL_DESCRIPTION,
+    parameters: { type: "object", properties: { category: { type: "string" }, policy: { type: "string" } }, additionalProperties: false },
+  },
+  osint_plan: {
+    name: "osint_plan",
+    description: "Build a free, read-only OSINT research plan for a task using the configured OSINT4ALL registry. Returns candidate tools and their policy boundaries; does not execute them.",
+    parameters: { type: "object", properties: { task: { type: "string", minLength: 3, maxLength: 500 }, limit: { type: "integer", minimum: 1, maximum: 25 } }, required: ["task"], additionalProperties: false },
+  },
+
   inspect_business_data: {
     name: "inspect_business_data",
     description: "Read the current BharatShop product, order, revenue, activity and approval summary from production PostgreSQL. Read only.",
@@ -363,7 +375,21 @@ async function executeTool(agentId: OperationalAgentId, call: ToolCall, state: R
       case "inspect_business_data": result = await inspectLiveBusinessData(); break;
       case "catalog_query": result = await catalogQuery(Math.max(1, Math.min(30, Number(call.args.limit || 12)))); break;
       case "research_web": result = await researchWeb(String(call.args.query || "").slice(0, 300)); break;
-      case "osint_catalog": {\n        const category = String(call.args.category || "").trim() as any;\n        const pricing = String(call.args.pricing || "").trim() as any;\n        const policy = String(call.args.policy || "").trim() as any;\n        result = listOsintTools({ category: category || undefined, pricing: pricing || undefined, policy: policy || undefined }).map((tool) => ({\n          id: tool.id, name: tool.name, url: tool.url, category: tool.category, workflow: tool.workflow, access: tool.access, pricing: tool.pricing, selfHosted: tool.selfHosted, policy: tool.policy, allowedForAgent: assertOsintAgentAccess(tool.id, agentId),\n        }));\n        break;\n      }\n      case "osint_plan": {\n        const task = String(call.args.task || "").slice(0, 500);\n        result = { task, tools: searchOsintTools(task, Math.max(1, Math.min(25, Number(call.args.limit || 12)))), policy: "Public/authorized research only. No private-account access, credential bypass, restricted-data acquisition, or third-party action execution." };\n        break;\n      }\n
+      case "osint_catalog": {
+        const category = String(call.args.category || "").trim() as any;
+        const pricing = "free";
+        const policy = String(call.args.policy || "").trim() as any;
+        result = listOsintTools({ category: category || undefined, pricing, policy: policy || undefined }).filter((tool) => assertOsintAgentAccess(tool.id, agentId)).map((tool) => ({
+          id: tool.id, name: tool.name, url: tool.url, category: tool.category, workflow: tool.workflow, access: tool.access, pricing: tool.pricing, selfHosted: tool.selfHosted, policy: tool.policy, allowedForAgent: assertOsintAgentAccess(tool.id, agentId),
+        }));
+        break;
+      }
+      case "osint_plan": {
+        const task = String(call.args.task || "").slice(0, 500);
+        result = { task, tools: searchOsintTools(task, Math.max(1, Math.min(25, Number(call.args.limit || 12)))).filter((tool) => assertOsintAgentAccess(tool.id, agentId)), policy: "Public/authorized research only. No private-account access, credential bypass, restricted-data acquisition, or third-party action execution." };
+        break;
+      }
+
       case "resolve_product_images": result = await resolveProductImages(Number(call.args.product_id) || undefined, String(call.args.product_name || "").trim() || undefined); break;
       case "fashion_studio": result = await fashionStudio(String(call.args.command), Number(call.args.product_id) || undefined, String(call.args.product_name || "").trim() || undefined, Math.max(1, Math.min(12, Number(call.args.count || 4))), String(call.args.extra_prompt || "").trim() || undefined); break;
       case "list_fashion_commands": result = listFashionCommands(); break;
