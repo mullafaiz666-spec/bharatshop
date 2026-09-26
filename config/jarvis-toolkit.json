@@ -1,0 +1,51 @@
+{
+  "version": "2026.1",
+  "project": "Jarvis / BharatShop",
+  "production": {
+    "host": "Render",
+    "database": "PostgreSQL",
+    "databaseSourceOfTruth": true,
+    "allowVercel": false,
+    "allowRailway": false,
+    "destructiveDatabaseOperations": false
+  },
+  "toolRegistry": [
+    {"id":"vscode","category":"frontend","mode":"developer","status":"recommended"},
+    {"id":"react","category":"frontend","mode":"runtime","status":"core"},
+    {"id":"figma","category":"frontend","mode":"design","status":"optional"},
+    {"id":"chrome-devtools","category":"frontend","mode":"developer","status":"recommended"},
+    {"id":"tailwindcss","category":"frontend","mode":"runtime","status":"core"},
+    {"id":"framer","category":"frontend","mode":"design","status":"optional"},
+    {"id":"framer-ai","category":"ai","mode":"design","status":"optional"},
+    {"id":"sass","category":"frontend","mode":"runtime","status":"optional"},
+    {"id":"docker","category":"backend","mode":"local-service","status":"core"},
+    {"id":"github","category":"backend","mode":"source-control","status":"core"},
+    {"id":"postgresql","category":"backend","mode":"database","status":"core"},
+    {"id":"supabase","category":"backend","mode":"external-verification","status":"optional"},
+    {"id":"redis","category":"backend","mode":"cache-queue","status":"optional"},
+    {"id":"nodejs","category":"backend","mode":"runtime","status":"core"},
+    {"id":"expressjs","category":"backend","mode":"service","status":"optional"},
+    {"id":"postman","category":"backend","mode":"api-testing","status":"recommended"},
+    {"id":"mongodb","category":"backend","mode":"database","status":"optional"},
+    {"id":"mysql","category":"backend","mode":"database","status":"optional"},
+    {"id":"chatgpt","category":"ai","mode":"assistant","status":"registered"},
+    {"id":"cursor","category":"ai","mode":"developer","status":"registered"},
+    {"id":"claude","category":"ai","mode":"verification","status":"registered"},
+    {"id":"claude-code","category":"ai","mode":"developer","status":"registered"},
+    {"id":"v0","category":"ai","mode":"ui-prototyping","status":"registered"},
+    {"id":"perplexity","category":"ai","mode":"research","status":"registered"},
+    {"id":"warp","category":"ai","mode":"terminal","status":"registered"},
+    {"id":"github-copilot","category":"ai","mode":"developer","status":"registered"},
+    {"id":"notion","category":"ai","mode":"knowledge","status":"registered"},
+    {"id":"galileo-ai","category":"ai","mode":"design","status":"registered"},
+    {"id":"langchain","category":"ai","mode":"orchestration","status":"registered"},
+    {"id":"replit","category":"ai","mode":"prototype","status":"registered"}
+  ],
+  "actionPolicy": {
+    "chain": ["CEO","Agent","Tool","Evidence","Audit","Decision","Human Approval","Action","Verified Result"],
+    "externalPublishingRequiresApproval": true,
+    "supplierPurchaseRequiresApproval": true,
+    "paymentActionsRequireApproval": true,
+    "secretExposure": false
+  }
+}
