@@ -67,7 +67,18 @@ export function createJarvis({ root, token, port = 3002, run = spawn, getModels 
     const expected = Buffer.from(`Bearer ${token}`);
     return value.length === expected.length && timingSafeEqual(value, expected);
   };
-  function snapshot(job) { const { child, timer, workerTask, ...data } = job; return data; }
+  function runtimeMeta(job) {
+    const output = String(job.output || '');
+    const gemini = output.match(/Provider:\s*Google Gemini\s*\(([^)]+)\)/i);
+    if (gemini) return { provider: 'google-gemini', modelUsed: gemini[1] };
+    const ollama = output.match(/Provider:\s*Ollama\s*\(([^)]+)\)/i);
+    if (ollama) return { provider: 'ollama', modelUsed: ollama[1] };
+    return { provider: null, modelUsed: null };
+  }
+  function snapshot(job) {
+    const { child, timer, workerTask, ...data } = job;
+    return { ...data, ...runtimeMeta(job) };
+  }
   function chatTask(task) {
     const previous = [...jobs.values()].filter(j => j.route === 'chat' && j.status === 'worker_finished').slice(-3);
     if (!previous.length) return task;
@@ -117,7 +128,23 @@ export function createJarvis({ root, token, port = 3002, run = spawn, getModels 
       try {
         const [command, args] = stage.label === 'typecheck' ? npmCommand(root, 'typecheck') : stage.label === 'build-check' ? npmCommand(root, 'build') : commandFor(root, job.route, job.workerTask || job.task);
         job.output += `\nStarting ${stage.label} worker…\n`;
-        const child = run(command, args, { cwd: root, shell: false, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PERSONAL_AI_MODEL: job.model, PERSONAL_AI_CONTEXT: process.env.PERSONAL_AI_CONTEXT || '4096', PERSONAL_AI_MEMORY: 'false' } });
+        const workerEnv = {
+          ...process.env,
+          PERSONAL_AI_MODEL: job.model,
+          PERSONAL_AI_CONTEXT: process.env.PERSONAL_AI_CONTEXT || '4096',
+          PERSONAL_AI_MEMORY: 'false',
+          JARVIS_CODING_MODEL: process.env.JARVIS_CODING_MODEL || 'deepseek-coder-v2:16b',
+          JARVIS_FAST_MODEL: process.env.JARVIS_FAST_MODEL || 'qwen3.5:4b',
+          JARVIS_TOOL_MODEL: process.env.JARVIS_TOOL_MODEL || 'functiongemma:270m',
+          PERSONAL_AI_CHAT_PROVIDER: process.env.PERSONAL_AI_CHAT_PROVIDER || 'auto',
+          PERSONAL_AI_GEMINI_MODEL: process.env.PERSONAL_AI_GEMINI_MODEL || 'gemini-3.5-flash',
+        };
+        if (job.route !== 'chat') {
+          delete workerEnv.GEMINI_API_KEY;
+          delete workerEnv.PERSONAL_AI_CHAT_PROVIDER;
+          delete workerEnv.PERSONAL_AI_GEMINI_MODEL;
+        }
+        const child = run(command, args, { cwd: root, shell: false, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'], env: workerEnv });
         job.child = child;
         for (const stream of [child.stdout, child.stderr]) stream?.on('data', chunk => { job.output = (job.output + chunk.toString()).slice(-64000); });
         child.on('error', error => finish(null, error));
@@ -151,9 +178,38 @@ export function createJarvis({ root, token, port = 3002, run = spawn, getModels 
     if (req.method === 'GET' && path === '/api/health') {
       let ollama = false, models = [];
       try { models = await getModels(); ollama = true; } catch {}
-      return reply(200, { service: 'jarvis-machine-ai', protocol: 1, version: '2.0.0', root, model, models, ollama, modelInstalled: models.includes(model), workerPresent: existsSync(join(root, 'scripts/personal-ai.mjs')), activeJob: active?.id || null, checkedAt: new Date().toISOString(), machine: { platform: process.platform, cpuCores: os.cpus().length, totalMemoryGB: +(os.totalmem() / 2**30).toFixed(1), freeMemoryGB: +(os.freemem() / 2**30).toFixed(1), connectorUptimeSeconds: Math.floor(process.uptime()) }, capabilities: ['chat', 'agency', 'build', 'browser', 'company', 'verify', 'status'], note: 'Connector health does not verify task execution or production integrations.' });
+      return reply(200, {
+        service: 'jarvis-machine-ai',
+        protocol: 1,
+        version: '2.1.0',
+        root,
+        model,
+        models,
+        ollama,
+        modelInstalled: models.includes(model),
+        workerPresent: existsSync(join(root, 'scripts/personal-ai.mjs')),
+        activeJob: active?.id || null,
+        routing: {
+          chatProvider: process.env.PERSONAL_AI_CHAT_PROVIDER || 'auto',
+          geminiModel: process.env.PERSONAL_AI_GEMINI_MODEL || 'gemini-3.5-flash',
+          codingModel: process.env.JARVIS_CODING_MODEL || 'deepseek-coder-v2:16b',
+          fastModel: process.env.JARVIS_FAST_MODEL || 'qwen3.5:4b',
+          toolModel: process.env.JARVIS_TOOL_MODEL || 'functiongemma:270m',
+          geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
+        },
+        checkedAt: new Date().toISOString(),
+        machine: { platform: process.platform, cpuCores: os.cpus().length, totalMemoryGB: +(os.totalmem() / 2**30).toFixed(1), freeMemoryGB: +(os.freemem() / 2**30).toFixed(1), connectorUptimeSeconds: Math.floor(process.uptime()) },
+        capabilities: ['chat', 'agency', 'build', 'browser', 'company', 'verify', 'status'],
+        note: 'Connector health does not verify task execution or production integrations.'
+      });
     }
     if (req.method === 'GET' && path === '/api/jobs') return reply(200, { jobs: [...jobs.values()].reverse().map(j => ({ ...snapshot(j), output: redact(j.output) })) });
+    if (req.method === 'GET' && path.startsWith('/api/jobs/')) {
+      const id = decodeURIComponent(path.slice('/api/jobs/'.length));
+      const job = jobs.get(id);
+      if (!job) return reply(404, { error: 'Task not found' });
+      return reply(200, { ...snapshot(job), output: redact(job.output) });
+    }
     if (req.method === 'POST') {
       let body = '';
       try {
