@@ -1,4 +1,5 @@
 import { pool } from "@/db";
+import { listOsintTools, searchOsintTools, assertOsintAgentAccess } from "@/lib/ai/osint4all-registry";
 import { aiModels, aiProviderName, runText, type AIMessage } from "@/lib/ai/provider";
 import {
   createApproval,
@@ -107,7 +108,8 @@ const AGENT_ALIASES: Record<string, OperationalAgentId> = {
   "fashion enrichment": "listing",
 };
 
-const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
+const OSINT_TOOL_DESCRIPTION = "Read-only OSINT4ALL routing catalog. Returns public/authorized research tools, URLs, access/pricing and the policy boundary. It never executes a third-party tool.";\n\nconst TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
+  osint_catalog: {\n    name: "osint_catalog",\n    description: OSINT_TOOL_DESCRIPTION,\n    parameters: { type: "object", properties: { category: { type: "string" }, pricing: { type: "string" }, policy: { type: "string" } }, additionalProperties: false },\n  },\n  osint_plan: {\n    name: "osint_plan",\n    description: "Build a read-only OSINT research plan for a task using the configured OSINT4ALL registry. Returns candidate tools and their policy boundaries; does not execute them.",\n    parameters: { type: "object", properties: { task: { type: "string", minLength: 3, maxLength: 500 }, limit: { type: "integer", minimum: 1, maximum: 25 } }, required: ["task"], additionalProperties: false },\n  },\n
   inspect_business_data: {
     name: "inspect_business_data",
     description: "Read the current BharatShop product, order, revenue, activity and approval summary from production PostgreSQL. Read only.",
@@ -181,11 +183,11 @@ const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
 };
 
 const TOOL_PERMISSIONS: Record<OperationalAgentId, string[]> = {
-  ceo: ["inspect_business_data", "catalog_query", "research_web", "resolve_product_images", "fashion_studio", "list_fashion_commands", "design_fashion_collection", "list_pending_approvals", "create_approval", "delegate_agent"],
-  "source-discovery": ["catalog_query", "research_web"],
-  "source-verification": ["catalog_query", "research_web"],
-  "seller-discovery": ["research_web"],
-  "image-media": ["catalog_query", "research_web", "resolve_product_images"],
+  ceo: ["inspect_business_data", "catalog_query", "research_web", "osint_catalog", "osint_plan", "resolve_product_images", "fashion_studio", "list_fashion_commands", "design_fashion_collection", "list_pending_approvals", "create_approval", "delegate_agent"],
+  "source-discovery": ["catalog_query", "research_web", "osint_catalog", "osint_plan"],
+  "source-verification": ["catalog_query", "research_web", "osint_catalog", "osint_plan"],
+  "seller-discovery": ["research_web", "osint_catalog", "osint_plan"],
+  "image-media": ["catalog_query", "research_web", "resolve_product_images", "osint_catalog", "osint_plan"],
   listing: ["catalog_query", "research_web", "resolve_product_images", "fashion_studio", "list_fashion_commands"],
   marketing: ["catalog_query", "research_web", "fashion_studio", "list_fashion_commands"],
   advertising: ["inspect_business_data", "catalog_query", "research_web", "list_pending_approvals", "create_approval"],
@@ -193,7 +195,7 @@ const TOOL_PERMISSIONS: Record<OperationalAgentId, string[]> = {
   tracking: ["inspect_business_data", "list_pending_approvals", "create_approval"],
   learning: ["inspect_business_data", "catalog_query", "research_web"],
   automation: ["inspect_business_data", "catalog_query", "research_web", "list_pending_approvals", "create_approval", "delegate_agent"],
-  "web-design": ["catalog_query", "research_web"],
+  "web-design": ["catalog_query", "research_web", "osint_catalog", "osint_plan"],
 };
 
 const TOOL_ALIASES: Record<string, string> = {
@@ -209,6 +211,9 @@ const TOOL_ALIASES: Record<string, string> = {
   delegate: "delegate_agent",
   handoff: "delegate_agent",
   images: "resolve_product_images",
+  osint: "osint_plan",
+  osint_tools: "osint_catalog",
+  osint_plan: "osint_plan",
 };
 
 let memoryReady: Promise<void> | null = null;
@@ -358,6 +363,7 @@ async function executeTool(agentId: OperationalAgentId, call: ToolCall, state: R
       case "inspect_business_data": result = await inspectLiveBusinessData(); break;
       case "catalog_query": result = await catalogQuery(Math.max(1, Math.min(30, Number(call.args.limit || 12)))); break;
       case "research_web": result = await researchWeb(String(call.args.query || "").slice(0, 300)); break;
+      case "osint_catalog": {\n        const category = String(call.args.category || "").trim() as any;\n        const pricing = String(call.args.pricing || "").trim() as any;\n        const policy = String(call.args.policy || "").trim() as any;\n        result = listOsintTools({ category: category || undefined, pricing: pricing || undefined, policy: policy || undefined }).map((tool) => ({\n          id: tool.id, name: tool.name, url: tool.url, category: tool.category, workflow: tool.workflow, access: tool.access, pricing: tool.pricing, selfHosted: tool.selfHosted, policy: tool.policy, allowedForAgent: assertOsintAgentAccess(tool.id, agentId),\n        }));\n        break;\n      }\n      case "osint_plan": {\n        const task = String(call.args.task || "").slice(0, 500);\n        result = { task, tools: searchOsintTools(task, Math.max(1, Math.min(25, Number(call.args.limit || 12)))), policy: "Public/authorized research only. No private-account access, credential bypass, restricted-data acquisition, or third-party action execution." };\n        break;\n      }\n
       case "resolve_product_images": result = await resolveProductImages(Number(call.args.product_id) || undefined, String(call.args.product_name || "").trim() || undefined); break;
       case "fashion_studio": result = await fashionStudio(String(call.args.command), Number(call.args.product_id) || undefined, String(call.args.product_name || "").trim() || undefined, Math.max(1, Math.min(12, Number(call.args.count || 4))), String(call.args.extra_prompt || "").trim() || undefined); break;
       case "list_fashion_commands": result = listFashionCommands(); break;
