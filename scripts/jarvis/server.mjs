@@ -20,10 +20,10 @@ export function classify(text, selected = 'auto') {
   if (/जाँच|जांच|परीक्षण/u.test(text)) return { route: 'verify', task: text };
   if (/ठीक करो|बनाओ|कोड|डिबग/u.test(text)) return { route: 'build', task: text };
   if (/ब्राउज़र|वेब.*खोज/u.test(text)) return { route: 'browser', task: text };
-  if (/\b(company cycle|run (the )?(company|employees|agents))\b/i.test(text)) return { route: 'company', task: text };
+  if (/\b(company cycle|run (?:the )?(?:bharatshop\s+)?(?:company(?:\s+agents?)?|employees|agents)(?:\s+once)?)\b/i.test(text)) return { route: 'company', task: text };
   if (/\b(verify|test|check)\b.*\b(build|bharatshop|project|types)\b/i.test(text)) return { route: 'verify', task: text };
   if (/\b(build|fix|implement|debug|refactor|code)\b/i.test(text)) return { route: 'build', task: text };
-  if (/\b(browse|browser|search the web|open website)\b/i.test(text)) return { route: 'browser', task: text };
+  if (/\b(browse|browser|search the web|open (?:a )?(?:website|site|web page)|inspect (?:the )?(?:page|site))\b/i.test(text) || /\bopen\b[\s\S]{0,80}https?:\/\//i.test(text)) return { route: 'browser', task: text };
   if (/\b(status|health)\b/i.test(text)) return { route: 'status', task: text };
   return { route: 'chat', task: text };
 }
