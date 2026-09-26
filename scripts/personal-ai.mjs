@@ -380,14 +380,22 @@ async function runBuild(task) {
   const ollama = ollamaPath();
   if (!ollama) throw new Error('Ollama is not installed. Run npm.cmd run ai:setup.');
   if (!harnessConfigured()) throw new Error('DeepSeek Harness local bridge is not configured. Run npm.cmd run ai:setup.');
+  const models = await ollamaModels();
+  const codingModel = models.includes(CODING_MODEL) ? CODING_MODEL : MODEL;
   const guardrailsPath = join(ROOT, 'agents', 'DEEPSEEK_SYSTEM_AGENT.md');
   const guardrails = existsSync(guardrailsPath) ? readFileSync(guardrailsPath, 'utf8') : '';
-  const prompt = `${guardrails}\n\nLOCAL-ONLY MODE\nUse the local Ollama model only. Do not invoke Claude Code, Codex, paid APIs, cloud web search, billing, publishing, production database mutation, or credential inspection. Work only inside the current repository. Verify edits with relevant tests/build checks.\n\nTASK\n${task}`.trim();
-  const npxCli = join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npx-cli.js');
-  if (!existsSync(npxCli)) throw new Error('The Node.js npx CLI is missing; repair the Node.js installation.');
-  const result = run(process.execPath, [npxCli, '--yes', '@deepseek-ai/dsh@0.1.5-rc.2', '--profile', 'headless', prompt], { env: localHarnessEnv() });
-  if (result.status !== 0) throw new Error(`Local DeepSeek Harness task failed with exit code ${result.status}.`);
-  return 'Local coding task completed. Review the Harness output and git diff before committing or deploying.';
+  const prompt = `${guardrails}\n\nLOCAL-ONLY MODE\nUse the local Ollama provider only. Do not invoke Claude Code, Codex, paid APIs, cloud web search, billing, publishing, production database mutation, or credential inspection. Work only inside the current repository. Verify edits with relevant tests/build checks.\n\nTASK\n${task}`.trim();
+
+  console.log(`Provider: Ollama Harness (${codingModel})`);
+  console.log('Launcher: ollama launch dsh');
+
+  const result = run(
+    ollama,
+    ['launch', 'dsh', '--model', codingModel, '--', '--profile', 'headless', prompt],
+    { env: localHarnessEnv() },
+  );
+  if (result.status !== 0) throw new Error(`Ollama DeepSeek Harness task failed with exit code ${result.status}.`);
+  return 'Local coding task completed through Ollama DeepSeek Harness. Review the Harness output and git diff before committing or deploying.';
 }
 
 async function runBrowser(task) {
