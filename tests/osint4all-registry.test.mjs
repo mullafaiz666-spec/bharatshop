@@ -20,6 +20,9 @@ test("agent runtime exposes read-only OSINT routing tools", () => {
   assert.match(runtime, /osint_plan:/);
   assert.match(runtime, /"osint_catalog", "osint_plan"/);
   assert.match(runtime, /Public\/authorized research only/);
+  assert.match(runtime, /pricing = "free"/);
+  assert.match(runtime, /assertOsintAgentAccess\(tool.id, agentId\)/);
+  assert.doesNotMatch(runtime, /;\\n\\nconst TOOL_DEFINITIONS/);
 });
 
 test("integration documentation preserves the approval boundary", () => {
