@@ -29,6 +29,8 @@
     "agency:24x7:status": "node scripts/agency-24x7-manager.mjs status",
     "agency:24x7:uninstall": "node scripts/agency-24x7-manager.mjs uninstall",
     "machine:24x7": "node scripts/machine-ai-supervisor.mjs",
+    "jarvis:start": "node scripts/jarvis/server.mjs",
+    "jarvis:install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/jarvis/install-persistent.ps1",
     "machine:24x7:install": "node scripts/machine-ai-manager.mjs install",
     "machine:24x7:start": "node scripts/machine-ai-manager.mjs start",
     "machine:24x7:stop": "node scripts/machine-ai-manager.mjs stop",
