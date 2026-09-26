@@ -16,7 +16,12 @@ const BROWSER_VENV = join(BROWSER_HOME, '.venv');
 const BROWSER_RUNNER = join(ROOT, 'services', 'browser-use-local', 'runner.py');
 const BROWSER_FALLBACK = join(ROOT, 'services', 'browser-use-local', 'read-only-fallback.py');
 const MEMORY_FILE = join(AI_HOME, 'memory.jsonl');
-const MODEL = process.env.PERSONAL_AI_MODEL || process.env.AGENCY_MODEL || 'qwen3.5:4b';
+const MODEL = process.env.PERSONAL_AI_MODEL || process.env.AGENCY_MODEL || 'deepseek-coder-v2:16b';
+const CODING_MODEL = process.env.JARVIS_CODING_MODEL || 'deepseek-coder-v2:16b';
+const FAST_MODEL = process.env.JARVIS_FAST_MODEL || 'qwen3.5:4b';
+const TOOL_MODEL = process.env.JARVIS_TOOL_MODEL || 'functiongemma:270m';
+const CHAT_PROVIDER = String(process.env.PERSONAL_AI_CHAT_PROVIDER || 'auto').toLowerCase();
+const GEMINI_MODEL = process.env.PERSONAL_AI_GEMINI_MODEL || 'gemini-3.5-flash';
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434';
 const BROWSER_USE_VERSION = '0.13.4';
 const PIXVERSE_VERSION = '1.4.3';
@@ -129,12 +134,12 @@ async function ollamaModels() {
   }
 }
 
-async function localChat(systemPrompt, messages, { json = false } = {}) {
+async function localChat(systemPrompt, messages, { json = false, model = MODEL } = {}) {
   const response = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      model: MODEL,
+      model,
       stream: false,
       format: json ? 'json' : undefined,
       messages: [{ role: 'system', content: systemPrompt }, ...messages],
@@ -177,9 +182,11 @@ function fallbackRoute(task) {
 
 async function routeTask(task) {
   if (!(await ollamaHealthy())) return fallbackRoute(task);
+  const installed = await ollamaModels();
+  const routerModel = installed.includes(TOOL_MODEL) ? TOOL_MODEL : installed.includes(FAST_MODEL) ? FAST_MODEL : MODEL;
   const prompt = `Choose exactly one route for the user's task. Return JSON only with keys route and reason.\n\nRoutes:\nchat = normal questions, explanations, writing, planning, brainstorming\nagency = use multiple specialist Agency Agents for strategy, design, marketing, sales, product or multidisciplinary work\nbuild = modify/build/debug software or repository files with the local coding harness\nbrowser = interact with websites using a local browser\npixverse = PixVerse image/video generation or creative-provider operations\ncompany = run the existing BharatShop company/autopilot agent cycle\n\nTask: ${task}`;
   try {
-    const raw = await localChat('You are a conservative local task router. Choose tools only when the task actually needs them.', [{ role: 'user', content: prompt }], { json: true });
+    const raw = await localChat('You are a conservative local task router. Choose tools only when the task actually needs them.', [{ role: 'user', content: prompt }], { json: true, model: routerModel });
     const parsed = JSON.parse(raw);
     const route = String(parsed.route || '').toLowerCase();
     return new Set(['chat', 'agency', 'build', 'browser', 'pixverse', 'company']).has(route) ? route : fallbackRoute(task);
@@ -347,6 +354,10 @@ async function statusRows() {
   return [
     { name: 'Local AI / Ollama', ready: healthy, note: healthy ? `${MODEL} local endpoint responding` : 'not responding' },
     { name: 'Local model', ready: models.includes(MODEL), note: models.includes(MODEL) ? MODEL : `missing ${MODEL}` },
+    { name: 'Jarvis coding model', ready: models.includes(CODING_MODEL), note: CODING_MODEL },
+    { name: 'Jarvis fast model', ready: models.includes(FAST_MODEL), note: FAST_MODEL },
+    { name: 'Jarvis tool router', ready: models.includes(TOOL_MODEL), note: models.includes(TOOL_MODEL) ? TOOL_MODEL : `fallback to ${FAST_MODEL}` },
+    { name: 'Gemini chat', ready: Boolean(process.env.GEMINI_API_KEY), note: `${CHAT_PROVIDER} / ${GEMINI_MODEL}` },
     { name: 'Agency workforce', ready: agents > 0, note: agents ? `${agents} agents discovered` : 'catalog not installed' },
     { name: 'Local memory', ready: existsSync(MEMORY_FILE), note: MEMORY_FILE },
     { name: 'App builder / DeepSeek Harness', ready: Boolean(ollamaPath()) && harnessConfigured(), note: 'Ollama launch dsh; no Claude/Codex required' },
@@ -369,14 +380,22 @@ async function runBuild(task) {
   const ollama = ollamaPath();
   if (!ollama) throw new Error('Ollama is not installed. Run npm.cmd run ai:setup.');
   if (!harnessConfigured()) throw new Error('DeepSeek Harness local bridge is not configured. Run npm.cmd run ai:setup.');
+  const models = await ollamaModels();
+  const codingModel = models.includes(CODING_MODEL) ? CODING_MODEL : MODEL;
   const guardrailsPath = join(ROOT, 'agents', 'DEEPSEEK_SYSTEM_AGENT.md');
   const guardrails = existsSync(guardrailsPath) ? readFileSync(guardrailsPath, 'utf8') : '';
-  const prompt = `${guardrails}\n\nLOCAL-ONLY MODE\nUse the local Ollama model only. Do not invoke Claude Code, Codex, paid APIs, cloud web search, billing, publishing, production database mutation, or credential inspection. Work only inside the current repository. Verify edits with relevant tests/build checks.\n\nTASK\n${task}`.trim();
-  const npxCli = join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npx-cli.js');
-  if (!existsSync(npxCli)) throw new Error('The Node.js npx CLI is missing; repair the Node.js installation.');
-  const result = run(process.execPath, [npxCli, '--yes', '@deepseek-ai/dsh@0.1.5-rc.2', '--profile', 'headless', prompt], { env: localHarnessEnv() });
-  if (result.status !== 0) throw new Error(`Local DeepSeek Harness task failed with exit code ${result.status}.`);
-  return 'Local coding task completed. Review the Harness output and git diff before committing or deploying.';
+  const prompt = `${guardrails}\n\nLOCAL-ONLY MODE\nUse the local Ollama provider only. Do not invoke Claude Code, Codex, paid APIs, cloud web search, billing, publishing, production database mutation, or credential inspection. Work only inside the current repository. Verify edits with relevant tests/build checks.\n\nTASK\n${task}`.trim();
+
+  console.log(`Provider: Ollama Harness (${codingModel})`);
+  console.log('Launcher: ollama launch dsh');
+
+  const result = run(
+    ollama,
+    ['launch', 'dsh', '--model', codingModel, '--', '--profile', 'headless', prompt],
+    { env: localHarnessEnv() },
+  );
+  if (result.status !== 0) throw new Error(`Ollama DeepSeek Harness task failed with exit code ${result.status}.`);
+  return 'Local coding task completed through Ollama DeepSeek Harness. Review the Harness output and git diff before committing or deploying.';
 }
 
 async function runBrowser(task) {
@@ -417,8 +436,27 @@ async function runPixVerse(task, execute) {
 
 async function generalAnswer(task) {
   const mem = recentMemory().map(item => `${item.role}: ${item.content}`).join('\n');
-  const system = `You are the user's private local Personal AI running through Ollama on their own machine. Be practical and concise. You may explain and plan, but never claim that tools or external actions ran unless this orchestrator actually ran them. Never request secrets.\n${mem ? `Recent local memory:\n${mem}` : ''}`;
-  return localChat(system, [{ role: 'user', content: task }]);
+  const system = `You are Jarvis, the user's private Personal AI. Be practical and concise. You may explain and plan, but never claim that tools or external actions ran unless this orchestrator actually ran them. Never request secrets.\n${mem ? `Recent local memory:\n${mem}` : ''}`;
+
+  const wantsGemini = CHAT_PROVIDER === 'gemini' || CHAT_PROVIDER === 'auto';
+  if (wantsGemini && process.env.GEMINI_API_KEY) {
+    try {
+      const { geminiChat } = await import('./jarvis/gemini-chat.mjs');
+      const answer = await geminiChat(task, { model: GEMINI_MODEL });
+      return `Provider: Google Gemini (${GEMINI_MODEL})\n${answer}`;
+    } catch (error) {
+      const reason = String(error?.message || error).replace(/\s+/g, ' ').slice(0, 240);
+      const models = await ollamaModels();
+      const fallbackModel = models.includes(FAST_MODEL) ? FAST_MODEL : models.includes(MODEL) ? MODEL : CODING_MODEL;
+      const answer = await localChat(system, [{ role: 'user', content: task }], { model: fallbackModel });
+      return `Provider: Ollama (${fallbackModel})\nFallback: Gemini unavailable (${reason})\n${answer}`;
+    }
+  }
+
+  const models = await ollamaModels();
+  const localModel = models.includes(FAST_MODEL) ? FAST_MODEL : models.includes(MODEL) ? MODEL : CODING_MODEL;
+  const answer = await localChat(system, [{ role: 'user', content: task }], { model: localModel });
+  return `Provider: Ollama (${localModel})\n${answer}`;
 }
 
 async function confirmExecution(rl, route) {
