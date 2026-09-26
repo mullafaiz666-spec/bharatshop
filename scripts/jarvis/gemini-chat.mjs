@@ -1,4 +1,4 @@
-const DEFAULT_MODEL = 'gemini-2.5-flash';
+const DEFAULT_MODEL = 'gemini-3.5-flash';
 
 export async function geminiChat(task, { key = process.env.GEMINI_API_KEY, model = DEFAULT_MODEL, fetcher = fetch } = {}) {
   if (!key) throw new Error('Gemini chat selected but GEMINI_API_KEY is missing. No hosted request was sent.');
