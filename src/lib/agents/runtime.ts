@@ -188,13 +188,13 @@ const TOOL_PERMISSIONS: Record<OperationalAgentId, string[]> = {
   "source-verification": ["catalog_query", "research_web", "osint_catalog", "osint_plan"],
   "seller-discovery": ["research_web", "osint_catalog", "osint_plan"],
   "image-media": ["catalog_query", "research_web", "resolve_product_images", "osint_catalog", "osint_plan"],
-  listing: ["catalog_query", "research_web", "resolve_product_images", "fashion_studio", "list_fashion_commands"],
-  marketing: ["catalog_query", "research_web", "fashion_studio", "list_fashion_commands"],
+  listing: ["catalog_query", "research_web", "resolve_product_images", "fashion_studio", "list_fashion_commands", "osint_catalog", "osint_plan"],
+  marketing: ["catalog_query", "research_web", "fashion_studio", "list_fashion_commands", "osint_catalog", "osint_plan"],
   advertising: ["inspect_business_data", "catalog_query", "research_web", "list_pending_approvals", "create_approval"],
   "order-recheck": ["inspect_business_data", "catalog_query", "research_web", "list_pending_approvals", "create_approval"],
   tracking: ["inspect_business_data", "list_pending_approvals", "create_approval"],
-  learning: ["inspect_business_data", "catalog_query", "research_web"],
-  automation: ["inspect_business_data", "catalog_query", "research_web", "list_pending_approvals", "create_approval", "delegate_agent"],
+  learning: ["inspect_business_data", "catalog_query", "research_web", "osint_catalog", "osint_plan"],
+  automation: ["inspect_business_data", "catalog_query", "research_web", "list_pending_approvals", "create_approval", "delegate_agent", "osint_catalog", "osint_plan"],
   "web-design": ["catalog_query", "research_web", "osint_catalog", "osint_plan"],
 };
 
