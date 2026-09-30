@@ -127,9 +127,13 @@ export default function CategoryLanding({ department }: { department: Department
   const config = CONFIG[department];
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
+  const [catalogueError, setCatalogueError] = useState(false);
+  const [retry, setRetry] = useState(0);
 
   useEffect(() => {
     let active = true;
+    setLoading(true);
+    setCatalogueError(false);
     setLoading(true);
     fetch(`/api/storefront/products?search=${encodeURIComponent(config.search)}&sort=aiScore&limit=48&page=1`)
       .then((response) => {
@@ -141,12 +145,12 @@ export default function CategoryLanding({ department }: { department: Department
         const rows = Array.isArray(data.products) ? data.products : [];
         setProducts(rows.filter((product: Product) => matchesDepartment(product, department)));
       })
-      .catch(() => active && setProducts([]))
+      .catch(() => { if (active) { setCatalogueError(true); setProducts([]); } })
       .finally(() => active && setLoading(false));
     return () => {
       active = false;
     };
-  }, [config.search, department]);
+  }, [config.search, department, retry]);
 
   const hero = products[0];
   const visualProducts = useMemo(() => products.slice(0, 4), [products]);
@@ -238,7 +242,7 @@ export default function CategoryLanding({ department }: { department: Department
         ) : trending.length ? (
           <div className="grid grid-cols-2 gap-x-4 gap-y-8 md:grid-cols-3 lg:grid-cols-4">{trending.map((product) => <ProductCard key={product.id} product={product} />)}</div>
         ) : (
-          <div className="rounded-[28px] border border-black/10 bg-white p-10 text-center"><h3 className="text-xl font-black">This edit is being prepared.</h3><p className="mt-2 text-sm text-slate-500">Browse the full live catalogue while products for this department are published.</p><Link href="/store" className="mt-5 inline-flex rounded-full bg-black px-6 py-3 text-sm font-black text-white">Open catalogue</Link></div>
+          <div className="rounded-[28px] border border-black/10 bg-white p-10 text-center"><h3 className="text-xl font-black">{catalogueError ? "Catalogue temporarily unavailable" : "No products in this department yet"}</h3><p className="mt-2 text-sm text-slate-500">{catalogueError ? "We could not load the catalogue. Please try again." : "Browse the full catalogue for other departments."}</p>{catalogueError && <button type="button" onClick={() => setRetry(x => x + 1)} className="mt-5 mr-3 rounded-full bg-black px-6 py-3 text-sm font-black text-white">Retry catalogue</button>}<Link href="/store" className="mt-5 inline-flex rounded-full bg-black px-6 py-3 text-sm font-black text-white">Open catalogue</Link></div>
         )}
       </section>
 
