@@ -1,7 +1,5 @@
 name: Unified workstation verification
 on:
-  push:
-    branches: [integration/jarvis-bharatshop-gateway-20261001]
   pull_request:
     branches: [main]
 permissions:

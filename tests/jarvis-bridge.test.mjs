@@ -50,7 +50,7 @@ test('authenticated HTTP to real worker, lifecycle, origin checks, company appro
     assert.equal((await request('/api/jobs', { text: '/company' })).status, 409);
     assert.equal((await request('/api/jobs', { text: '--execute', mode: 'build' })).status, 400);
     const health = await (await request('/api/health')).json();
-    assert.equal(health.version, '2.0.0'); assert.equal(health.models.length, 2);
+    assert.equal(health.version, '2.1.0'); assert.equal(health.models.length, 2);
     assert.equal(health.model, 'deepseek-coder-v2:16b'); assert.equal(health.modelInstalled, true);
     assert.ok(health.machine.totalMemoryGB > 0);
     const plan = await (await request('/api/preview', { text: 'fix cart', verifyAfter: true })).json();
