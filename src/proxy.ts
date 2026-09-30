@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminUser } from "@/lib/admin-auth";
+import { updateSession } from "@/utils/supabase/middleware";
 
 const ADMIN_PATHS = [
   "/api/admin",
@@ -73,6 +74,9 @@ function isAutomationAuthorized(request: NextRequest) {
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  if (pathname === "/supabase" || pathname.startsWith("/supabase/")) {
+    return updateSession(request);
+  }
   const protectedPath = ADMIN_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
   if (!protectedPath) return NextResponse.next();
   if (isAutomationAuthorized(request)) return NextResponse.next();
@@ -102,6 +106,7 @@ export async function proxy(request: NextRequest) {
 // the hybrid Render rewrite without invoking its Next server handler.
 export const config = {
   matcher: [
+    "/supabase/:path*",
     "/dashboard/:path*",
     "/api/admin/:path*",
     "/api/agent-execute/:path*",

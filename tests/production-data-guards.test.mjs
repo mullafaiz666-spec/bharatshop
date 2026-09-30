@@ -40,7 +40,11 @@ function request(path, cookie) {
   return { nextUrl: { pathname: path }, url: `https://example.com${path}`, headers: new Headers(), cookies: { get: () => cookie ? { value: cookie } : undefined } };
 }
 function proxyFor(getAdminUser) {
-  return load('src/proxy.ts', { 'next/server': { NextResponse: response }, '@/lib/admin-auth': { getAdminUser } }, { ADMIN_SESSION_SECRET: secret }).proxy;
+  return load('src/proxy.ts', {
+    'next/server': { NextResponse: response },
+    '@/lib/admin-auth': { getAdminUser },
+    '@/utils/supabase/middleware': { updateSession: async () => { throw new Error('Supabase must not handle administrator routes'); } },
+  }, { ADMIN_SESSION_SECRET: secret }).proxy;
 }
 test('company cart rejects unauthenticated reads and mutations at request boundary', async () => {
   const proxy = proxyFor(() => { throw new Error('must not query unauthenticated requests'); });
