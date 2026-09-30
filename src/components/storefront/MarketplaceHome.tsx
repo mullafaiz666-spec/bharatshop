@@ -51,21 +51,25 @@ function ProductCard({ product }: { product: Product }) {
 export default function MarketplaceHome() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
+  const [catalogueError, setCatalogueError] = useState(false);
+  const [retry, setRetry] = useState(0);
 
   useEffect(() => {
     let active = true;
+    setLoading(true);
+    setCatalogueError(false);
     fetch("/api/storefront/products?sort=aiScore&limit=48&page=1")
       .then((response) => {
         if (!response.ok) throw new Error("Catalogue unavailable");
         return response.json();
       })
       .then((data) => active && setProducts(Array.isArray(data.products) ? data.products : []))
-      .catch(() => active && setProducts([]))
+      .catch(() => { if (active) { setCatalogueError(true); setProducts([]); } })
       .finally(() => active && setLoading(false));
     return () => {
       active = false;
     };
-  }, []);
+  }, [retry]);
 
   const heroProducts = useMemo(() => products.slice(0, 3), [products]);
   const newNow = useMemo(() => products.slice(0, 8), [products]);
@@ -139,7 +143,7 @@ export default function MarketplaceHome() {
 
       <section className="mx-auto max-w-[1440px] px-4 py-12 sm:px-8 sm:py-16">
         <div className="mb-6 flex items-end justify-between gap-4"><div><p className="text-xs font-black uppercase tracking-[0.2em] text-slate-500">New & now</p><h2 className="mt-1 text-3xl font-black tracking-[-0.045em] sm:text-4xl">Fresh from the catalogue.</h2></div><Link href="/store" className="hidden items-center gap-2 text-sm font-black sm:flex">Shop all <ArrowRight size={16} /></Link></div>
-        {loading ? <div className="grid grid-cols-2 gap-4 md:grid-cols-4">{Array.from({ length: 8 }).map((_, i) => <div key={i} className="aspect-[3/4] animate-pulse rounded-[24px] bg-white" />)}</div> : newNow.length ? <div className="grid grid-cols-2 gap-x-4 gap-y-8 md:grid-cols-4">{newNow.map((product) => <ProductCard key={product.id} product={product} />)}</div> : <div className="rounded-[28px] bg-white p-10 text-center"><h3 className="text-xl font-black">Catalogue is temporarily unavailable.</h3><p className="mt-2 text-sm text-slate-500">The storefront structure is ready; live products will appear here when the catalogue API responds.</p><Link href="/store" className="mt-5 inline-flex rounded-full bg-black px-6 py-3 text-sm font-black text-white">Open store</Link></div>}
+        {loading ? <div className="grid grid-cols-2 gap-4 md:grid-cols-4">{Array.from({ length: 8 }).map((_, i) => <div key={i} className="aspect-[3/4] animate-pulse rounded-[24px] bg-white" />)}</div> : newNow.length ? <div className="grid grid-cols-2 gap-x-4 gap-y-8 md:grid-cols-4">{newNow.map((product) => <ProductCard key={product.id} product={product} />)}</div> : <div className="rounded-[28px] bg-white p-10 text-center"><h3 className="text-xl font-black">{catalogueError ? "Catalogue temporarily unavailable" : "No products are available yet"}</h3><p className="mt-2 text-sm text-slate-500">{catalogueError ? "We could not load the catalogue. Please try again." : "Please check back once the catalogue is available."}</p>{catalogueError && <button type="button" onClick={() => setRetry(x => x + 1)} className="mt-5 mr-3 rounded-full bg-black px-6 py-3 text-sm font-black text-white">Retry catalogue</button>}<Link href="/store" className="mt-5 inline-flex rounded-full bg-black px-6 py-3 text-sm font-black text-white">Open store</Link></div>}
       </section>
 
       <section className="mx-auto max-w-[1440px] px-4 pb-16 sm:px-8">
