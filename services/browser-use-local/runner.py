@@ -15,6 +15,7 @@ from browser_use import Agent, Browser, ChatOllama
 
 async def run_task(task: str, model: str, max_steps: int, headless: bool) -> dict:
     llm = ChatOllama(model=model)
+    # Headless Chromium needs less memory and avoids desktop/profile startup work.
     browser = Browser(headless=headless)
     guarded_task = f"""
 You are the browser worker for the user's local Personal AI system.
@@ -57,7 +58,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("task")
     parser.add_argument("--model", default=os.getenv("PERSONAL_AI_MODEL", os.getenv("AGENCY_MODEL", "qwen3.5:4b")))
     parser.add_argument("--max-steps", type=int, default=int(os.getenv("PERSONAL_AI_BROWSER_MAX_STEPS", "25")))
-    parser.add_argument("--headless", action="store_true", default=os.getenv("PERSONAL_AI_BROWSER_HEADLESS", "").lower() in {"1", "true", "yes", "on"})
+    parser.add_argument("--headless", action="store_true", default=os.getenv("PERSONAL_AI_BROWSER_HEADLESS", "true").lower() in {"1", "true", "yes", "on"})
     return parser.parse_args()
 
 
@@ -68,7 +69,10 @@ def main() -> int:
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if result["ok"] else 1
     except Exception as exc:
-        print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, indent=2), file=sys.stderr)
+        message = str(exc)
+        if "BrowserSession.on_BrowserStartEvent" in message and "timed out" in message:
+            message = "Chromium did not expose its local debugging port within 30 seconds. The browser task never reached the website. Check available RAM and test the installed Chromium with Playwright before retrying."
+        print(json.dumps({"ok": False, "error": message}, ensure_ascii=False, indent=2), file=sys.stderr)
         return 1
 
 

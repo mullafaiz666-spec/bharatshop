@@ -12,7 +12,7 @@ test("agent suite v4 exposes Image and Media as a first-class operational agent"
   assert.match(contracts, /name: "Image & Media Agent"/);
   assert.match(contracts, /endpoint: "\/api\/agents\/image-media"/);
   assert.match(runtime, /"image & media": "image-media"/);
-  assert.match(runtime, /"image-media": \["catalog_query", "research_web", "resolve_product_images"\]/);
+  assert.match(runtime, /"image-media": \["catalog_query", "research_web", "resolve_product_images", "osint_catalog", "osint_plan"\]/);
   assert.match(company, /agentId: "image-media"/);
   assert.match(company, /Repair truthful product media/);
 });
