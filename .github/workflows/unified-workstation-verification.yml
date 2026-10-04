@@ -1,0 +1,26 @@
+name: Unified workstation verification
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - name: Integration tests
+        run: npm run test:integrations
+      - name: Typecheck
+        if: ${{ !cancelled() }}
+        run: npm run typecheck
+      - name: Build
+        if: ${{ !cancelled() }}
+        run: npm run build
+      - name: Lint
+        if: ${{ !cancelled() }}
+        run: npm run lint

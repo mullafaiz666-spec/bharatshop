@@ -67,6 +67,8 @@
     "ai:start": "node scripts/personal-ai.mjs start",
     "ai:status": "node scripts/personal-ai.mjs status",
     "ai:task": "node scripts/personal-ai.mjs task",
+    "jarvis:start": "node scripts/jarvis/server.mjs",
+    "jarvis:test": "node --test tests/jarvis-bridge.test.mjs tests/jarvis-ui.test.mjs",
     "skills:marketing:sync": "node scripts/sync-marketing-skills.mjs --apply",
     "skills:marketing:check": "node scripts/sync-marketing-skills.mjs --check",
     "skills:upgrades:sync": "node scripts/sync-agent-upgrade-skills.mjs --apply",
@@ -109,6 +111,8 @@
     "start:local": "node scripts/start-production.mjs --hostname 127.0.0.1 --port 3000"
   },
   "dependencies": {
+    "@supabase/ssr": "0.12.7",
+    "@supabase/supabase-js": "2.117.2",
     "@types/node": "22.19.15",
     "@types/pg": "8.18.0",
     "@types/react": "19.2.14",
@@ -116,7 +120,7 @@
     "dotenv": "17.3.1",
     "drizzle-orm": "0.45.2",
     "lucide-react": "^1.34.0",
-    "next": "16.3.4",
+    "next": "16.3.8",
     "pg": "8.21.0",
     "react": "19.2.6",
     "react-dom": "19.2.6"
@@ -126,7 +130,7 @@
     "drizzle-kit": "0.31.10",
     "esbuild": "0.25.12",
     "eslint": "9.39.4",
-    "eslint-config-next": "16.3.4",
+    "eslint-config-next": "16.3.8",
     "postcss": "8.5.23",
     "tailwindcss": "4.1.17",
     "typescript": "5.9.3"
