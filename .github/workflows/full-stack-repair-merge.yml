@@ -1,0 +1,71 @@
+name: Full stack repair merge
+
+on:
+  push:
+    branches:
+      - integration/full-stack-repair-20261004
+
+permissions:
+  contents: write
+
+jobs:
+  merge-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout protected integration branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: integration/full-stack-repair-20261004
+
+      - name: Configure git
+        run: |
+          git config user.name "bharatshop-repair-bot"
+          git config user.email "actions@users.noreply.github.com"
+
+      - name: Merge Jarvis/Supabase integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin integration/jarvis-bharatshop-gateway-20261001
+          if git merge-base --is-ancestor origin/integration/jarvis-bharatshop-gateway-20261001 HEAD; then
+            echo "Jarvis integration already merged"
+          else
+            git merge --no-ff -X ours origin/integration/jarvis-bharatshop-gateway-20261001 -m "Merge Jarvis and Supabase into full-stack repair candidate"
+          fi
+
+      - name: Reconcile pinned runtime dependencies
+        run: |
+          npm install --save-exact @supabase/supabase-js@2.117.2 @supabase/ssr@0.12.7 next@16.3.8 eslint-config-next@16.3.8
+
+      - name: Verify Jarvis scripts survived merge
+        run: |
+          node -e "const p=require('./package.json'); if(!p.scripts['jarvis:start']||!p.scripts['jarvis:test']) process.exit(1)"
+          test -f scripts/jarvis/server.mjs
+          test -f src/utils/supabase/server.ts
+          test -f scripts/machine-ai-web.mjs
+          test -f src/lib/bharatdrip/live-products.ts
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Integration tests
+        run: npm run test:integrations
+
+      - name: Jarvis tests
+        run: npm run jarvis:test
+
+      - name: Production build
+        run: npm run build
+
+      - name: Commit successful integrated tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! git diff --quiet || ! git diff --cached --quiet; then
+            git add package.json package-lock.json
+            git commit -m "build: reconcile full-stack repair dependencies"
+          fi
+          if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/integration/full-stack-repair-20261004)" ]; then
+            git push origin HEAD:integration/full-stack-repair-20261004
+          fi
